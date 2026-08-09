@@ -1,0 +1,118 @@
+site_name: OpenSCM
+site_description: Enterprise-grade security compliance management.
+site_url: https://openscm.io  # Added for SEO and search plugin
+repo_url: https://github.com/easysysio/OpenSCM
+repo_name: OpenSCM
+# Docs now live in this repo, so "edit this page" can point at the real file.
+edit_uri: edit/main/docs/
+copyright: Copyright &copy; 2025-2026 OpenSCM
+
+# docs/design/ holds internal design specs that ship with the source but are
+# not part of the public manual.
+#   exclude_docs (MkDocs 1.6+) keeps them out of the built site entirely.
+#   not_in_nav   (MkDocs 1.4+) suppresses the "page not in nav" warning, which
+#                --strict would otherwise turn into a build failure.
+# Both are listed so the build behaves on either version.
+exclude_docs: |
+  design/
+not_in_nav: |
+  design/
+
+nav:
+  - Home: index.md
+  - Getting Started:
+      - Introduction: start/intro.md
+      - Deploy Options: start/deploy.md
+      - Architecture: start/architecture.md
+      - Installation: start/installation.md
+      - Downloads: start/downloads.md
+      - Configuration: start/configuration.md
+  - User Guide:
+      - Overview: guide/index.md  # This is the file we just wrote
+      - Systems & Groups: guide/systems.md
+      - Containers: guide/containers.md
+      - Compliance Tests: guide/tests.md
+      - Policies: guide/policies.md
+      - Reports: guide/reports.md
+      - Scheduler: guide/scheduler.md
+      - Admin Settings: guide/admin.md
+      - LDAP Directories: guide/directories.md
+  - Screenshots: screenshots.md
+  - FAQ: faq.md
+
+theme:
+  name: material
+  logo: assets/logo.png
+  favicon: assets/favicon.png
+  icon:
+    repo: fontawesome/brands/github # Adds GitHub icon to the top bar
+  font:
+    text: Inter
+    code: Roboto Mono
+  palette: 
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      primary: indigo
+      accent: indigo
+      toggle:
+        icon: material/brightness-7
+        name: Switch to dark mode
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      primary: indigo
+      accent: indigo
+      toggle:
+        icon: material/brightness-4
+        name: Switch to light mode
+  features:
+    - navigation.instant
+    - navigation.tracking
+    - navigation.tabs
+    - navigation.sections
+    - navigation.top
+    - navigation.path # Adds breadcrumbs
+    - search.suggest
+    - search.highlight
+    - search.share # Allows users to share specific search results
+    - content.code.copy
+    - content.code.annotate
+
+markdown_extensions:
+  - attr_list
+  - md_in_html
+  - admonition
+  - pymdownx.details # Allows for collapsible "Check out more" blocks
+  - pymdownx.superfences:
+      custom_fences:
+        - name: mermaid
+          class: mermaid
+          format: !!python/name:pymdownx.superfences.fence_code_format
+  - pymdownx.magiclink # Automatically turns URLs and GitHub issues into links
+  - pymdownx.tabbed:
+      alternate_style: true
+  - pymdownx.highlight: # Better syntax highlighting control
+      anchor_linenums: true
+      line_spans: __span
+      pygments_lang_class: true
+  - pymdownx.inlinehilite
+  - pymdownx.emoji:
+      emoji_index: !!python/name:material.extensions.emoji.twemoji
+      emoji_generator: !!python/name:material.extensions.emoji.to_svg
+
+
+plugins:
+  - search
+  - glightbox
+
+extra:
+  social:
+    - icon: fontawesome/brands/github
+      link: https://github.com/easysysio/OpenSCM
+    - icon: fontawesome/solid/globe
+      link: https://openscm.io
+
+extra_css:
+  - stylesheets/extra.css
+
+extra_javascript:
+  - https://unpkg.com/mermaid@10/dist/mermaid.min.js

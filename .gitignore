@@ -26,3 +26,6 @@ keys
 #.idea/
 .claude/
 .DS_Store
+
+# MkDocs build output (docs site)
+site/

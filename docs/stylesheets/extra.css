@@ -1,0 +1,143 @@
+/* --- Header & Logo --- */
+.md-logo img {
+    height: 3rem !important;
+    width: auto;
+    margin-top: 0.2rem;
+}
+
+.md-header__button.md-logo {
+    margin: 0.4rem 0.4rem 0.4rem 0;
+    padding: 0;
+}
+
+/* --- Hero Section (Split Layout) --- */
+.hero-split {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 2rem; 
+    padding: 2rem 0 0 0; /* Reduced bottom padding */
+    flex-wrap: nowrap;
+}
+
+.hero-content {
+    flex: 1.2; /* Give slightly more room to text */
+}
+
+.hero-content > *:last-child {
+    margin-bottom: 0 !important;
+}
+
+.hero-logo-container {
+    flex: 1;
+    max-width: 350px;
+    text-align: right;
+}
+
+.hero-logo-container img {
+    width: 100%;
+    max-width: 280px;
+    height: auto;
+    filter: drop-shadow(0 15px 30px rgba(0,0,0,0.15));
+}
+
+/* --- The Title --- */
+.mega-title {
+    font-size: 4rem !important;
+    font-weight: 900 !important;
+    line-height: 1.1 !important;
+    letter-spacing: -0.02em !important;
+    margin: 0 0 0.5rem 0 !important;
+    display: block !important;
+    background: linear-gradient(90deg, #3f51b5, #2196f3);
+    -webkit-background-clip: text;
+    background-clip: text;
+    -webkit-text-fill-color: transparent;
+}
+
+/* --- Responsive Hero Scaling --- */
+@media screen and (max-width: 76em) {
+    .mega-title { font-size: 3rem !important; }
+}
+
+@media screen and (max-width: 60em) {
+    .hero-split {
+        flex-direction: column-reverse;
+        text-align: center;
+        padding: 2rem 0;
+    }
+    .hero-content, .hero-logo-container { text-align: center; flex: 1; }
+    .hero-logo-container { margin-bottom: 2rem; }
+}
+
+@media screen and (max-width: 45em) {
+    .mega-title { font-size: 2.2rem !important; }
+}
+
+/* --- Hero subtitle --- */
+.hero-sub {
+    font-size: 0.85rem;
+    color: var(--md-default-fg-color--light);
+    margin-top: 0.6rem !important;
+    margin-bottom: 0 !important;
+}
+
+/* --- Deploy Options Grid --- */
+.deploy-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 1.5rem;
+    margin-top: 1.5rem;
+}
+
+.deploy-grid--full {
+    margin-top: 2rem;
+}
+
+.deploy-card {
+    border: 1px solid var(--md-primary-fg-color);
+    border-radius: 0.5rem;
+    padding: 1.75rem;
+    background: var(--md-default-bg-color);
+}
+
+/* The "featured" card gets an extra inset ring so SaaS still reads as the
+   recommended option visually, but the base card is also blue now (was gray). */
+.deploy-card--featured {
+    box-shadow: 0 0 0 1px var(--md-primary-fg-color);
+}
+
+.deploy-card h3 {
+    margin-top: 0 !important;
+}
+
+.deploy-card table {
+    font-size: 0.85rem;
+    margin: 1rem 0;
+}
+
+.green {
+    color: #2e7d32;
+}
+
+@media screen and (max-width: 60em) {
+    .deploy-grid {
+        grid-template-columns: 1fr;
+    }
+}
+
+/* --- Feature Grid --- */
+.grid-3-cols {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr) !important;
+    gap: 1.5rem;
+    margin-top: 1rem !important;
+}
+
+@media screen and (max-width: 76em) {
+    .grid-3-cols { grid-template-columns: repeat(2, 1fr) !important; }
+}
+
+@media screen and (max-width: 45em) {
+    .grid-3-cols { grid-template-columns: 1fr !important; }
+}
