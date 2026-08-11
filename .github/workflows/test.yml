@@ -1,0 +1,46 @@
+name: Tests
+
+# Runs on every push and pull request — and is called by the release
+# workflow so a tag cannot produce artifacts from a failing tree.
+#
+# This exists because it didn't: releases were built straight from a tag
+# with no test run, and 0.7.4 shipped a template that failed to parse,
+# crash-looping the server on boot until it was hotfixed. Every test in
+# this suite is fast (the whole run is seconds) — there is no reason for
+# it not to gate.
+on:
+  push:
+    branches: ['**']
+  pull_request:
+  workflow_call:
+
+env:
+  CARGO_TERM_COLOR: always
+  # Fewer codegen units / no incremental: CI builds are one-shot.
+  CARGO_INCREMENTAL: 0
+
+jobs:
+  test:
+    name: cargo test · workspace
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # No toolchain action: rust-toolchain.toml pins the version, and
+      # rustup on the runner honours it automatically. Using a setup
+      # action here would silently override that pin.
+      - name: Show toolchain
+        run: |
+          rustc --version
+          cargo --version
+
+      - name: Cache cargo registry and build artifacts
+        uses: Swatinem/rust-cache@v2
+
+      - name: Build (workspace)
+        run: cargo build --workspace --locked
+
+      - name: Test (workspace)
+        run: cargo test --workspace --locked

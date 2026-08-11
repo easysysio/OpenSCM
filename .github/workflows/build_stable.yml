@@ -10,12 +10,21 @@ on:
 
 jobs:
 
+  # ── TESTS ─────────────────────────────────────────────────────────────────
+  # Gate: nothing is built or published from a tree whose tests fail.
+  # 0.7.4 was tagged and released with a template that failed to parse and
+  # crash-looped the server on boot; the release workflow never ran a test.
+  test:
+    name: Tests
+    uses: ./.github/workflows/test.yml
+
   # ── LINUX CLIENTS ─────────────────────────────────────────────────────────
   # x86_64 / aarch64 / armv7 / riscv64 / ppc64le  →  deb + rpm + archlinux
   # s390x / i686 / loongarch64                     →  deb + rpm only
   # Raw binaries for x86_64 and aarch64 are also uploaded for agent bundling.
   build-linux-client:
     name: Linux · client · ${{ matrix.target }}
+    needs: test
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -159,6 +168,7 @@ jobs:
   # ── WINDOWS CLIENT ────────────────────────────────────────────────────────
   build-windows-client:
     name: Windows · client
+    needs: test
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -250,6 +260,7 @@ jobs:
   # ── MACOS (universal .pkg + thin binaries for agent bundle) ───────────────
   build-macos-client:
     name: macOS · Client
+    needs: test
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
@@ -327,6 +338,7 @@ jobs:
   # We use a QEMU FreeBSD VM via cross-platform-actions for a native build instead.
   build-freebsd-client:
     name: FreeBSD · Client
+    needs: test
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
