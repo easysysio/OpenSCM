@@ -8,10 +8,14 @@
 # makes every one of those edits together or not at all.
 #
 # Usage:
-#   ./release.sh 0.7.11                 # CE 0.7.11, SaaS patch-bumped
-#   ./release.sh 0.7.11 --saas 0.6.0    # explicit SaaS version
-#   ./release.sh 0.7.11 --dry-run       # show what would change
-#   ./release.sh 0.7.11 --no-test       # skip the suite (not recommended)
+#   ./release.sh 0.7.12                 # CE + SaaS both to 0.7.12
+#   ./release.sh 0.7.12 --dry-run       # show what would change
+#   ./release.sh 0.7.12 --no-test       # skip the suite (not recommended)
+#
+# CE and SaaS carry the SAME version. Every SaaS release exists to pick up a
+# CE release, so a separate SaaS number was translation overhead — and a third
+# number to keep aligned with CE_TAG, which is how 0.3.2-0.3.4 shipped stale
+# CE code. The SaaS version now IS the CE version it contains.
 #
 # Does NOT push. It prints the push commands — pushing is left to a human
 # because the tags trigger the production release pipelines.
@@ -27,20 +31,18 @@ die()  { echo "${RED}Error:${RESET} $*" >&2; exit 1; }
 
 # ── Arguments ────────────────────────────────────────────────────────────────
 VERSION="${1:-}"; shift || true
-SAAS_VERSION=""
 DRY_RUN=0
 RUN_TESTS=1
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
-        --saas)    SAAS_VERSION="${2:-}"; shift 2 ;;
         --dry-run) DRY_RUN=1; shift ;;
         --no-test) RUN_TESTS=0; shift ;;
         *) die "Unknown argument: $1" ;;
     esac
 done
 
-[[ -n "$VERSION" ]] || die "Usage: $0 <version> [--saas <version>] [--dry-run] [--no-test]"
+[[ -n "$VERSION" ]] || die "Usage: $0 <version> [--dry-run] [--no-test]"
 [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] \
     || die "Version must be X.Y.Z (got '$VERSION')"
 
@@ -55,13 +57,8 @@ TODAY="$(date +%F)"
 CE_OLD="$(grep -m1 '^version = ' "$CE_DIR/scmserver/Cargo.toml" | cut -d'"' -f2)"
 SAAS_OLD="$(grep -m1 '^version = ' "$SAAS_DIR/Cargo.toml" | cut -d'"' -f2)"
 
-# Default the SaaS version to a patch bump of its own line — CE and SaaS
-# track separate minors (0.7.x vs 0.5.x), so it is never derived from CE.
-if [[ -z "$SAAS_VERSION" ]]; then
-    SAAS_VERSION="$(echo "$SAAS_OLD" | awk -F. '{printf "%d.%d.%d", $1, $2, $3+1}')"
-fi
-[[ "$SAAS_VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] \
-    || die "SaaS version must be X.Y.Z (got '$SAAS_VERSION')"
+# SaaS carries the same version as CE — see the header.
+SAAS_VERSION="$VERSION"
 
 echo
 info "Release plan"
@@ -166,7 +163,7 @@ perl -pi -e "s/^(\s*CE_TAG:\s*)v.*/\${1}v$VERSION/" "$WF"
 grep -q "CE_TAG: v$VERSION" "$WF" || die "failed to update CE_TAG in $WF"
 ok "CE_TAG -> v$VERSION"
 
-perl -0pi -e "s/^## \[Unreleased\]\n/## [Unreleased]\n\n---\n\n## [$SAAS_VERSION] - $TODAY\n\n### Changed\n- **Picks up CE v$VERSION.** \`CE_TAG\` bumped \`v$CE_OLD\` -> \`v$VERSION\`; lands via the path-dep. See CE v$VERSION CHANGELOG.\n/m" \
+perl -0pi -e "s/^## \[Unreleased\]\n/## [Unreleased]\n\n---\n\n## [$SAAS_VERSION] - $TODAY\n\n### Changed\n- **Picks up CE v$VERSION.** Same version by definition; \`CE_TAG\` follows. See the CE CHANGELOG for what this release contains.\n/m" \
     "$SAAS_DIR/CHANGELOG.md"
 grep -q "^## \[$SAAS_VERSION\] - $TODAY" "$SAAS_DIR/CHANGELOG.md" \
     || die "failed to promote SaaS CHANGELOG to [$SAAS_VERSION]"
