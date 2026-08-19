@@ -1,0 +1,33 @@
+# Security advisories only — deliberately NOT routine version bumps.
+#
+# Cargo.lock is committed and builds are reproducible because dependencies
+# never move on their own. Routine bump PRs would fight that for no benefit
+# and add review load. What was actually missing is being *told* when one of
+# the ~500 transitive crates has a published vulnerability.
+#
+# `open-pull-requests-limit: 0` disables version-update PRs entirely while
+# leaving Dependabot's security updates active — those ignore the limit and
+# are raised only when an advisory affects a locked version.
+version: 2
+updates:
+  - package-ecosystem: cargo
+    directory: /
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 0
+    labels:
+      - security
+    commit-message:
+      prefix: "deps"
+
+  # The workflows pin action versions and prebuilt tool releases; an advisory
+  # in an action is worth the same notification.
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 0
+    labels:
+      - security
+    commit-message:
+      prefix: "ci"

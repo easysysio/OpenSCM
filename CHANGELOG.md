@@ -6,6 +6,13 @@ All notable changes to OpenSCM are documented here.
 
 ## [Unreleased]
 
+### Security
+- **Dependency advisories are now checked on every push, and the first sweep cleared three of nine.** `cargo audit` runs in CI (advisory-only for now, so a newly published CVE cannot wedge a release) and Dependabot is configured for **security updates only** — no routine version-bump PRs, so `Cargo.lock` stays reproducible.
+  - Refreshing the lockfile within existing version constraints resolved **RUSTSEC-2026-0204** (`crossbeam-epoch`, invalid pointer dereference) and one of the two **RUSTSEC-2026-0258** (`h2`) instances.
+  - Dropped the unused sqlx `macros` feature, which pulled in the MySQL and Postgres drivers this SQLite-only product never loads — removing 13 crates and with them **RUSTSEC-2023-0071** (`rsa`, Marvin timing sidechannel), an advisory with no upstream fix. Recorded in `.cargo/audit.toml` since the crate is still resolved-but-unbuilt.
+  - **Six remain, all transitive and pending upstream bumps** (tracked, not ignored): three `rustls-webpki` certificate-validation issues plus `h2` and `ring` — all held back by `reqwest 0.11` and `ldap3 0.11` — and a `lopdf` stack overflow from `genpdf`. The `lopdf` issue needs a hostile PDF as *input*; this product only generates them. The `ring` panic requires overflow checks, which release builds disable. The `rustls-webpki` ones are the real ones to close, and need `reqwest 0.12` / a newer `ldap3`.
+
+
 ### Fixed
 - **Windows builds no longer warn about unused code.** The `boolean()` helper is only called from the Unix path-permission checks, so on Windows it had no users and every build reported it. Gated to match its callers.
 

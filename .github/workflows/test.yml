@@ -44,3 +44,39 @@ jobs:
 
       - name: Test (workspace)
         run: cargo test --workspace --locked
+
+  audit:
+    name: cargo audit · advisories
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    # Advisory-only. A newly published CVE in any of ~500 transitive crates
+    # would otherwise appear with no warning and block a release the moment
+    # someone needed to ship — so this reports without failing the build.
+    # Promote to blocking once the backlog (if any) is cleared.
+    continue-on-error: true
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # Prebuilt binary rather than `cargo install cargo-audit`, which builds
+      # from source and takes minutes for a tool that runs in seconds.
+      - name: Install cargo-audit
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-audit
+
+      - name: Audit dependencies
+        run: cargo audit --deny warnings || true
+
+      # Surface the result where it is actually read, rather than only in the
+      # job log — an advisory nobody opens is the same as no advisory.
+      - name: Summary
+        if: always()
+        run: |
+          {
+            echo "## Dependency advisories"
+            echo
+            echo '```'
+            cargo audit 2>&1 | tail -40 || true
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"

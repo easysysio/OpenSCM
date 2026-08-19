@@ -1,0 +1,18 @@
+# cargo-audit configuration.
+#
+# cargo-audit reads Cargo.lock, which records the full resolution graph —
+# including optional dependencies that are never enabled. An advisory against
+# a crate that is resolved but not compiled is noise, and permanent noise is
+# how a real advisory gets ignored. Entries here are assessed, not dismissed:
+# each states why it cannot affect this product.
+
+[advisories]
+ignore = [
+    # rsa is an optional dependency of sqlx-mysql. This product is SQLite-only
+    # and no longer enables the sqlx "macros" feature, so neither sqlx-mysql
+    # nor rsa appears in the built graph — `cargo tree -p scmserver` reports
+    # zero nodes for both. The advisory has no upstream fix, so it would
+    # otherwise sit in every report forever.
+    # Re-check if a MySQL backend is ever added.
+    "RUSTSEC-2023-0071",
+]
