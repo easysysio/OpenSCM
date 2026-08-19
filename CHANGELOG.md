@@ -6,6 +6,10 @@ All notable changes to OpenSCM are documented here.
 
 ## [Unreleased]
 
+### Changed
+- **CE and SaaS now share a version number.** Every SaaS release exists to pick up a CE release, and the patch numbers had tracked CE exactly for ten consecutive releases — so the separate SaaS `0.5.x` line carried no information, just a translation step in every changelog and a third number to keep aligned with `CE_TAG` (the drift that shipped stale CE code in 0.3.2–0.3.4). SaaS jumped `0.5.11` → `0.7.11` to match, and `release.sh` takes a single version argument instead of two.
+
+
 ---
 
 ## [0.7.11] - 2026-08-19
