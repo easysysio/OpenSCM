@@ -43,10 +43,28 @@ jobs:
 
       - name: Setup Environment
         run: |
-          sudo apt-get update && sudo apt-get install -y gettext-base
-          go install github.com/goreleaser/nfpm/v2/cmd/nfpm@latest
-          echo "$(go env GOPATH)/bin" >> $GITHUB_PATH
-          cargo install cargo-zigbuild
+          # envsubst (gettext-base) ships on the GitHub runner image; only pay
+          # for apt when it is genuinely missing. The Azure Ubuntu mirror
+          # regularly stalls `apt-get update` for minutes before falling back.
+          command -v envsubst >/dev/null || {
+            sudo apt-get update && sudo apt-get install -y gettext-base
+          }
+          # Prebuilt nfpm for the same reason — `go install` rebuilt it from
+          # Go source on every job.
+          NFPM_VERSION=2.47.0
+          curl -fsSL "https://github.com/goreleaser/nfpm/releases/download/v${NFPM_VERSION}/nfpm_${NFPM_VERSION}_Linux_x86_64.tar.gz" \
+            | sudo tar -xz -C /usr/local/bin nfpm
+          # Prebuilt cargo-zigbuild. `cargo install` compiled it from source in
+          # every job that needs it — roughly 13 jobs per release once the
+          # 8-target client matrix is counted — for an identical binary each
+          # time. Pinned so a release is reproducible; bump deliberately.
+          CARGO_ZIGBUILD_VERSION=0.23.0
+          # The binary sits inside a versioned directory in the archive, so
+          # strip that component rather than extracting the whole tree.
+          curl -fsSL "https://github.com/rust-cross/cargo-zigbuild/releases/download/v${CARGO_ZIGBUILD_VERSION}/cargo-zigbuild-x86_64-unknown-linux-musl.tar.xz" \
+            | sudo tar -xJ -C /usr/local/bin --strip-components=1 \
+                  cargo-zigbuild-x86_64-unknown-linux-musl/cargo-zigbuild
+          cargo-zigbuild --version
           rustup target add ${{ matrix.target }}
 
       - uses: goto-bus-stop/setup-zig@v2
@@ -121,10 +139,28 @@ jobs:
 
       - name: Setup Environment
         run: |
-          sudo apt-get update && sudo apt-get install -y gettext-base
-          go install github.com/goreleaser/nfpm/v2/cmd/nfpm@latest
-          echo "$(go env GOPATH)/bin" >> $GITHUB_PATH
-          cargo install cargo-zigbuild
+          # envsubst (gettext-base) ships on the GitHub runner image; only pay
+          # for apt when it is genuinely missing. The Azure Ubuntu mirror
+          # regularly stalls `apt-get update` for minutes before falling back.
+          command -v envsubst >/dev/null || {
+            sudo apt-get update && sudo apt-get install -y gettext-base
+          }
+          # Prebuilt nfpm for the same reason — `go install` rebuilt it from
+          # Go source on every job.
+          NFPM_VERSION=2.47.0
+          curl -fsSL "https://github.com/goreleaser/nfpm/releases/download/v${NFPM_VERSION}/nfpm_${NFPM_VERSION}_Linux_x86_64.tar.gz" \
+            | sudo tar -xz -C /usr/local/bin nfpm
+          # Prebuilt cargo-zigbuild. `cargo install` compiled it from source in
+          # every job that needs it — roughly 13 jobs per release once the
+          # 8-target client matrix is counted — for an identical binary each
+          # time. Pinned so a release is reproducible; bump deliberately.
+          CARGO_ZIGBUILD_VERSION=0.23.0
+          # The binary sits inside a versioned directory in the archive, so
+          # strip that component rather than extracting the whole tree.
+          curl -fsSL "https://github.com/rust-cross/cargo-zigbuild/releases/download/v${CARGO_ZIGBUILD_VERSION}/cargo-zigbuild-x86_64-unknown-linux-musl.tar.xz" \
+            | sudo tar -xJ -C /usr/local/bin --strip-components=1 \
+                  cargo-zigbuild-x86_64-unknown-linux-musl/cargo-zigbuild
+          cargo-zigbuild --version
           rustup target add ${{ matrix.target }}
 
       - uses: goto-bus-stop/setup-zig@v2
@@ -176,7 +212,17 @@ jobs:
       - name: Setup Environment
         run: |
           sudo apt-get update && sudo apt-get install -y nsis
-          cargo install cargo-zigbuild
+          # Prebuilt cargo-zigbuild. `cargo install` compiled it from source in
+          # every job that needs it — roughly 13 jobs per release once the
+          # 8-target client matrix is counted — for an identical binary each
+          # time. Pinned so a release is reproducible; bump deliberately.
+          CARGO_ZIGBUILD_VERSION=0.23.0
+          # The binary sits inside a versioned directory in the archive, so
+          # strip that component rather than extracting the whole tree.
+          curl -fsSL "https://github.com/rust-cross/cargo-zigbuild/releases/download/v${CARGO_ZIGBUILD_VERSION}/cargo-zigbuild-x86_64-unknown-linux-musl.tar.xz" \
+            | sudo tar -xJ -C /usr/local/bin --strip-components=1 \
+                  cargo-zigbuild-x86_64-unknown-linux-musl/cargo-zigbuild
+          cargo-zigbuild --version
           rustup target add x86_64-pc-windows-gnu
 
       - uses: goto-bus-stop/setup-zig@v2
@@ -223,7 +269,17 @@ jobs:
       - name: Setup Environment
         run: |
           sudo apt-get update && sudo apt-get install -y nsis
-          cargo install cargo-zigbuild
+          # Prebuilt cargo-zigbuild. `cargo install` compiled it from source in
+          # every job that needs it — roughly 13 jobs per release once the
+          # 8-target client matrix is counted — for an identical binary each
+          # time. Pinned so a release is reproducible; bump deliberately.
+          CARGO_ZIGBUILD_VERSION=0.23.0
+          # The binary sits inside a versioned directory in the archive, so
+          # strip that component rather than extracting the whole tree.
+          curl -fsSL "https://github.com/rust-cross/cargo-zigbuild/releases/download/v${CARGO_ZIGBUILD_VERSION}/cargo-zigbuild-x86_64-unknown-linux-musl.tar.xz" \
+            | sudo tar -xJ -C /usr/local/bin --strip-components=1 \
+                  cargo-zigbuild-x86_64-unknown-linux-musl/cargo-zigbuild
+          cargo-zigbuild --version
           rustup target add x86_64-pc-windows-gnu
 
       - uses: goto-bus-stop/setup-zig@v2
@@ -356,7 +412,12 @@ jobs:
 
       - name: Package
         run: |
-          sudo apt-get update && sudo apt-get install -y gettext-base
+          # envsubst (gettext-base) ships on the GitHub runner image; only pay
+          # for apt when it is genuinely missing. The Azure Ubuntu mirror
+          # regularly stalls `apt-get update` for minutes before falling back.
+          command -v envsubst >/dev/null || {
+            sudo apt-get update && sudo apt-get install -y gettext-base
+          }
           APP_NAME=scmclient
           VERSION=$(grep -m1 '^version =' ${APP_NAME}/Cargo.toml | sed 's/.*"\(.*\)".*/\1/')
           RELEASE=1
@@ -482,7 +543,17 @@ jobs:
 
       - name: Setup Build Tools
         run: |
-          cargo install cargo-zigbuild
+          # Prebuilt cargo-zigbuild. `cargo install` compiled it from source in
+          # every job that needs it — roughly 13 jobs per release once the
+          # 8-target client matrix is counted — for an identical binary each
+          # time. Pinned so a release is reproducible; bump deliberately.
+          CARGO_ZIGBUILD_VERSION=0.23.0
+          # The binary sits inside a versioned directory in the archive, so
+          # strip that component rather than extracting the whole tree.
+          curl -fsSL "https://github.com/rust-cross/cargo-zigbuild/releases/download/v${CARGO_ZIGBUILD_VERSION}/cargo-zigbuild-x86_64-unknown-linux-musl.tar.xz" \
+            | sudo tar -xJ -C /usr/local/bin --strip-components=1 \
+                  cargo-zigbuild-x86_64-unknown-linux-musl/cargo-zigbuild
+          cargo-zigbuild --version
           rustup target add ${{ matrix.target }}
 
       - uses: goto-bus-stop/setup-zig@v2
