@@ -6,6 +6,18 @@ All notable changes to OpenSCM are documented here.
 
 ## [Unreleased]
 
+### Fixed
+- **Agent: memory growth on hosts with many processes.** `collect_system_info` called `System::new_all()` and then `refresh_all()`, walking every process on the host twice per heartbeat while reading only CPU and memory totals. On a container host that covers every process in every container — they share the host PID namespace — so it built and discarded thousands of process structs every 300 s. The client is a static musl binary and musl's allocator returns little of that to the OS, so it accumulated as RSS: one agent reached **2.9 GB after a week**, with 43 minutes of CPU burned doing it. Telemetry now refreshes CPU and memory only, and the `PROCESS` element no longer loads command lines, environments, cwd and disk usage for fields it never reads. Restart the agent once after upgrading to reclaim memory already held.
+- **Agent service is now memory-capped** (`MemoryHigh=256M`, `MemoryMax=512M`). The agent's working set is tens of MB; a monitoring agent should never be able to pressure the workloads it monitors.
+
+### Added
+- **Tests run in CI on every push, and releases are gated on them.** Neither workflow ran `cargo test` — they built straight from a tag, which is how 0.7.4 shipped a template that crash-looped the server on boot. The release pipeline now depends on the suite passing before anything is built or published. Fixing `schema_migration.rs` was a prerequisite: it tested the v3 → v4 migration against a four-table fixture and had been failing since roughly v5, unnoticed because nothing ran the full suite. Its assertions are replaced with invariants that survive schema growth, including one that re-runs every migration over an existing schema to prove each step is guarded.
+- **`release.sh`** cuts a coordinated CE + SaaS release: both versions, both changelogs, the docs version strings and the SaaS `CE_TAG`, in one step. It refuses to run on a dirty tree, an existing tag, an empty `[Unreleased]`, or a failing test suite.
+
+### Changed
+- **The openscm.io documentation now lives in this repository** (`docs/` + `mkdocs.yml`), so a feature and its documentation land in the same commit. It had drifted six releases behind. `deploy-docs.sh` builds from a sparse checkout and swaps the published site atomically.
+
+
 ---
 
 ## [0.7.10] - 2026-07-25
