@@ -6,15 +6,12 @@ All notable changes to OpenSCM are documented here.
 
 ## [Unreleased]
 
-### Changed
-- **CE and SaaS now share a version number.** Every SaaS release exists to pick up a CE release, and the patch numbers had tracked CE exactly for ten consecutive releases — so the separate SaaS `0.5.x` line carried no information, just a translation step in every changelog and a third number to keep aligned with `CE_TAG` (the drift that shipped stale CE code in 0.3.2–0.3.4). SaaS jumped `0.5.11` → `0.7.11` to match, and `release.sh` takes a single version argument instead of two.
-
-
 ---
 
 ## [0.7.11] - 2026-08-19
 
 ### Fixed
+- **Agent: repeated commands now run once per scan.** A policy commonly asks the same command several different questions — the CIS Debian profile runs `sshd -T` twenty times to check twenty sshd settings — which meant 84 process spawns per scan where 60 would do, and `sshd -T` is among the more expensive things to spawn. Results are cached for the duration of a scan and cleared at the start of the next, so a remediation applied between two scans is still picked up immediately.
 - **Agent: memory growth on hosts with many processes.** `collect_system_info` called `System::new_all()` and then `refresh_all()`, walking every process on the host twice per heartbeat while reading only CPU and memory totals. On a container host that covers every process in every container — they share the host PID namespace — so it built and discarded thousands of process structs every 300 s. The client is a static musl binary and musl's allocator returns little of that to the OS, so it accumulated as RSS: one agent reached **2.9 GB after a week**, with 43 minutes of CPU burned doing it. Telemetry now refreshes CPU and memory only, and the `PROCESS` element no longer loads command lines, environments, cwd and disk usage for fields it never reads. Restart the agent once after upgrading to reclaim memory already held.
 - **Agent service is now memory-capped** (`MemoryHigh=256M`, `MemoryMax=512M`). The agent's working set is tens of MB; a monitoring agent should never be able to pressure the workloads it monitors.
 
@@ -23,6 +20,8 @@ All notable changes to OpenSCM are documented here.
 - **`release.sh`** cuts a coordinated CE + SaaS release: both versions, both changelogs, the docs version strings and the SaaS `CE_TAG`, in one step. It refuses to run on a dirty tree, an existing tag, an empty `[Unreleased]`, or a failing test suite.
 
 ### Changed
+- **CE and SaaS now share a version number.** Every SaaS release exists to pick up a CE release, and the patch numbers had tracked CE exactly for ten consecutive releases — so the separate SaaS `0.5.x` line carried no information, just a translation step in every changelog and a third number to keep aligned with `CE_TAG` (the drift that shipped stale CE code in 0.3.2–0.3.4). SaaS jumped `0.5.11` → `0.7.11` to match, and `release.sh` takes a single version argument instead of two.
+- **CI installs `cargo-zigbuild` and `nfpm` prebuilt instead of compiling them.** Every job rebuilt both from source before building anything — roughly 13 identical from-source builds per release once the 8-target client matrix is counted. `apt-get update` is also now conditional on `envsubst` being absent, since the Azure Ubuntu mirror routinely stalls it for minutes.
 - **The openscm.io documentation now lives in this repository** (`docs/` + `mkdocs.yml`), so a feature and its documentation land in the same commit. It had drifted six releases behind. `deploy-docs.sh` builds from a sparse checkout and swaps the published site atomically.
 
 
