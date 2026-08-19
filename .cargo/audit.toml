@@ -15,4 +15,19 @@ ignore = [
     # otherwise sit in every report forever.
     # Re-check if a MySQL backend is ever added.
     "RUSTSEC-2023-0071",
+
+    # lopdf stack overflow via deeply nested PDF objects, reached through
+    # genpdf. Rated 7.5, but the attack requires PARSING a hostile PDF and this
+    # product only ever generates them — there is no Document::load, no PDF
+    # input path of any kind. Verified by grep across scmserver/src.
+    #
+    # Not fixable by a version bump: genpdf has been unmaintained since
+    # 2021-06-17 and pins lopdf 0.26; the maintained fork
+    # (numaelis-rckive-genpdf) only reaches lopdf 0.31, still below the 0.42
+    # this advisory requires. Closing it means replacing the PDF renderer,
+    # tracked separately.
+    #
+    # RE-CHECK THIS the moment anything reads a PDF rather than writing one —
+    # at that point the exposure becomes real and this entry is wrong.
+    "RUSTSEC-2026-0187",
 ]
