@@ -6,6 +6,8 @@ use sysinfo::System;
 use std::process::Command;
 use std::net::TcpStream;
 use std::io::{BufRead, BufReader};
+use std::collections::HashMap;
+use std::sync::Mutex;
 
 
 // ============================================================
@@ -888,6 +890,78 @@ pub fn combine_verdict(results: &[EvalResult], filter: &str) -> String {
 // expected value) plus the per-condition verdict and a GENERIC note. It never
 // includes host-observed content (file bytes, command output, etc.) — see the
 // 0.6.4 evidence design. The note explains the outcome in match-only terms.
+
+// ─────────────────────────────────────────────────────────────────────────────
+// CMD output cache — scoped to one scan.
+//
+// A policy commonly asks several questions of the same command: the CIS
+// Debian profile runs `sshd -T` twenty times to check twenty different sshd
+// settings, and re-runs findmnt, lsmod and nft for each option they cover.
+// That is 84 process spawns per scan where 60 would do, and `sshd -T` is one
+// of the more expensive things to spawn — it parses the config, initialises
+// crypto and resolves the hostname on every invocation.
+//
+// So each distinct command runs once per scan and every later condition reads
+// the stored result. The cache is cleared by reset_cmd_cache() at the start of
+// each scan rather than expiring on a timer: a remediation applied between two
+// scans must be visible in the next one, and a timer could silently hide it.
+// Within a single scan, reusing one result is also more correct — every check
+// then describes the same instant instead of a drifting one.
+// ─────────────────────────────────────────────────────────────────────────────
+static CMD_CACHE: Mutex<Option<HashMap<String, (String, i32)>>> = Mutex::new(None);
+
+/// Drop everything cached from the previous scan. Called once per scan.
+pub fn reset_cmd_cache() {
+    if let Ok(mut g) = CMD_CACHE.lock() {
+        *g = Some(HashMap::new());
+    }
+}
+
+/// Run `input` through the shell, or return the result already recorded for it
+/// in this scan. Returns (combined stdout+stderr, exit code); an exit code of
+/// -1 means the command could not be spawned at all.
+fn run_cmd_cached(input: &str) -> Option<(String, i32)> {
+    if let Ok(g) = CMD_CACHE.lock() {
+        if let Some(map) = g.as_ref() {
+            if let Some(hit) = map.get(input) {
+                debug!("CMD '{}' served from scan cache", input);
+                return Some(hit.clone());
+            }
+        }
+    }
+
+    #[cfg(unix)]
+    let output = Command::new("sh").args(["-c", input]).output();
+    #[cfg(windows)]
+    let output = Command::new("cmd").args(["/C", input]).output();
+
+    let result = match output {
+        Ok(o) => {
+            let stdout = String::from_utf8_lossy(&o.stdout).trim().to_string();
+            let stderr = String::from_utf8_lossy(&o.stderr).trim().to_string();
+            // Some commands (e.g. softwareupdate) write to stderr instead of
+            // stdout. Combine both so conditions match either way.
+            let combined = match (stdout.is_empty(), stderr.is_empty()) {
+                (false, false) => format!("{}\n{}", stdout, stderr),
+                (true,  false) => stderr,
+                (_,      _   ) => stdout,
+            };
+            (combined, o.status.code().unwrap_or(-1))
+        }
+        Err(e) => {
+            error!("Failed to execute command '{}': {}", input, e);
+            return None;
+        }
+    };
+
+    if let Ok(mut g) = CMD_CACHE.lock() {
+        g.get_or_insert_with(HashMap::new)
+         .insert(input.to_string(), result.clone());
+    }
+    Some(result)
+}
+
+
 // ─────────────────────────────────────────────────────────────────────────────
 #[derive(serde::Serialize)]
 pub struct ConditionOutcome {
@@ -1675,22 +1749,8 @@ pub fn evaluate(
             // EXEC element instead (it execs via the container runtime).
             match selement_l.as_str() {
                 "output" => {
-                    #[cfg(unix)]
-                    let output = Command::new("sh").args(["-c", input]).output();
-                    #[cfg(windows)]
-                    let output = Command::new("cmd").args(["/C", input]).output();
-
-                    match output {
-                        Ok(o) => {
-                            let stdout = String::from_utf8_lossy(&o.stdout).trim().to_string();
-                            let stderr = String::from_utf8_lossy(&o.stderr).trim().to_string();
-                            // Some commands (e.g. softwareupdate) write to stderr instead of stdout.
-                            // Combine both so conditions match regardless of which stream is used.
-                            let combined = match (stdout.is_empty(), stderr.is_empty()) {
-                                (false, false) => format!("{}\n{}", stdout, stderr),
-                                (true,  false) => stderr,
-                                (_,      _   ) => stdout,
-                            };
+                    match run_cmd_cached(input) {
+                        Some((combined, _)) => {
                             debug!("CMD '{}' output: '{}'", input, combined);
                             if apply_string_condition(&combined, condition, sinput_trim) {
                                 EvalResult::Pass
@@ -1698,21 +1758,13 @@ pub fn evaluate(
                                 EvalResult::Fail
                             }
                         }
-                        Err(e) => {
-                            error!("Failed to execute command '{}': {}", input, e);
-                            EvalResult::Fail
-                        }
+                        None => EvalResult::Fail,
                     }
                 }
                 "exit code" => {
-                    #[cfg(unix)]
-                    let output = Command::new("sh").args(["-c", input]).output();
-                    #[cfg(windows)]
-                    let output = Command::new("cmd").args(["/C", input]).output();
-
-                    match output {
-                        Ok(o) => {
-                            let code = o.status.code().unwrap_or(-1).to_string();
+                    match run_cmd_cached(input) {
+                        Some((_, code)) => {
+                            let code = code.to_string();
                             debug!("CMD '{}' exit_code: {}", input, code);
                             if apply_string_condition(&code, condition, sinput_trim) {
                                 EvalResult::Pass
@@ -1720,10 +1772,7 @@ pub fn evaluate(
                                 EvalResult::Fail
                             }
                         }
-                        Err(e) => {
-                            error!("Failed to execute command '{}': {}", input, e);
-                            EvalResult::Fail
-                        }
+                        None => EvalResult::Fail,
                     }
                 }
                 _ => {

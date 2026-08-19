@@ -160,6 +160,12 @@ async fn process_compliance_tests(
 ) {
     info!("Processing {} compliance test(s).", tests.len());
 
+    // Start each scan from a clean CMD cache. Within one scan a repeated
+    // command runs once (the CIS Debian profile asks `sshd -T` twenty
+    // separate questions); across scans nothing is reused, so a remediation
+    // applied between two scans shows up in the next one.
+    crate::compliance::reset_cmd_cache();
+
     // Parse client_id once — reject if invalid
     let client_id_int: i64 = match client_id.parse() {
         Ok(id) if id > 0 => id,

@@ -121,6 +121,8 @@ pub enum OutputFormat { Text, Json }
 
 /// Returns an exit code: 0 = success, 1 = strict-mode FAIL, 2 = usage / I/O error.
 pub fn run(opts: RunOptions) -> u8 {
+    // Same scan-scoped CMD cache as the managed path.
+    crate::compliance::reset_cmd_cache();
     let bytes = match fs::read(&opts.policy_path) {
         Ok(b) => b,
         Err(e) => {
