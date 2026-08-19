@@ -6,6 +6,10 @@ All notable changes to OpenSCM are documented here.
 
 ## [Unreleased]
 
+---
+
+## [0.7.12] - 2026-08-19
+
 ### Security
 - **Dependency advisories are now checked on every push, and the first sweep cleared eight of nine.** `cargo audit` runs in CI (advisory-only for now, so a newly published CVE cannot wedge a release) and Dependabot is configured for **security updates only** — no routine version-bump PRs, so `Cargo.lock` stays reproducible.
   - Refreshing the lockfile within existing version constraints resolved **RUSTSEC-2026-0204** (`crossbeam-epoch`, invalid pointer dereference) and one of the two **RUSTSEC-2026-0258** (`h2`) instances.

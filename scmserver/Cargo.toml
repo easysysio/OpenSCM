@@ -1,6 +1,6 @@
 [package]
 name = "scmserver"
-version = "0.7.11"
+version = "0.7.12"
 edition = "2024"
 authors = ["Yariv Hakim <yariv@openscm.io>"]
 license = "FSL-1.1-ALv2"

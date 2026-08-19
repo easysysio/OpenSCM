@@ -118,7 +118,7 @@ The server only needs to be installed once on a central host.
 
     ```bash
     # Debian/Ubuntu example
-    sudo dpkg -i scmserver_0.7.11-1_amd64.deb
+    sudo dpkg -i scmserver_0.7.12-1_amd64.deb
     ```
 
 ---
@@ -193,7 +193,7 @@ and has no runtime dependencies.
     Install directly from the repository:
 
     ```bash
-    sudo pacman -U https://repo.openscm.io/stable/arch/scmclient_0.7.11-1_x86_64.pkg.tar.zst
+    sudo pacman -U https://repo.openscm.io/stable/arch/scmclient_0.7.12-1_x86_64.pkg.tar.zst
     ```
 
     Available architectures: `x86_64`, `aarch64`, `armv7h`
@@ -207,7 +207,7 @@ and has no runtime dependencies.
     Download the package from the [Downloads](downloads.md) page and run:
 
     ```bash
-    pkg add scmclient-0.7.11-freebsd-amd64.pkg
+    pkg add scmclient-0.7.12-freebsd-amd64.pkg
     ```
 
     The service will start automatically after installation. Edit the config
@@ -224,7 +224,7 @@ and has no runtime dependencies.
     to install, or from the terminal:
 
     ```bash
-    sudo installer -pkg scmclient_0.7.11-1_macos.pkg -target /
+    sudo installer -pkg scmclient_0.7.12-1_macos.pkg -target /
     ```
 
     Edit the config to point to your server then restart:
@@ -244,7 +244,7 @@ and has no runtime dependencies.
 
     ```bash
     # Debian/Ubuntu example
-    sudo dpkg -i scmclient_0.7.11-1_amd64.deb
+    sudo dpkg -i scmclient_0.7.12-1_amd64.deb
     ```
 
 ---
@@ -481,7 +481,7 @@ pod in rotation while a rolling deploy runs migrations on the new one.
     ```
 
 !!! tip "Let the server compress — don't strip `Accept-Encoding`"
-    Since **0.7.11** OpenSCM compresses its own responses (gzip/brotli) and
+    Since **0.7.12** OpenSCM compresses its own responses (gzip/brotli) and
     serves static assets with `ETag` + `Cache-Control`, which is most of the
     reason a page costs ~290 KB instead of ~4.8 MB. Both depend on headers
     surviving your reverse proxy:
