@@ -26,6 +26,7 @@ jobs:
     name: Linux · client · ${{ matrix.target }}
     needs: test
     runs-on: ubuntu-latest
+    timeout-minutes: 45
     strategy:
       fail-fast: false
       matrix:
@@ -127,6 +128,7 @@ jobs:
   build-linux-server:
     name: Linux · server · ${{ matrix.target }}
     runs-on: ubuntu-latest
+    timeout-minutes: 45
     needs: collect-agents
     strategy:
       fail-fast: false
@@ -206,6 +208,7 @@ jobs:
     name: Windows · client
     needs: test
     runs-on: ubuntu-latest
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
 
@@ -262,6 +265,7 @@ jobs:
   build-windows-server:
     name: Windows · server
     runs-on: ubuntu-latest
+    timeout-minutes: 45
     needs: collect-agents
     steps:
       - uses: actions/checkout@v4
@@ -318,6 +322,7 @@ jobs:
     name: macOS · Client
     needs: test
     runs-on: macos-latest
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
 
@@ -396,6 +401,7 @@ jobs:
     name: FreeBSD · Client
     needs: test
     runs-on: ubuntu-latest
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
 
@@ -466,6 +472,7 @@ jobs:
   collect-agents:
     name: Collect · Agent Binaries
     runs-on: ubuntu-latest
+    timeout-minutes: 45
     needs:
       - build-linux-client
       - build-windows-client
@@ -527,6 +534,7 @@ jobs:
   build-docker:
     name: Docker · ${{ matrix.arch }}
     runs-on: ubuntu-latest
+    timeout-minutes: 45
     needs: collect-agents
     strategy:
       fail-fast: false
@@ -598,6 +606,7 @@ jobs:
   docker-manifest:
     name: Docker · Manifest
     runs-on: ubuntu-latest
+    timeout-minutes: 45
     needs: build-docker
     steps:
       - uses: actions/checkout@v4
@@ -622,6 +631,7 @@ jobs:
   publish:
     name: Create Draft Release
     runs-on: ubuntu-latest
+    timeout-minutes: 45
     needs:
       - build-linux-client
       - build-linux-server
@@ -673,6 +683,7 @@ jobs:
   cleanup:
     name: Cleanup build artifacts
     runs-on: ubuntu-latest
+    timeout-minutes: 45
     needs: [publish]
     if: success()
     permissions:
