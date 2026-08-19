@@ -6,6 +6,10 @@ All notable changes to OpenSCM are documented here.
 
 ## [Unreleased]
 
+### Fixed
+- **Windows builds no longer warn about unused code.** The `boolean()` helper is only called from the Unix path-permission checks, so on Windows it had no users and every build reported it. Gated to match its callers.
+
+
 ---
 
 ## [0.7.11] - 2026-08-19
