@@ -166,7 +166,7 @@ perl -pi -e "s/^(\s*CE_TAG:\s*)v.*/\${1}v$VERSION/" "$WF"
 grep -q "CE_TAG: v$VERSION" "$WF" || die "failed to update CE_TAG in $WF"
 ok "CE_TAG -> v$VERSION"
 
-perl -0pi -e "s/^## \[Unreleased\]\n/## [Unreleased]\n\n---\n\n## [$SAAS_VERSION] - $TODAY\n\n### Changed\n- **Picks up CE v$VERSION.** \`CE_TAG\` bumped \`v$CE_OLD\` -> \`v$VERSION\`; lands via the path-dep, no SaaS-side source change. See CE v$VERSION CHANGELOG.\n/m" \
+perl -0pi -e "s/^## \[Unreleased\]\n/## [Unreleased]\n\n---\n\n## [$SAAS_VERSION] - $TODAY\n\n### Changed\n- **Picks up CE v$VERSION.** \`CE_TAG\` bumped \`v$CE_OLD\` -> \`v$VERSION\`; lands via the path-dep. See CE v$VERSION CHANGELOG.\n/m" \
     "$SAAS_DIR/CHANGELOG.md"
 grep -q "^## \[$SAAS_VERSION\] - $TODAY" "$SAAS_DIR/CHANGELOG.md" \
     || die "failed to promote SaaS CHANGELOG to [$SAAS_VERSION]"
