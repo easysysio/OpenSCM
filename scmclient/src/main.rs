@@ -68,6 +68,13 @@ fn check_required_directories() -> Result<(), Box<dyn std::error::Error>> {
 // to the OS and made long-lived agents balloon to multi-GB RSS / 20-GB VSZ.
 #[tokio::main(flavor = "current_thread")]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    // rustls is built without a default crypto provider (see Cargo.toml: the
+    // aws-lc-rs default does not cross-compile to this project's targets), so
+    // one must be installed before any TLS connection is attempted. Without
+    // this every HTTPS request fails at runtime with "no process-level
+    // CryptoProvider available".
+    let _ = rustls::crypto::ring::default_provider().install_default();
+
 
     // 1. Logging setup
     let env_filter = EnvFilter::new("info");

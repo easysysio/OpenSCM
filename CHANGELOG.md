@@ -7,10 +7,11 @@ All notable changes to OpenSCM are documented here.
 ## [Unreleased]
 
 ### Security
-- **Dependency advisories are now checked on every push, and the first sweep cleared three of nine.** `cargo audit` runs in CI (advisory-only for now, so a newly published CVE cannot wedge a release) and Dependabot is configured for **security updates only** — no routine version-bump PRs, so `Cargo.lock` stays reproducible.
+- **Dependency advisories are now checked on every push, and the first sweep cleared eight of nine.** `cargo audit` runs in CI (advisory-only for now, so a newly published CVE cannot wedge a release) and Dependabot is configured for **security updates only** — no routine version-bump PRs, so `Cargo.lock` stays reproducible.
   - Refreshing the lockfile within existing version constraints resolved **RUSTSEC-2026-0204** (`crossbeam-epoch`, invalid pointer dereference) and one of the two **RUSTSEC-2026-0258** (`h2`) instances.
   - Dropped the unused sqlx `macros` feature, which pulled in the MySQL and Postgres drivers this SQLite-only product never loads — removing 13 crates and with them **RUSTSEC-2023-0071** (`rsa`, Marvin timing sidechannel), an advisory with no upstream fix. Recorded in `.cargo/audit.toml` since the crate is still resolved-but-unbuilt.
-  - **Six remain, all transitive and pending upstream bumps** (tracked, not ignored): three `rustls-webpki` certificate-validation issues plus `h2` and `ring` — all held back by `reqwest 0.11` and `ldap3 0.11` — and a `lopdf` stack overflow from `genpdf`. The `lopdf` issue needs a hostile PDF as *input*; this product only generates them. The `ring` panic requires overflow checks, which release builds disable. The `rustls-webpki` ones are the real ones to close, and need `reqwest 0.12` / a newer `ldap3`.
+  - **Upgraded `reqwest` 0.11 → 0.13 and `ldap3` 0.11 → 0.12**, which moves the TLS stack to `rustls 0.23` / `rustls-webpki 0.103` and closes the three certificate-validation advisories (**RUSTSEC-2026-0098**, **-0099**, **-0104**) plus **RUSTSEC-2026-0258** (`h2`) and **RUSTSEC-2025-0009** (`ring 0.16`). Both crates select rustls' **ring** provider rather than the new aws-lc-rs default, which requires cmake and a C toolchain and does not cross-compile to the riscv64 / loongarch64 / s390x / powerpc64 targets this project ships; the provider is installed explicitly at startup, and verified with a live HTTPS request.
+  - **One advisory remains:** **RUSTSEC-2026-0187**, a stack overflow in `lopdf` reached through `genpdf`, which is at its latest release and effectively unmaintained. It requires a hostile PDF as *input*; this product only generates them. Closing it means replacing the PDF library.
 
 
 ### Fixed

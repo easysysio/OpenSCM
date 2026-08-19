@@ -35,6 +35,13 @@ OPTIONS:
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
+    // rustls is built without a default crypto provider (see Cargo.toml: the
+    // aws-lc-rs default does not cross-compile to this project's targets), so
+    // one must be installed before any TLS connection is attempted. Without
+    // this every HTTPS request fails at runtime with "no process-level
+    // CryptoProvider available".
+    let _ = rustls::crypto::ring::default_provider().install_default();
+
     scmserver::set_app_version(env!("CARGO_PKG_VERSION"));
     scmserver::set_app_edition("Community Edition");
 
