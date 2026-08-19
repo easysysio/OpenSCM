@@ -419,7 +419,7 @@ fn load_or_create_identity(config: &Config) -> Result<AgentIdentity, Box<dyn std
 // Collect host metadata for the heartbeat payload.
 // ─────────────────────────────────────────────────────────────────────────────
 fn collect_system_info() -> SystemInfo {
-    use sysinfo::{System, Disks};
+    use sysinfo::{System, Disks, RefreshKind, CpuRefreshKind, MemoryRefreshKind};
 
     let osinfo = os_info::get();
     let ip = local_ip_address::local_ip()
@@ -430,10 +430,23 @@ fn collect_system_info() -> SystemInfo {
         });
 
     // Collect telemetry via sysinfo.
-    // CPU usage requires a brief refresh interval to get a meaningful value.
-    let mut sys = System::new_all();
-    sys.refresh_all();
-    // Second refresh after a short pause so CPU deltas are computed.
+    //
+    // Refresh ONLY cpu + memory. The previous System::new_all() + refresh_all()
+    // enumerated every process on the host — twice — for data this function
+    // never reads: it uses cpus(), total_memory() and used_memory() and nothing
+    // else. On a container host that walk covers every process in every
+    // container (they share the host PID namespace), so it allocated thousands
+    // of process structs and their command lines every heartbeat and dropped
+    // them again. The agent is a static musl binary and musl's allocator
+    // returns very little of that to the OS, so RSS climbed steadily —
+    // ~2.9 GB after a week on a busy hypervisor — and it burned CPU doing it.
+    let mut sys = System::new_with_specifics(
+        RefreshKind::new()
+            .with_cpu(CpuRefreshKind::new().with_cpu_usage())
+            .with_memory(MemoryRefreshKind::new().with_ram()),
+    );
+    // CPU usage is a delta between two samples, so take the second one after a
+    // brief pause. Only the CPU figures need re-reading here.
     std::thread::sleep(std::time::Duration::from_millis(500));
     sys.refresh_cpu_usage();
 

@@ -1274,8 +1274,16 @@ pub fn evaluate(
         // PROCESS
         // =========================================================
         "process" => {
+            // Only name() and user_id() are read below, so refresh just those.
+            // The default refresh_processes() also loads each process's command
+            // line, environment, cwd and disk usage — on a container host that
+            // means every process in every container, allocated and thrown away
+            // for fields nobody looks at.
             let mut sys = System::new();
-            sys.refresh_processes();
+            sys.refresh_processes_specifics(
+                sysinfo::ProcessRefreshKind::new()
+                    .with_user(sysinfo::UpdateKind::OnlyIfNotSet),
+            );
 
             let needle = input.to_lowercase();
             let matching: Vec<_> = sys

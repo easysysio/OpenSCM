@@ -12,6 +12,12 @@ WorkingDirectory=/etc/openscm
 
 Restart=on-failure
 RestartSec=5s
+
+# Safety net. The agent's working set is tens of MB; these caps exist so a
+# regression in it can never pressure the workloads it is meant to monitor.
+# MemoryHigh throttles and reclaims first, MemoryMax is the hard stop.
+MemoryHigh=256M
+MemoryMax=512M
 StartLimitIntervalSec=60s
 StartLimitBurst=3
 
