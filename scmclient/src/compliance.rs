@@ -22,6 +22,10 @@ pub enum EvalResult {
 }
 
 // Tiny sugar — `boolean(check())` reads better than the same if/else everywhere.
+// Unix-only: its three callers (path owner / group / permission) are all
+// #[cfg(unix)], and the Windows stubs return Na directly, so without this gate
+// the Windows build warns that the function is unused.
+#[cfg(unix)]
 #[inline]
 fn boolean(passed: bool) -> EvalResult {
     if passed { EvalResult::Pass } else { EvalResult::Fail }
