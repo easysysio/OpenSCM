@@ -17,8 +17,8 @@ use urlencoding;
 use std::collections::BTreeMap;
 use tracing::{info, error};
 use chrono::Utc;
-use genpdf::{fonts, elements, style, Element, Margins};
 
+use crate::pdf::{Align, Cell, Doc, Style, Table, LOGO_WIDTH_MM};
 use crate::models::{
     ErrorQuery, SystemGroup, Test, Policy, PolicySchedule,
     SystemInsidePolicy, TestInsidePolicy, PolicyCompliance,
@@ -1200,14 +1200,6 @@ pub async fn policies_report(
 
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Helper: cell
-// Wraps a PDF element with uniform cell padding for table layout.
-// ─────────────────────────────────────────────────────────────────────────────
-fn cell<E: Element + 'static>(e: E) -> Box<dyn Element> {
-    Box::new(elements::PaddedElement::new(e, Margins::trbl(1.5, 2.0, 1.5, 2.0)))
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
 // GET /policies/download/{id}
 // Generate and stream a PDF version of the live policy compliance report.
 // Role: Viewer
@@ -1543,56 +1535,36 @@ pub fn build_live_policy_pdf(report_data: &ReportData) -> Result<Vec<u8>, ()> {
     const FONT_BOLD_ITALIC: &[u8] = include_bytes!("../static/dist/fonts/LiberationSans-BoldItalic.ttf");
     const LOGO_BYTES: &[u8] = include_bytes!("../static/dist/img/Logo_report.jpg");
 
-    let font_family = match (
-        fonts::FontData::new(FONT_REGULAR.to_vec(), None),
-        fonts::FontData::new(FONT_BOLD.to_vec(), None),
-        fonts::FontData::new(FONT_ITALIC.to_vec(), None),
-        fonts::FontData::new(FONT_BOLD_ITALIC.to_vec(), None),
-    ) {
-        (Ok(regular), Ok(bold), Ok(italic), Ok(bold_italic)) => fonts::FontFamily { regular, bold, italic, bold_italic },
-        _ => { error!("Failed to load PDF fonts"); return Err(()); }
-    };
+    let mut doc = Doc::new(
+        &format!("OpenSCM Compliance Report - {}", report_data.policy_name),
+        FONT_REGULAR, FONT_BOLD, FONT_ITALIC, FONT_BOLD_ITALIC,
+    ).map_err(|_| { error!("Failed to load PDF fonts for live policy report"); })?;
 
-    let mut doc = genpdf::Document::new(font_family);
-    let cursor = std::io::Cursor::new(LOGO_BYTES);
-    let mut logo = match elements::Image::from_reader(cursor) {
-        Ok(img) => img,
-        Err(e) => { error!("Failed to load PDF logo: {}", e); return Err(()); }
-    };
+    doc.text(
+        "OpenSCM Compliance Report",
+        Style::new().size(30.0).bold().color(0, 0, 128).align(Align::Center),
+    );
+    doc.space(2.0);
+    doc.text(
+        &format!("Generated on {} by {}", report_data.submission_date, report_data.submitter_name),
+        Style::new().align(Align::Center),
+    );
+    doc.space(0.5);
+    doc.image_centered(LOGO_BYTES, LOGO_WIDTH_MM);
+    doc.space(1.0);
 
-    doc.set_title(format!("OpenSCM Compliance Report - {}", report_data.policy_name));
-    let mut decorator = genpdf::SimplePageDecorator::new();
-    decorator.set_margins(15);
-    doc.set_page_decorator(decorator);
-
-    let mut title = elements::Paragraph::new("OpenSCM Compliance Report");
-    title.set_alignment(genpdf::Alignment::Center);
-    doc.push(title.styled(style::Style::new().with_font_size(30).bold().with_color(style::Color::Rgb(0, 0, 128))));
-    doc.push(elements::Break::new(2.0));
-
-    let mut submitter = elements::Paragraph::new(format!("Generated on {} by {}", report_data.submission_date, report_data.submitter_name));
-    submitter.set_alignment(genpdf::Alignment::Center);
-    doc.push(submitter);
-    doc.push(elements::Break::new(0.5));
-
-    logo.set_dpi(40.0);
-    logo.set_alignment(genpdf::Alignment::Center);
-    doc.push(logo);
-    doc.push(elements::Break::new(1.0));
-
-    doc.push(elements::Text::new("Report Details").styled(style::Style::new().bold().with_font_size(14)));
-    doc.push(elements::Break::new(0.5));
-    let mut details_table = elements::TableLayout::new(vec![1, 3]);
-    details_table.set_cell_decorator(elements::FrameCellDecorator::new(true, true, false));
-    if let Err(e) = details_table.push_row(vec![
-        cell(elements::Text::new("Policy Name").styled(style::Style::new().bold())),
-        cell(elements::Paragraph::new(format!("{} v{}", report_data.policy_name, report_data.version))),
-    ]) { error!("Failed to add policy name row to PDF: {}", e); }
-    if let Err(e) = details_table.push_row(vec![
-        cell(elements::Text::new("Description").styled(style::Style::new().bold())),
-        cell(elements::Paragraph::new(report_data.description.clone())),
-    ]) { error!("Failed to add description row to PDF: {}", e); }
-    doc.push(details_table);
+    doc.text("Report Details", Style::new().size(14.0).bold());
+    doc.space(0.5);
+    let mut details = Table::new(vec![1, 3]);
+    details.row(vec![
+        Cell::new("Policy Name", Style::new().bold()),
+        Cell::new(format!("{} v{}", report_data.policy_name, report_data.version), Style::new()),
+    ]);
+    details.row(vec![
+        Cell::new("Description", Style::new().bold()),
+        Cell::new(report_data.description.clone(), Style::new()),
+    ]);
+    doc.table(&details);
 
     // ──────────────────────────────────────────────────────────────────────
     // Tests Summary — name + description of every test in the policy.
@@ -1602,48 +1574,39 @@ pub fn build_live_policy_pdf(report_data: &ReportData) -> Result<Vec<u8>, ()> {
     // reflects current test definitions for on-demand PDFs.
     // ──────────────────────────────────────────────────────────────────────
     if !report_data.tests_metadata.is_empty() {
-        doc.push(elements::PageBreak::new());
-        doc.push(
-            elements::Text::new(format!(
-                "Tests in this Policy ({})",
-                report_data.tests_metadata.len(),
-            ))
-            .styled(style::Style::new().bold().with_font_size(14)),
+        doc.page_break();
+        doc.text(
+            &format!("Tests in this Policy ({})", report_data.tests_metadata.len()),
+            Style::new().size(14.0).bold(),
         );
-        doc.push(elements::Break::new(0.5));
+        doc.space(0.5);
 
-        let mut tests_table = elements::TableLayout::new(vec![2, 5]);
-        tests_table.set_cell_decorator(elements::FrameCellDecorator::new(true, true, true));
-
-        if let Err(e) = tests_table.push_row(vec![
-            cell(elements::Text::new("Test Name").styled(style::Style::new().bold())),
-            cell(elements::Text::new("Description").styled(style::Style::new().bold())),
-        ]) {
-            error!("Failed to add tests summary header to PDF: {}", e);
-        }
-
+        let mut tests = Table::new(vec![2, 5]).header(vec![
+            Cell::new("Test Name", Style::new().bold()),
+            Cell::new("Description", Style::new().bold()),
+        ]);
         for tm in &report_data.tests_metadata {
             let desc = if tm.description.trim().is_empty() {
                 "—".to_string()
             } else {
                 tm.description.clone()
             };
-            if let Err(e) = tests_table.push_row(vec![
-                cell(elements::Paragraph::new(&tm.name)),
-                cell(elements::Paragraph::new(&desc)),
-            ]) {
-                error!("Failed to add tests summary row to PDF: {}", e);
-            }
+            tests.row(vec![
+                Cell::new(tm.name.clone(), Style::new()),
+                Cell::new(desc, Style::new()),
+            ]);
         }
-
-        doc.push(tests_table);
+        doc.table(&tests);
     }
 
-    doc.push(elements::PageBreak::new());
+    doc.page_break();
 
     for system in &report_data.system_reports {
-        doc.push(elements::Text::new(format!("Host Name: {}", system.system_name)).styled(style::Style::new().bold().with_font_size(14)));
-        doc.push(elements::Break::new(0.5));
+        doc.text(
+            &format!("Host Name: {}", system.system_name),
+            Style::new().size(14.0).bold(),
+        );
+        doc.space(0.5);
 
         // Excluded findings don't count as PASS or FAIL — match the on-screen
         // tallies and the three-way verdict (Compliant / Non-Compliant / Not Applicable).
@@ -1653,77 +1616,72 @@ pub fn build_live_policy_pdf(report_data: &ReportData) -> Result<Vec<u8>, ()> {
         let excluded_count  = system.excluded_count;
         let exempt = compliant_count == 0 && violation_count == 0;
         let (status_text, status_color) = if exempt {
-            ("Not Applicable", style::Color::Rgb(120, 120, 120))
+            ("Not Applicable", (120, 120, 120))
         } else if system.is_passed {
-            ("Compliant", style::Color::Rgb(0, 128, 0))
+            ("Compliant", (0, 128, 0))
         } else {
-            ("Non-Compliant", style::Color::Rgb(200, 0, 0))
+            ("Non-Compliant", (200, 0, 0))
         };
 
-        let mut summary_table = elements::TableLayout::new(vec![1, 1]);
-        summary_table.set_cell_decorator(elements::FrameCellDecorator::new(true, true, false));
-        if let Err(e) = summary_table.push_row(vec![
-            cell(elements::Text::new("Compliance Status").styled(style::Style::new().bold())),
-            cell(elements::Text::new(status_text).styled(
-                style::Style::new().with_color(status_color).bold(),
-            )),
-        ]) { error!("Failed to add compliance status row to PDF: {}", e); }
-        if let Err(e) = summary_table.push_row(vec![
-            cell(elements::Text::new("Passed").styled(style::Style::new().bold())),
-            cell(elements::Text::new(format!("{}", compliant_count))),
-        ]) { error!("Failed to add passed count row to PDF: {}", e); }
-        if let Err(e) = summary_table.push_row(vec![
-            cell(elements::Text::new("Failed").styled(style::Style::new().bold())),
-            cell(elements::Text::new(format!("{}", violation_count))),
-        ]) { error!("Failed to add failed count row to PDF: {}", e); }
-        if let Err(e) = summary_table.push_row(vec![
-            cell(elements::Text::new("Not Applicable").styled(style::Style::new().bold())),
-            cell(elements::Text::new(format!("{}", na_count))),
-        ]) { error!("Failed to add NA count row to PDF: {}", e); }
-        if let Err(e) = summary_table.push_row(vec![
-            cell(elements::Text::new("Excluded").styled(style::Style::new().bold())),
-            cell(elements::Text::new(format!("{}", excluded_count))),
-        ]) { error!("Failed to add excluded count row to PDF: {}", e); }
-        doc.push(summary_table);
-        doc.push(elements::Break::new(1.0));
+        let mut summary = Table::new(vec![1, 1]);
+        summary.row(vec![
+            Cell::new("Compliance Status", Style::new().bold()),
+            Cell::new(status_text, Style::new().bold().color(status_color.0, status_color.1, status_color.2)),
+        ]);
+        for (label, count) in [
+            ("Passed", compliant_count),
+            ("Failed", violation_count),
+            ("Not Applicable", na_count),
+            ("Excluded", excluded_count),
+        ] {
+            summary.row(vec![
+                Cell::new(label, Style::new().bold()),
+                Cell::new(count.to_string(), Style::new()),
+            ]);
+        }
+        doc.table(&summary);
+        doc.space(1.0);
 
-        doc.push(elements::Text::new("Audit Rules Detailed Breakdown").styled(style::Style::new().bold().with_font_size(14)));
-        doc.push(elements::Break::new(0.5));
-        let mut rules_table = elements::TableLayout::new(vec![4, 1]);
-        rules_table.set_cell_decorator(elements::FrameCellDecorator::new(true, true, false));
-        if let Err(e) = rules_table.push_row(vec![
-            cell(elements::Text::new("Rule Name").styled(style::Style::new().bold())),
-            cell(elements::Text::new("Status").styled(style::Style::new().bold())),
-        ]) { error!("Failed to add rules table header to PDF: {}", e); }
+        doc.text("Audit Rules Detailed Breakdown", Style::new().size(14.0).bold());
+        doc.space(0.5);
+        let mut rules = Table::new(vec![4, 1]).header(vec![
+            Cell::new("Rule Name", Style::new().bold()),
+            Cell::new("Status", Style::new().bold()),
+        ]);
 
         for res in &system.results {
+            // NOTE: deliberately NOT pdf::status_badge. The policy reports use
+            // their own vocabulary — "N/A" rather than "NA", grey 120 rather
+            // than 100, and anything unrecognised falls through to FAIL rather
+            // than an em dash. Unifying the two would change what these reports
+            // say, so the divergence is preserved here rather than quietly
+            // resolved during the renderer port.
             let (status_text, status_color) = if res.is_excluded {
-                ("EXCLUDED", style::Color::Rgb(120, 120, 120))
+                ("EXCLUDED", (120, 120, 120))
             } else {
                 match res.status.as_str() {
-                    "PASS" => ("PASS", style::Color::Rgb(0, 128, 0)),
-                    "NA"   => ("N/A",  style::Color::Rgb(120, 120, 120)),
-                    _      => ("FAIL", style::Color::Rgb(200, 0, 0)),
+                    "PASS" => ("PASS", (0, 128, 0)),
+                    "NA"   => ("N/A",  (120, 120, 120)),
+                    _      => ("FAIL", (200, 0, 0)),
                 }
             };
-            if let Err(e) = rules_table.push_row(vec![
-                cell(elements::Paragraph::new(&res.test_name)),
-                cell(elements::Text::new(status_text).styled(style::Style::new().with_color(status_color).bold())),
-            ]) { error!("Failed to add rule row to PDF: {}", e); }
+            rules.row(vec![
+                Cell::new(res.test_name.clone(), Style::new()),
+                Cell::new(status_text, Style::new().bold().color(status_color.0, status_color.1, status_color.2)),
+            ]);
         }
-        doc.push(rules_table);
-        doc.push(elements::PageBreak::new());
+        doc.table(&rules);
+        doc.page_break();
     }
 
-    doc.push(elements::Break::new(2.0));
-    doc.push(elements::Paragraph::new(
+    doc.space(2.0);
+    doc.text(
         "Note: This report contains confidential information about your infrastructure \
          and should be treated as such. Unauthorized distribution is strictly prohibited.",
-    ).styled(style::Style::new().with_font_size(10).with_color(style::Color::Rgb(100, 100, 100))));
+        Style::new().size(10.0).color(100, 100, 100),
+    );
 
-    let mut buffer = Vec::new();
-    doc.render(&mut buffer).map_err(|e| { error!("Failed to render live policy PDF: {}", e); })?;
-    Ok(buffer)
+    Ok(doc.finish())
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

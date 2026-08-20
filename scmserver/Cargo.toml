@@ -47,7 +47,6 @@ rand = "0.8"
 ed25519-dalek = { version = "2", features = ["rand_core"] }
 bcrypt = "0.17.0"
 time = "0.3"
-genpdf = { version = "0.2.0", features = ["images"] }
 hkdf = "0.12"
 sha2 = "0.10"
 # rustls-no-provider, not "rustls": the latter selects the aws-lc-rs crypto

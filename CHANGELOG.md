@@ -6,6 +6,16 @@ All notable changes to OpenSCM are documented here.
 
 ## [Unreleased]
 
+### Changed
+- **PDF reports are now roughly 25× smaller.** A two-page report was 2.7 MB and a seven-page one barely larger, because the old renderer embedded four complete font faces in every document regardless of what the report actually used. Fonts are now subsetted, so the same reports are 48 KB–130 KB. This matters most for the **Email me the PDF** flows, where every report sent was carrying ~2.6 MB of unused font data and edging towards the attachment limits some mail gateways enforce.
+- **Table headers now repeat on every page** of a multi-page findings table. Previously only the first page was labelled, so from page 2 onwards an auditor had unlabelled columns.
+- Reports use slightly tighter table rows and so run to fewer pages for the same content. No content has been removed.
+
+### Security
+- **Closed RUSTSEC-2026-0187 and six unmaintained-crate advisories** by replacing the PDF renderer. All seven traced to a single root: `genpdf`, unmaintained since 2021, which pinned `lopdf` 0.26 and `image` 0.23. The advisory needed `lopdf` ≥ 0.42 and no version bump could reach it — the maintained `genpdf` fork only gets to 0.31 — so closing it meant replacing the renderer. The project now uses `printpdf` 0.12 (`lopdf` 0.44) with an in-tree layout layer, and `cargo audit` reports **zero findings** with the previous suppression removed rather than merely re-ignored.
+
+  The exposure was always latent rather than live — the advisory requires *parsing* a hostile PDF and this product only ever generates them — but it sat in every dependency scan a prospective customer might run.
+
 ---
 
 ## [0.7.14] - 2026-08-20
