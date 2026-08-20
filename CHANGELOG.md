@@ -7,9 +7,11 @@ All notable changes to OpenSCM are documented here.
 ## [Unreleased]
 
 ### Added
-- **SaaS: automatic suspension of organizations that never onboarded.** A signup that registers and never enrols a system otherwise sits in the tenant list forever. **Settings → SaaS → Dormant Organizations** sets the age at which such an account is suspended, and how many days beforehand its admins are emailed.
+- **SaaS: automatic cleanup of abandoned signups.** **Settings → SaaS → Dormant Organizations** adds two independent rules, both **off by default**:
+  - **Unverified registrations** whose email address was never confirmed are **deleted** after a set number of days. Nothing can exist behind them — the account cannot be signed into until the address is verified — and they are not warned first, because the only address on file is the unverified one, usually a typo.
+  - **Verified organizations that never enrolled a system** are acted on after a set number of days, and *what* happens depends on what they hold. An account with **nothing** — no policies or tests it authored, no compliance history, no saved reports — is **deleted**. One that holds any of those is only **suspended**, so authored work and audit evidence are never destroyed; a superuser can reactivate it unchanged. Admins are emailed once beforehand and the mail states plainly which of the two will happen.
 
-  It **suspends, never deletes** — systems, policies, reports and history all survive, and a superuser can reactivate the organization from the tenant page. It is **off by default** (`0` days), because a sweep that disables customer accounts must not switch itself on during an upgrade. "Dormant" means *no system has ever been enrolled*, so a tenant that uses the product is never a candidate however quiet it is; `platform` and `default` are excluded outright. Warnings are sent once and only recorded as sent if the mail actually left, so an SMTP outage retries rather than silently skipping. Both the warning and the suspension are written to the tenant's audit log.
+  An organization with systems is never a candidate, `platform` and `default` are excluded outright, both outcomes are audited (deletions into the platform log, since a tenant's own log is removed with it), and a warning is only recorded as sent once the mail has actually left, so an SMTP outage retries rather than skipping straight to the action.
 
 ### Fixed
 - **Tenant suspension is now actually enforced.** Login checked that the organization *existed* but never looked at its status, so the admin **Suspend** button set a flag that nothing read — a suspended organization could still sign in and use the product normally. Suspended organizations are now refused at login.

@@ -81,3 +81,74 @@ async fn disabled_threshold_selects_nothing_in_practice() {
     let days: i64 = 0;
     assert!(days <= 0, "0 must mean disabled, never 'age >= 0'");
 }
+
+
+// ── Classification: delete vs suspend ────────────────────────────────────────
+// This is the decision that destroys data, so it is pinned explicitly.
+
+async fn classify(p: &SqlitePool, min_age: i64) -> Vec<(String, i64, i64)> {
+    sqlx::query(
+        "SELECT t.id,
+                (SELECT COUNT(*) FROM tests    x WHERE x.tenant_id = t.id)
+              + (SELECT COUNT(*) FROM policies x WHERE x.tenant_id = t.id) AS authored,
+                (SELECT COUNT(*) FROM compliance_history x WHERE x.tenant_id = t.id)
+              + (SELECT COUNT(*) FROM reports            x WHERE x.tenant_id = t.id)
+              + (SELECT COUNT(*) FROM system_reports     x WHERE x.tenant_id = t.id) AS used_before
+           FROM tenants t
+          WHERE t.status = 'active'
+            AND t.id NOT IN ('platform','default')
+            AND EXISTS (SELECT 1 FROM users u WHERE u.tenant_id = t.id AND u.email_verified = 1)
+            AND NOT EXISTS (SELECT 1 FROM systems s WHERE s.tenant_id = t.id)
+            AND julianday('now') - julianday(t.created_at) >= ?
+          ORDER BY t.id")
+        .bind(min_age as f64).fetch_all(p).await.unwrap()
+        .iter().map(|r| (r.get::<String,_>("id"), r.get::<i64,_>("authored"), r.get::<i64,_>("used_before")))
+        .collect()
+}
+
+async fn verified_user(p: &SqlitePool, tenant: &str, verified: i64) {
+    sqlx::query("INSERT INTO users (tenant_id, username, password, role, email, email_verified)
+                 VALUES (?, ?, 'x', 'admin', 'a@example.com', ?)")
+        .bind(tenant).bind(format!("admin-{}", tenant)).bind(verified)
+        .execute(p).await.unwrap();
+}
+
+#[tokio::test]
+async fn empty_account_is_deletable_but_authored_work_is_not() {
+    let p = pool().await;
+    tenant(&p, "truly-empty", "active", 200).await;  verified_user(&p, "truly-empty", 1).await;
+    tenant(&p, "wrote-policy","active", 200).await;  verified_user(&p, "wrote-policy", 1).await;
+    sqlx::query("INSERT INTO policies (id, tenant_id, name) VALUES (1,'wrote-policy','mine')")
+        .execute(&p).await.unwrap();
+
+    let c = classify(&p, 180).await;
+    let empty = c.iter().find(|(id,_,_)| id == "truly-empty").unwrap();
+    let wrote = c.iter().find(|(id,_,_)| id == "wrote-policy").unwrap();
+
+    assert_eq!((empty.1, empty.2), (0, 0), "an account holding nothing may be deleted");
+    assert!(wrote.1 > 0, "a policy the user authored must force suspend, not delete");
+}
+
+#[tokio::test]
+async fn a_formerly_active_account_is_never_deleted() {
+    // Agents were removed and the systems pruned, but the compliance history
+    // is audit evidence — this is a former customer, not an empty signup.
+    let p = pool().await;
+    tenant(&p, "former", "active", 400).await; verified_user(&p, "former", 1).await;
+    sqlx::query("INSERT INTO compliance_history (tenant_id, systems_score, policies_score)
+                 VALUES ('former', 91.0, 88.0)").execute(&p).await.unwrap();
+
+    let c = classify(&p, 180).await;
+    let former = c.iter().find(|(id,_,_)| id == "former").unwrap();
+    assert!(former.2 > 0, "past compliance history must force suspend, never delete");
+}
+
+#[tokio::test]
+async fn unverified_registrations_are_a_separate_population() {
+    let p = pool().await;
+    tenant(&p, "never-confirmed", "active", 30).await; verified_user(&p, "never-confirmed", 0).await;
+    // Excluded from the "unused" sweep — it is handled by the unverified rule.
+    let c = classify(&p, 10).await;
+    assert!(!c.iter().any(|(id,_,_)| id == "never-confirmed"),
+        "an unverified signup must not be judged by the verified-but-unused rule");
+}

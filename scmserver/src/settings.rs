@@ -54,9 +54,13 @@ pub struct Settings {
     // "1" = email superusers when a new tenant self-registers, "0" = off.
     // Defaults to "1" to preserve the behaviour shipped in SaaS 0.4.3.
     pub notify_new_tenant: String,
-    /// Days with zero systems after which a tenant is auto-suspended.
-    /// "0" disables the sweep entirely. SaaS-only.
-    pub dormant_tenant_days: String,
+    /// Days after which a registration whose email was never verified is
+    /// deleted. Nothing exists to keep. "0" disables. SaaS-only.
+    pub dormant_unverified_days: String,
+    /// Days after which a verified organization that never enrolled a system
+    /// is acted on — deleted if it holds nothing, suspended if it authored
+    /// tests/policies or was once in use. "0" disables. SaaS-only.
+    pub dormant_unused_days: String,
     /// How many days before that the tenant's admins are warned by email.
     pub dormant_warn_days: String,
 }
@@ -96,7 +100,7 @@ pub async fn settings(
     // SMTP settings + SaaS platform settings are global — read from default tenant
     let smtp_rows = sqlx::query(
         "SELECT skey, value FROM settings WHERE tenant_id = 'default'
-         AND skey IN ('smtp_host','smtp_port','smtp_username','smtp_password','smtp_from','smtp_tls','app_url','notify_new_tenant','dormant_tenant_days','dormant_warn_days')",
+         AND skey IN ('smtp_host','smtp_port','smtp_username','smtp_password','smtp_from','smtp_tls','app_url','notify_new_tenant','dormant_unverified_days','dormant_unused_days','dormant_warn_days')",
     )
     .fetch_all(&*pool)
     .await
@@ -138,7 +142,8 @@ pub async fn settings(
         notify_new_tenant: map.get("notify_new_tenant").cloned().unwrap_or_else(|| "1".to_string()),
         // Default 0: auto-suspension is opt-in. A sweep that silently disables
         // accounts should never switch itself on during an upgrade.
-        dormant_tenant_days: map.get("dormant_tenant_days").cloned().unwrap_or_else(|| "0".to_string()),
+        dormant_unverified_days: map.get("dormant_unverified_days").cloned().unwrap_or_else(|| "0".to_string()),
+        dormant_unused_days:     map.get("dormant_unused_days").cloned().unwrap_or_else(|| "0".to_string()),
         dormant_warn_days:   map.get("dormant_warn_days").cloned().unwrap_or_else(|| "14".to_string()),
     };
 
@@ -331,16 +336,19 @@ pub async fn settings_save(
             // sane number of days. The warning lead is clamped below the
             // threshold so a warning cannot be scheduled after the suspension
             // it is meant to precede.
-            let dormant_days: i64 = form_data.get("dormant_tenant_days")
-                .and_then(|v| v.first())
-                .and_then(|v| v.parse().ok()).unwrap_or(0);
-            let dormant_days = if (0..=3650).contains(&dormant_days) { dormant_days } else { 0 };
-            let warn_days: i64 = form_data.get("dormant_warn_days")
-                .and_then(|v| v.first())
-                .and_then(|v| v.parse().ok()).unwrap_or(14);
-            let warn_days = warn_days.clamp(0, (dormant_days - 1).max(0));
-            updates.push(("dormant_tenant_days", dormant_days.to_string()));
-            updates.push(("dormant_warn_days",   warn_days.to_string()));
+            let num = |k: &str, dflt: i64| -> i64 {
+                form_data.get(k).and_then(|v| v.first())
+                    .and_then(|v| v.parse().ok()).unwrap_or(dflt)
+            };
+            let unverified = num("dormant_unverified_days", 0).clamp(0, 3650);
+            let unused     = num("dormant_unused_days", 0).clamp(0, 3650);
+            // Clamp the warning lead below the shorter active threshold so a
+            // warning can never be scheduled after the action it precedes.
+            let shortest = [unused].into_iter().filter(|d| *d > 0).min().unwrap_or(0);
+            let warn_days = num("dormant_warn_days", 14).clamp(0, (shortest - 1).max(0));
+            updates.push(("dormant_unverified_days", unverified.to_string()));
+            updates.push(("dormant_unused_days",     unused.to_string()));
+            updates.push(("dormant_warn_days",       warn_days.to_string()));
         }
     }
 
