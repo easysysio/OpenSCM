@@ -6,6 +6,10 @@ All notable changes to OpenSCM are documented here.
 
 ## [Unreleased]
 
+---
+
+## [0.7.14] - 2026-08-20
+
 ### Added
 - **SaaS: automatic cleanup of abandoned signups.** **Settings → SaaS → Dormant Organizations** adds two independent rules, both **off by default**:
   - **Unverified registrations** whose email address was never confirmed are **deleted** after a set number of days. Nothing can exist behind them — the account cannot be signed into until the address is verified — and they are not warned first, because the only address on file is the unverified one, usually a typo.
