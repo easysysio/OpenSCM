@@ -253,8 +253,11 @@
           </li>
           {% endif %}
 
-          {# SaaS-only sidebar entries: Policy Store, Support, Platform Admin. #}
-          {% if is_saas and is_editor %}
+          {# SaaS-only sidebar entries: Policy Store, Support, Platform Admin.
+             is_viewer, not is_editor: the store is a catalogue anyone in the
+             tenant may browse, and a superuser viewing a tenant read-only needs
+             to see it. Installing is still Editor-gated in the handler. #}
+          {% if is_saas and is_viewer %}
           <li class="nav-item">
             <a href="/store" class="nav-link">
               <i class="nav-icon fas fa-store"></i>

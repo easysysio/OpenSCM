@@ -6,6 +6,10 @@ All notable changes to OpenSCM are documented here.
 
 ## [Unreleased]
 
+### Fixed
+- **The Policy Store is now visible to Viewers, and therefore while viewing a tenant read-only.** Browsing the catalogue required the Editor role, so it was hidden both from ordinary Viewers and from a superuser using **View as tenant** — where "which policies does this customer have, and are any behind?" is one of the main questions that view exists to answer. The listing now requires only Viewer; **installing and updating still require Editor**, and the install buttons are hidden from anyone who cannot use them. Nothing new is exposed: the catalogue is already served publicly and unauthenticated, and which policies a tenant has installed is already on their policies page.
+
+
 ---
 
 ## [0.7.13] - 2026-08-20
