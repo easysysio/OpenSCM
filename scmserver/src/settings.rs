@@ -54,6 +54,11 @@ pub struct Settings {
     // "1" = email superusers when a new tenant self-registers, "0" = off.
     // Defaults to "1" to preserve the behaviour shipped in SaaS 0.4.3.
     pub notify_new_tenant: String,
+    /// Days with zero systems after which a tenant is auto-suspended.
+    /// "0" disables the sweep entirely. SaaS-only.
+    pub dormant_tenant_days: String,
+    /// How many days before that the tenant's admins are warned by email.
+    pub dormant_warn_days: String,
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -91,7 +96,7 @@ pub async fn settings(
     // SMTP settings + SaaS platform settings are global — read from default tenant
     let smtp_rows = sqlx::query(
         "SELECT skey, value FROM settings WHERE tenant_id = 'default'
-         AND skey IN ('smtp_host','smtp_port','smtp_username','smtp_password','smtp_from','smtp_tls','app_url','notify_new_tenant')",
+         AND skey IN ('smtp_host','smtp_port','smtp_username','smtp_password','smtp_from','smtp_tls','app_url','notify_new_tenant','dormant_tenant_days','dormant_warn_days')",
     )
     .fetch_all(&*pool)
     .await
@@ -131,6 +136,10 @@ pub async fn settings(
         smtp_tls:      map.get("smtp_tls").cloned().unwrap_or_else(|| "starttls".to_string()),
         app_url:       map.get("app_url").cloned().unwrap_or_default(),
         notify_new_tenant: map.get("notify_new_tenant").cloned().unwrap_or_else(|| "1".to_string()),
+        // Default 0: auto-suspension is opt-in. A sweep that silently disables
+        // accounts should never switch itself on during an upgrade.
+        dormant_tenant_days: map.get("dormant_tenant_days").cloned().unwrap_or_else(|| "0".to_string()),
+        dormant_warn_days:   map.get("dormant_warn_days").cloned().unwrap_or_else(|| "14".to_string()),
     };
 
     // Active signing key fingerprint and creation date for the Danger Zone card.
@@ -317,6 +326,21 @@ pub async fn settings_save(
         if crate::handlers::is_saas_mode() {
             let notify = if form_data.contains_key("notify_new_tenant") { "1" } else { "0" };
             updates.push(("notify_new_tenant", notify.to_string()));
+
+            // Dormant-tenant sweep. 0 disables it; anything else must be a
+            // sane number of days. The warning lead is clamped below the
+            // threshold so a warning cannot be scheduled after the suspension
+            // it is meant to precede.
+            let dormant_days: i64 = form_data.get("dormant_tenant_days")
+                .and_then(|v| v.first())
+                .and_then(|v| v.parse().ok()).unwrap_or(0);
+            let dormant_days = if (0..=3650).contains(&dormant_days) { dormant_days } else { 0 };
+            let warn_days: i64 = form_data.get("dormant_warn_days")
+                .and_then(|v| v.first())
+                .and_then(|v| v.parse().ok()).unwrap_or(14);
+            let warn_days = warn_days.clamp(0, (dormant_days - 1).max(0));
+            updates.push(("dormant_tenant_days", dormant_days.to_string()));
+            updates.push(("dormant_warn_days",   warn_days.to_string()));
         }
     }
 

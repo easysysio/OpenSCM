@@ -6,7 +6,13 @@ All notable changes to OpenSCM are documented here.
 
 ## [Unreleased]
 
+### Added
+- **SaaS: automatic suspension of organizations that never onboarded.** A signup that registers and never enrols a system otherwise sits in the tenant list forever. **Settings → SaaS → Dormant Organizations** sets the age at which such an account is suspended, and how many days beforehand its admins are emailed.
+
+  It **suspends, never deletes** — systems, policies, reports and history all survive, and a superuser can reactivate the organization from the tenant page. It is **off by default** (`0` days), because a sweep that disables customer accounts must not switch itself on during an upgrade. "Dormant" means *no system has ever been enrolled*, so a tenant that uses the product is never a candidate however quiet it is; `platform` and `default` are excluded outright. Warnings are sent once and only recorded as sent if the mail actually left, so an SMTP outage retries rather than silently skipping. Both the warning and the suspension are written to the tenant's audit log.
+
 ### Fixed
+- **Tenant suspension is now actually enforced.** Login checked that the organization *existed* but never looked at its status, so the admin **Suspend** button set a flag that nothing read — a suspended organization could still sign in and use the product normally. Suspended organizations are now refused at login.
 - **The Policy Store is now visible to Viewers, and therefore while viewing a tenant read-only.** Browsing the catalogue required the Editor role, so it was hidden both from ordinary Viewers and from a superuser using **View as tenant** — where "which policies does this customer have, and are any behind?" is one of the main questions that view exists to answer. The listing now requires only Viewer; **installing and updating still require Editor**, and the install buttons are hidden from anyone who cannot use them. Nothing new is exposed: the catalogue is already served publicly and unauthenticated, and which policies a tenant has installed is already on their policies page.
 
 

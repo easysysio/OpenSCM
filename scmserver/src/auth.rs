@@ -176,17 +176,31 @@ pub async fn login_submit(
                 .trim_matches('-')
                 .to_string();
 
-            let exists: i64 = sqlx::query_scalar(
-                "SELECT COUNT(*) FROM tenants WHERE id = ?",
+            // Read the status too, not just existence. Suspension previously set
+            // tenants.status and nothing ever read it, so a suspended tenant
+            // could still log in and use the product normally — the admin
+            // Suspend button did nothing. Dormant-account suspension depends on
+            // this actually being enforced.
+            let row: Option<(i64, String)> = sqlx::query_as(
+                "SELECT COUNT(*), COALESCE(MAX(status), 'active') FROM tenants WHERE id = ?",
             )
             .bind(&tid)
-            .fetch_one(&pool)
+            .fetch_optional(&pool)
             .await
-            .unwrap_or(0);
+            .ok()
+            .flatten();
+
+            let (exists, status) = row.unwrap_or((0, "active".to_string()));
 
             if exists == 0 {
                 warn!("Login attempt for unknown organization: '{}'", org);
                 return (jar, Redirect::to("/login?error_message=Organization+not+found."));
+            }
+
+            if status == "suspended" {
+                warn!("Login attempt for suspended organization: '{}'", org);
+                return (jar, Redirect::to(
+                    "/login?error_message=This+organization+is+suspended.+Please+contact+support."));
             }
 
             Some(tid)
