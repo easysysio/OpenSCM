@@ -62,6 +62,7 @@ semver = "1.0"
 regex = "1.10"
 ipnet = "2.9"
 ldap3 = { version = "0.12", default-features = false, features = ["sync", "tls-rustls-ring"] }
+printpdf = { version = "0.12", default-features = false, features = ["jpeg", "text_layout"] }
 
 [target.'cfg(windows)'.dependencies]
 winreg = "0.52"

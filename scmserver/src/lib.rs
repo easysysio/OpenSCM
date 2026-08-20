@@ -22,6 +22,7 @@ pub mod auto_groups;
 pub mod auto_groups_admin;
 pub mod enrollment;
 pub mod tests;
+pub mod pdf;
 pub mod policies;
 pub mod reports;
 pub mod users;

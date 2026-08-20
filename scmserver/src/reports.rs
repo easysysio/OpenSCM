@@ -20,6 +20,7 @@ use serde_json;
 use urlencoding;
 use genpdf::{fonts, elements, style, Element, Margins};
 
+use crate::pdf::{status_badge, Align, Cell, Doc, Style, Table, LOGO_WIDTH_MM};
 use crate::auth::{self};
 use crate::handlers::{render_template, normalize_status, parse_form_data, is_system_passed};
 use crate::models::{
@@ -1618,51 +1619,33 @@ pub fn build_system_report_pdf(data: &SystemReportData, subtitle: &str) -> Resul
     const FONT_BOLD_ITALIC: &[u8] = include_bytes!("../static/dist/fonts/LiberationSans-BoldItalic.ttf");
     const LOGO_BYTES:       &[u8] = include_bytes!("../static/dist/img/Logo_report.jpg");
 
-    let font_family = match (
-        fonts::FontData::new(FONT_REGULAR.to_vec(), None),
-        fonts::FontData::new(FONT_BOLD.to_vec(), None),
-        fonts::FontData::new(FONT_ITALIC.to_vec(), None),
-        fonts::FontData::new(FONT_BOLD_ITALIC.to_vec(), None),
-    ) {
-        (Ok(regular), Ok(bold), Ok(italic), Ok(bold_italic)) =>
-            fonts::FontFamily { regular, bold, italic, bold_italic },
-        _ => return Err(()),
-    };
-
-    let mut doc = genpdf::Document::new(font_family);
-    doc.set_title(format!("OpenSCM System Report - {}", data.system_name));
-    let mut decorator = genpdf::SimplePageDecorator::new();
-    decorator.set_margins(15);
-    doc.set_page_decorator(decorator);
+    let mut doc = Doc::new(
+        &format!("OpenSCM System Report - {}", data.system_name),
+        FONT_REGULAR, FONT_BOLD, FONT_ITALIC, FONT_BOLD_ITALIC,
+    )?;
 
     // Title
-    let mut title = elements::Paragraph::new("OpenSCM System Compliance Report");
-    title.set_alignment(genpdf::Alignment::Center);
-    doc.push(title.styled(style::Style::new().with_font_size(28).bold()
-        .with_color(style::Color::Rgb(0, 0, 128))));
-    doc.push(elements::Break::new(1.0));
+    doc.text(
+        "OpenSCM System Compliance Report",
+        Style::new().size(28.0).bold().color(0, 0, 128).align(Align::Center),
+    );
+    doc.space(1.0);
+    doc.text(
+        subtitle,
+        Style::new().size(10.0).color(100, 100, 100).align(Align::Center),
+    );
+    doc.space(0.5);
 
-    let mut sub = elements::Paragraph::new(subtitle);
-    sub.set_alignment(genpdf::Alignment::Center);
-    doc.push(sub.styled(style::Style::new().with_font_size(10)
-        .with_color(style::Color::Rgb(100, 100, 100))));
-    doc.push(elements::Break::new(0.5));
-
-    let cursor = std::io::Cursor::new(LOGO_BYTES);
-    if let Ok(mut logo) = elements::Image::from_reader(cursor) {
-        logo.set_dpi(40.0);
-        logo.set_alignment(genpdf::Alignment::Center);
-        doc.push(logo);
-    }
-    doc.push(elements::Break::new(1.0));
+    // The 250px logo at genpdf's 40 DPI worked out to 158.75mm; kept identical
+    // so the port does not change page 1's composition.
+    doc.image_centered(LOGO_BYTES, LOGO_WIDTH_MM);
+    doc.space(1.0);
 
     // System details table
-    doc.push(elements::Text::new("System Details")
-        .styled(style::Style::new().bold().with_font_size(13)));
-    doc.push(elements::Break::new(0.5));
+    doc.text("System Details", Style::new().size(13.0).bold());
+    doc.space(0.5);
 
-    let mut details = elements::TableLayout::new(vec![1, 3]);
-    details.set_cell_decorator(elements::FrameCellDecorator::new(true, true, true));
+    let mut details = Table::new(vec![1, 3]);
     for (label, value) in &[
         ("System Name",  data.system_name.as_str()),
         ("OS",           data.os.as_str()),
@@ -1670,9 +1653,9 @@ pub fn build_system_report_pdf(data: &SystemReportData, subtitle: &str) -> Resul
         ("IP Address",   data.ip.as_deref().unwrap_or("—")),
         ("Last Seen",    data.last_seen.as_deref().unwrap_or("—")),
     ] {
-        let _ = details.push_row(vec![
-            cell(elements::Text::new(*label).styled(style::Style::new().bold())),
-            cell(elements::Paragraph::new(value.to_string())),
+        details.row(vec![
+            Cell::new(*label, Style::new().bold()),
+            Cell::new(*value, Style::new()),
         ]);
     }
     let score_text = if data.compliance_score < 0.0 {
@@ -1681,81 +1664,73 @@ pub fn build_system_report_pdf(data: &SystemReportData, subtitle: &str) -> Resul
         format!("{:.0}%  ({} pass / {} fail / {} na)",
             data.compliance_score, data.total_pass, data.total_fail, data.total_na)
     };
-    let _ = details.push_row(vec![
-        cell(elements::Text::new("Compliance Score").styled(style::Style::new().bold())),
-        cell(elements::Paragraph::new(score_text)),
+    details.row(vec![
+        Cell::new("Compliance Score", Style::new().bold()),
+        Cell::new(score_text, Style::new()),
     ]);
-    doc.push(details);
-    doc.push(elements::PageBreak::new());
+    doc.table(&details);
+    doc.page_break();
 
     // Per-policy sections
     for policy in &data.policy_groups {
         let exempt = policy.pass_count == 0 && policy.fail_count == 0;
         let verdict = if exempt { "NOT APPLICABLE" } else if policy.is_passed { "COMPLIANT" } else { "NON-COMPLIANT" };
         let verdict_color = if exempt {
-            style::Color::Rgb(100, 100, 100)
+            (100, 100, 100)
         } else if policy.is_passed {
-            style::Color::Rgb(0, 128, 0)
+            (0, 128, 0)
         } else {
-            style::Color::Rgb(200, 0, 0)
+            (200, 0, 0)
         };
 
-        doc.push(elements::Text::new(format!("{} — v{}", policy.policy_name, policy.policy_version))
-            .styled(style::Style::new().bold().with_font_size(13)));
+        doc.text(
+            &format!("{} — v{}", policy.policy_name, policy.policy_version),
+            Style::new().size(13.0).bold(),
+        );
         if let Some(desc) = &policy.policy_description {
             if !desc.is_empty() {
-                doc.push(elements::Break::new(0.2));
-                doc.push(elements::Paragraph::new(desc.as_str())
-                    .styled(style::Style::new().with_font_size(9)
-                        .with_color(style::Color::Rgb(100, 100, 100))));
+                doc.space(0.2);
+                doc.text(desc, Style::new().size(9.0).color(100, 100, 100));
             }
         }
-        doc.push(elements::Break::new(0.3));
-        doc.push(elements::Text::new(format!("Verdict: {}", verdict))
-            .styled(style::Style::new().bold().with_color(verdict_color)));
-        doc.push(elements::Break::new(0.2));
-        doc.push(elements::Paragraph::new(format!(
-            "Passed: {}    Failed: {}    Not Applicable: {}    Excluded: {}",
-            policy.pass_count, policy.fail_count, policy.na_count, policy.excluded_count
-        )).styled(style::Style::new().with_font_size(9).with_color(style::Color::Rgb(80, 80, 80))));
-        doc.push(elements::Break::new(0.5));
+        doc.space(0.3);
+        doc.text(
+            &format!("Verdict: {}", verdict),
+            Style::new().bold().color(verdict_color.0, verdict_color.1, verdict_color.2),
+        );
+        doc.space(0.2);
+        doc.text(
+            &format!(
+                "Passed: {}    Failed: {}    Not Applicable: {}    Excluded: {}",
+                policy.pass_count, policy.fail_count, policy.na_count, policy.excluded_count
+            ),
+            Style::new().size(9.0).color(80, 80, 80),
+        );
+        doc.space(0.5);
 
-        let mut rules_table = elements::TableLayout::new(vec![5, 1]);
-        rules_table.set_cell_decorator(elements::FrameCellDecorator::new(true, true, true));
-        let _ = rules_table.push_row(vec![
-            cell(elements::Text::new("Security Requirement").styled(style::Style::new().bold())),
-            cell(elements::Text::new("Status").styled(style::Style::new().bold())),
+        let mut rules = Table::new(vec![5, 1]).header(vec![
+            Cell::new("Security Requirement", Style::new().bold()),
+            Cell::new("Status", Style::new().bold()),
         ]);
         for res in &policy.results {
-            let (status_text, color) = if res.is_excluded {
-                ("EXCLUDED", style::Color::Rgb(100, 100, 100))
-            } else {
-                match res.status.as_str() {
-                    "PASS" => ("PASS", style::Color::Rgb(0, 128, 0)),
-                    "FAIL" => ("FAIL", style::Color::Rgb(200, 0, 0)),
-                    "NA"   => ("NA",   style::Color::Rgb(100, 100, 100)),
-                    _      => ("—",    style::Color::Rgb(150, 150, 150)),
-                }
-            };
-            let _ = rules_table.push_row(vec![
-                cell(elements::Paragraph::new(&res.test_name)),
-                cell(elements::Text::new(status_text)
-                    .styled(style::Style::new().with_color(color).bold())),
+            let (status_text, color) = status_badge(&res.status, res.is_excluded);
+            rules.row(vec![
+                Cell::new(res.test_name.clone(), Style::new()),
+                Cell::new(status_text, Style::new().bold().color(color.0, color.1, color.2)),
             ]);
         }
-        doc.push(rules_table);
-        doc.push(elements::PageBreak::new());
+        doc.table(&rules);
+        doc.page_break();
     }
 
-    doc.push(elements::Break::new(2.0));
-    doc.push(elements::Paragraph::new(
+    doc.space(2.0);
+    doc.text(
         "Note: This report contains confidential information about your infrastructure \
          and should be treated as such. Unauthorized distribution is strictly prohibited.",
-    ).styled(style::Style::new().with_font_size(10).with_color(style::Color::Rgb(100, 100, 100))));
+        Style::new().size(10.0).color(100, 100, 100),
+    );
 
-    let mut buffer = Vec::new();
-    doc.render(&mut buffer).map_err(|_| ())?;
-    Ok(buffer)
+    Ok(doc.finish())
 }
 
 
