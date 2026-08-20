@@ -6,6 +6,14 @@ All notable changes to OpenSCM are documented here.
 
 ## [Unreleased]
 
+### Added
+- **SaaS: superusers can view a tenant's data read-only.** A **View as tenant** button on the tenant admin page switches the session to that tenant, so every existing page — systems, policies, tests, reports, compliance trends — shows what the customer sees. Support work on a multi-tenant product is otherwise guesswork.
+
+  The access is deliberately narrow: **read-only**, enforced twice over. The session role is forced to `viewer` on every request rather than trusted from the cookie, so the ordinary permission checks reject anything privileged; and a middleware independently rejects every non-GET request while impersonating, so a mutating GET route — or a handler added later that forgets its permission check — still cannot write into a customer's tenant. Nesting is refused, the session expires after an hour, and a red banner naming both tenants sits on every page.
+
+  Entering and leaving are recorded in **both** audit logs, attributed to the real operator — so a customer can see in their own log that someone looked.
+
+
 ---
 
 ## [0.7.12] - 2026-08-19

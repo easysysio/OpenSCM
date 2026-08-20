@@ -149,6 +149,19 @@ pub async fn render_template(
         context.insert("tenant_id", &session.tenant_id);
         context.insert("role", &session.role);
 
+        // Impersonation banner state. Rendered by base.html on every page so a
+        // superuser cannot lose track of whose data they are looking at — that
+        // confusion is the main way read-only support access turns into an
+        // incident.
+        match &session.impersonating {
+            Some(imp) => {
+                context.insert("impersonating", &true);
+                context.insert("impersonating_tenant", &session.tenant_id);
+                context.insert("impersonating_real_tenant", &imp.real_tenant_id);
+            }
+            None => { context.insert("impersonating", &false); }
+        }
+
         context.insert("is_superuser", &(role_enum >= UserRole::Superuser));
         context.insert("is_admin",  &(role_enum >= UserRole::Admin));
         context.insert("is_editor", &(role_enum >= UserRole::Editor));
@@ -157,6 +170,7 @@ pub async fn render_template(
     } else {
         context.insert("username", "Guest");
         context.insert("role", "Guest");
+        context.insert("impersonating", &false);
         context.insert("is_superuser", &false);
         context.insert("is_admin",  &false);
         context.insert("is_editor", &false);

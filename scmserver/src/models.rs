@@ -663,8 +663,25 @@ pub struct Report {
 pub struct AuthSession {
     pub username: String,
     pub userid: i32,
+    /// The tenant every query in this request scopes to. While a superuser is
+    /// impersonating, this is the TARGET tenant — that is what makes every
+    /// existing page work unchanged.
     pub tenant_id: String,
+    /// The effective role. While impersonating this is forced to "viewer", so
+    /// the ordinary authorize() checks reject any privileged action without
+    /// each handler needing to know impersonation exists.
     pub role: String,
+    /// Present only while a superuser is viewing another tenant. Keeps the
+    /// real identity so audit entries attribute actions to the human rather
+    /// than to the tenant being viewed, and so we know where to return to.
+    pub impersonating: Option<Impersonation>,
+}
+
+/// Who the operator really is while impersonating another tenant.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Impersonation {
+    pub real_tenant_id: String,
+    pub real_role: String,
 }
 
 // One row from the audit_log table — used by the /admin/audit-log viewer.

@@ -77,11 +77,33 @@ where
                         };
                        
 
+                        // Impersonation (SaaS support tooling): when present,
+                        // tenant_id above is already the TARGET tenant, so every
+                        // query scopes there with no handler changes. The role is
+                        // forced to "viewer" rather than trusted from the cookie,
+                        // so a stale or tampered cookie cannot retain privileges
+                        // inside someone else's tenant.
+                        let impersonating = session_json
+                            .get("impersonating")
+                            .and_then(|v| {
+                                Some(crate::models::Impersonation {
+                                    real_tenant_id: v.get("real_tenant_id")?.as_str()?.to_string(),
+                                    real_role:      v.get("real_role")?.as_str()?.to_string(),
+                                })
+                            });
+
+                        let effective_role = if impersonating.is_some() {
+                            "viewer".to_string()
+                        } else {
+                            role.to_string()
+                        };
+
                         return Ok(AuthSession {
                             username: username.to_string(),
                             userid, 
                             tenant_id: tenant_id.to_string(),
-                            role: role.to_string(),
+                            role: effective_role,
+                            impersonating,
                         });
                     }
                 }
@@ -256,6 +278,7 @@ pub async fn login_submit(
                 "userid": userid.to_string(),
                 "tenant_id": tenant_id,
                 "role": role
+                // no "impersonating" key: a fresh login is always the real tenant
             }).to_string();
 
             let mut cookie = Cookie::new("session", session_data);

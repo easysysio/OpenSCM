@@ -26,9 +26,39 @@
   {% block form_libs_css %}{% endblock %}
 
   {% block head %}{% endblock %}
+  <style>
+    .impersonation-bar {
+      position: fixed; top: 0; left: 0; right: 0; z-index: 2000;
+      background: #c0392b; color: #fff; text-align: center;
+      padding: 6px 12px; font-size: .875rem;
+      box-shadow: 0 2px 6px rgba(0,0,0,.3);
+    }
+    /* Shift the whole chrome down by the bar height rather than letting it
+       overlay the navbar and sidebar. */
+    body.impersonating .main-header,
+    body.impersonating .main-sidebar { margin-top: 34px; }
+    body.impersonating .content-wrapper { margin-top: 34px; }
+  </style>
 </head>
 
-<body class="hold-transition sidebar-mini layout-fixed">
+<body class="hold-transition sidebar-mini layout-fixed{% if impersonating %} impersonating{% endif %}">
+
+{# Impersonation banner. Deliberately loud and fixed to the top of every page:
+   the failure mode this guards against is an operator forgetting whose data
+   they are looking at and acting on it. Read-only is enforced server-side —
+   this exists so the state is never a surprise. #}
+{% if impersonating %}
+<div class="impersonation-bar">
+  <i class="fas fa-eye mr-2"></i>
+  Viewing tenant <strong>{{ impersonating_tenant }}</strong> as a superuser —
+  <strong>read-only</strong>. Your account belongs to <strong>{{ impersonating_real_tenant }}</strong>.
+  <form method="POST" action="/admin/impersonate/exit" style="display:inline">
+    <button type="submit" class="btn btn-xs btn-light ml-2">
+      <i class="fas fa-sign-out-alt mr-1"></i>Exit
+    </button>
+  </form>
+</div>
+{% endif %}
 <div class="wrapper">
 
   <nav class="main-header navbar navbar-expand navbar-white navbar-light">
