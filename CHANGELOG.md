@@ -6,6 +6,10 @@ All notable changes to OpenSCM are documented here.
 
 ## [Unreleased]
 
+---
+
+## [0.7.13] - 2026-08-20
+
 ### Added
 - **SaaS: superusers can view a tenant's data read-only.** A **View as tenant** button on the tenant admin page switches the session to that tenant, so every existing page — systems, policies, tests, reports, compliance trends — shows what the customer sees. Support work on a multi-tenant product is otherwise guesswork.
 
