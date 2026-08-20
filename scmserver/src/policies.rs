@@ -1533,8 +1533,10 @@ async fn fetch_live_policy_report_data(
 // Helper: build_live_policy_pdf
 // Renders a live-policy compliance report into a PDF byte buffer. Shared by
 // the download and the email handler so the two flows can't drift in layout.
+// Public so `tests/pdf_render.rs` can render golden fixtures for visual
+// before/after comparison across renderer changes.
 // ─────────────────────────────────────────────────────────────────────────────
-fn build_live_policy_pdf(report_data: &ReportData) -> Result<Vec<u8>, ()> {
+pub fn build_live_policy_pdf(report_data: &ReportData) -> Result<Vec<u8>, ()> {
     const FONT_REGULAR: &[u8] = include_bytes!("../static/dist/fonts/LiberationSans-Regular.ttf");
     const FONT_BOLD: &[u8] = include_bytes!("../static/dist/fonts/LiberationSans-Bold.ttf");
     const FONT_ITALIC: &[u8] = include_bytes!("../static/dist/fonts/LiberationSans-Italic.ttf");

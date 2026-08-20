@@ -785,8 +785,10 @@ async fn fetch_archive_policy_report(
 // Renders a saved-policy compliance report into a PDF byte buffer. The
 // download and email handlers both call into this so there is one canonical
 // place where the PDF layout lives.
+// Public so `tests/pdf_render.rs` can render golden fixtures for visual
+// before/after comparison across renderer changes.
 // ─────────────────────────────────────────────────────────────────────────────
-fn build_archive_policy_pdf(
+pub fn build_archive_policy_pdf(
     report: &Report,
     system_reports: &[SystemReport],
     tests_metadata: &[TestMeta],
@@ -1606,9 +1608,10 @@ pub async fn system_reports_bulk_delete(
 // ─────────────────────────────────────────────────────────────────────────────
 // Helper: build_system_report_pdf
 // Builds a PDF byte buffer for a system compliance report.
-// Used by both the live-download and saved-snapshot download handlers.
+// Public so `tests/pdf_render.rs` can render golden fixtures for visual
+// before/after comparison across renderer changes.
 // ─────────────────────────────────────────────────────────────────────────────
-fn build_system_report_pdf(data: &SystemReportData, subtitle: &str) -> Result<Vec<u8>, ()> {
+pub fn build_system_report_pdf(data: &SystemReportData, subtitle: &str) -> Result<Vec<u8>, ()> {
     const FONT_REGULAR:     &[u8] = include_bytes!("../static/dist/fonts/LiberationSans-Regular.ttf");
     const FONT_BOLD:        &[u8] = include_bytes!("../static/dist/fonts/LiberationSans-Bold.ttf");
     const FONT_ITALIC:      &[u8] = include_bytes!("../static/dist/fonts/LiberationSans-Italic.ttf");
