@@ -6,6 +6,10 @@ All notable changes to OpenSCM are documented here.
 
 ## [Unreleased]
 
+---
+
+## [0.8.0] - 2026-08-21
+
 ### Added
 - **Guided first run.** A new install shows an empty dashboard and nothing on screen says that the order is *register a system → write a test → build a policy → run it*. First-time users now get a short walkthrough on the dashboard naming those four steps, each with a diagram of what it means and a link straight to the page that does it. The agent install command comes pre-filled with your server URL (set **app_url** under Settings for this), and the whole thing is dismissible with **Don't show this again**.
 
