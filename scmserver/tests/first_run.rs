@@ -137,3 +137,56 @@ fn tour_template_is_registered() {
     let tera = scmserver::init_tera().expect("templates must parse");
     assert!(tera.get_template_names().any(|n| n == "partials/tour.html"));
 }
+
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Helper: render_tour
+// Renders the tour partial for one edition.
+// ─────────────────────────────────────────────────────────────────────────────
+fn render_tour(is_saas: bool) -> String {
+    let tera = scmserver::init_tera().expect("templates must parse");
+    let mut ctx = tera::Context::new();
+    ctx.insert("is_saas", &is_saas);
+    ctx.insert(
+        "tour",
+        &serde_json::json!({ "server_url": "https://scm.example.com", "screens": [1, 2, 3, 4, 5] }),
+    );
+    tera.render("partials/tour.html", &ctx).expect("tour renders")
+}
+
+// The tour ships inside the CE binary but is also served by SaaS, so it is the
+// one template that can easily promise a feature the running edition does not
+// have. The Policy Store is SaaS-only — /store is registered in the SaaS
+// binary, not CE — and the tour recommended it unconditionally, sending every
+// CE user to a 404 from the first suggestion on the "write a test" screen.
+#[test]
+fn ce_tour_links_only_to_routes_ce_actually_has() {
+    let ce = render_tour(false);
+    assert!(
+        !ce.contains("/store"),
+        "the CE tour must not link to the SaaS-only Policy Store"
+    );
+
+    // Anything the tour offers must be a real CE route. A new link that is not
+    // in this list is either a typo or another SaaS-only feature leaking in.
+    const CE_ROUTES: [&str; 4] = ["/systems", "/tests", "/policies", "/tour/reopen"];
+    let lib = include_str!("../src/lib.rs");
+    for href in ce.split("href=\"/").skip(1) {
+        let path = format!("/{}", href.split('"').next().unwrap_or(""));
+        assert!(
+            CE_ROUTES.contains(&path.as_str()),
+            "tour links to {path}, which is not in the vetted CE route list"
+        );
+        assert!(
+            lib.contains(&format!("\"{path}\"")),
+            "tour links to {path}, which is not registered in CE's lib.rs"
+        );
+    }
+}
+
+// The SaaS build should still get the Policy Store recommendation, which is a
+// genuinely better first step there than authoring a test by hand.
+#[test]
+fn saas_tour_still_recommends_the_policy_store() {
+    assert!(render_tour(true).contains("/store"));
+}

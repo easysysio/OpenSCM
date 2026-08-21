@@ -150,6 +150,12 @@ organization = "default"</pre>
             <text class="tx na" x="527" y="112" text-anchor="middle">N/A</text>
             <text class="tx-sm" x="527" y="140" text-anchor="middle">one verdict, per system</text>
           </svg>
+          {# The Policy Store is a SaaS-only feature — /store is registered in
+             the SaaS binary, not in CE — so both the pitch and the button are
+             gated exactly as the sidebar link in base.html is. Recommending it
+             unconditionally sent every CE user to a 404, from the first thing
+             this screen suggests. #}
+          {% if is_saas %}
           <p class="text-muted">
             The quickest start is the <strong>Policy Store</strong>, which carries
             ready-made CIS-style content you can install and run as-is.
@@ -160,6 +166,15 @@ organization = "default"</pre>
           <a href="/tests" class="btn btn-sm btn-outline-secondary">
             <i class="fa fa-vial fa-fw"></i> Create a test
           </a>
+          {% else %}
+          <p class="text-muted">
+            Build one test first and run it end to end &mdash; it is the quickest
+            way to see the whole loop work before writing a set of them.
+          </p>
+          <a href="/tests" class="btn btn-sm btn-outline-primary">
+            <i class="fa fa-vial fa-fw"></i> Create a test
+          </a>
+          {% endif %}
         </div>
         {% endif %}
 
