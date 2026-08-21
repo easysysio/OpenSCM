@@ -10,9 +10,9 @@ use tera::Context;
 fn render_tour_preview() {
     let tera = scmserver::init_tera().expect("templates parse");
 
-    for (name, server_url, has_token, screens) in [
-        ("tour_admin.html", "https://scm.example.com", true, vec![1u8, 2, 3, 4, 5]),
-        ("tour_runner.html", "", false, vec![1u8, 4, 5]),
+    for (name, server_url, screens) in [
+        ("tour_admin.html", "https://scm.example.com", vec![1u8, 2, 3, 4, 5]),
+        ("tour_runner.html", "", vec![1u8, 4, 5]),
     ] {
         let mut ctx = Context::new();
         ctx.insert("show_tour", &true);
@@ -20,7 +20,6 @@ fn render_tour_preview() {
             "tour",
             &serde_json::json!({
                 "server_url": server_url,
-                "has_token": has_token,
                 "screens": screens,
             }),
         );

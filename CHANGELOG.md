@@ -11,7 +11,7 @@ All notable changes to OpenSCM are documented here.
 ## [0.8.0] - 2026-08-21
 
 ### Added
-- **Guided first run.** A new install shows an empty dashboard and nothing on screen says that the order is *register a system → write a test → build a policy → run it*. First-time users now get a short walkthrough on the dashboard naming those four steps, each with a diagram of what it means and a link straight to the page that does it. The agent install command comes pre-filled with your server URL (set **app_url** under Settings for this), and the whole thing is dismissible with **Don't show this again**.
+- **Guided first run.** A new install shows an empty dashboard and nothing on screen says that the order is *register a system → write a test → build a policy → run it*. First-time users now get a short walkthrough on the dashboard naming those four steps, each with a diagram of what it means and a link straight to the page that does it. The agent step shows the real install and configuration commands with your server URL filled in (set **app_url** under Settings for this) and covers approving the system afterwards, and the whole thing is dismissible with **Don't show this again**.
 
   It appears **only on the dashboard** — never over a page you are working on — and only for roles that can act on it: Viewers do not see it at all, and Runners get the three screens that concern them rather than authoring steps they would be denied at. Closing with Esc or the X does *not* dismiss it permanently, so an accidental close on step 2 does not bury something unread. **Quick start** in the user menu reopens it at any time.
 

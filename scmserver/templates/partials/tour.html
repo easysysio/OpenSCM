@@ -77,44 +77,49 @@
         <div class="tour-pane" data-pane="2">
           <h4>1 &mdash; Register a system</h4>
           <p class="text-muted">
-            Install the agent on a machine. It enrols itself, reports its
-            inventory, and stays connected.
+            Install the agent, point it at this server, then approve it under
+            <strong>Systems</strong>.
           </p>
           <svg class="tour-fig" viewBox="0 0 720 104" role="img"
-               aria-label="The agent on your machine enrols with the OpenSCM server, which then lists it under Systems">
+               aria-label="The agent registers with the server, arrives as pending, and becomes active once you approve it">
             <rect class="bx" x="1" y="26" width="196" height="54" rx="6"/>
             <text class="tx"    x="99" y="49" text-anchor="middle">Your machine</text>
             <text class="tx-sm" x="99" y="67" text-anchor="middle">scmclient agent</text>
             <line class="ln" x1="200" y1="53" x2="246" y2="53" marker-end="url(#tourArrow)"/>
-            <text class="tx-sm" x="223" y="42" text-anchor="middle">enrols</text>
-            <rect class="bx-hi" x="250" y="26" width="196" height="54" rx="6"/>
-            <text class="tx"    x="348" y="49" text-anchor="middle">OpenSCM server</text>
-            <text class="tx-sm" x="348" y="67" text-anchor="middle">verifies the token</text>
+            <text class="tx-sm" x="223" y="42" text-anchor="middle">registers</text>
+            <rect class="bx" x="250" y="26" width="196" height="54" rx="6"/>
+            <text class="tx"    x="348" y="49" text-anchor="middle">Pending</text>
+            <text class="tx-sm" x="348" y="67" text-anchor="middle">awaiting approval</text>
             <line class="ln" x1="449" y1="53" x2="495" y2="53" marker-end="url(#tourArrow)"/>
-            <text class="tx-sm" x="472" y="42" text-anchor="middle">reports</text>
-            <rect class="bx" x="499" y="26" width="220" height="54" rx="6"/>
-            <text class="tx"    x="609" y="49" text-anchor="middle">Systems</text>
-            <text class="tx-sm" x="609" y="67" text-anchor="middle">inventory, OS, last seen</text>
+            <text class="tx-sm" x="472" y="42" text-anchor="middle">approve</text>
+            <rect class="bx-hi" x="499" y="26" width="220" height="54" rx="6"/>
+            <text class="tx"    x="609" y="49" text-anchor="middle">Active</text>
+            <text class="tx-sm" x="609" y="67" text-anchor="middle">receiving compliance tests</text>
           </svg>
-          <pre id="tourInstall" class="p-2" style="background:#f4f6f9; border:1px solid #dee2e6; white-space:pre-wrap;">curl -fsSL https://repo.openscm.io/install.sh | sh -s -- \
-    --server {% if tour.server_url %}{{ tour.server_url }}{% else %}https://your-openscm-server{% endif %} \
-    --token  &lt;enrolment-token&gt;</pre>
+          <p class="text-muted small mb-1">
+            <strong>Install</strong> on Debian / Ubuntu &mdash; RHEL, Arch, FreeBSD,
+            macOS and Windows are in the installation guide:
+          </p>
+          <pre class="p-2 mb-2" style="background:#f4f6f9; border:1px solid #dee2e6; white-space:pre-wrap; font-size:11px;">curl -sS https://repo.openscm.io/openscm.gpg | sudo gpg --dearmor -o /usr/share/keyrings/openscm.gpg
+echo "deb [signed-by=/usr/share/keyrings/openscm.gpg] https://repo.openscm.io/stable/debian stable main" | sudo tee /etc/apt/sources.list.d/openscm.list
+sudo apt update &amp;&amp; sudo apt install scmclient</pre>
+          <p class="text-muted small mb-1">
+            <strong>Point it here</strong> &mdash; edit <code>/etc/openscm/scmclient.config</code>,
+            then <code>sudo systemctl restart scmclient</code>:
+          </p>
+          <pre class="p-2 mb-2" style="background:#f4f6f9; border:1px solid #dee2e6; white-space:pre-wrap; font-size:11px;">[server]
+url = "{% if tour.server_url %}{{ tour.server_url }}{% else %}https://your-openscm-server{% endif %}"
+organization = "default"</pre>
           <p class="text-muted small">
-            {% if tour.has_token %}
-              Replace <code>&lt;enrolment-token&gt;</code> with one of your enrolment
-              tokens. Tokens are shown only once, when they are created &mdash; if you
-              no longer have it, issue a new one.
-            {% else %}
-              You do not have an enrolment token yet. Create one first; the token
-              value is shown only once, at creation.
-            {% endif %}
+            The machine then shows up under <strong>Systems</strong> as pending.
+            Approve it and it starts receiving tests.
             {% if not tour.server_url %}
-              <br><strong>Set your public URL</strong> under Settings so this command
+              <br><strong>Set your public URL</strong> under Settings so this snippet
               is filled in for you.
             {% endif %}
           </p>
-          <a href="/enrollment" class="btn btn-sm btn-outline-primary">
-            <i class="fa fa-key fa-fw"></i> Manage enrolment tokens
+          <a href="/systems" class="btn btn-sm btn-outline-primary">
+            <i class="fa fa-server fa-fw"></i> Go to Systems
           </a>
         </div>
         {% endif %}

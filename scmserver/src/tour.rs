@@ -34,9 +34,6 @@ pub struct TourInfo {
     /// the operator has not set one, in which case the install snippet shows a
     /// placeholder rather than a wrong address.
     pub server_url: String,
-    /// True when the tenant already has at least one usable enrollment token,
-    /// which changes screen 2 from "create one" to "use one you already have".
-    pub has_token: bool,
     /// Which of the five screens to render, by number.
     pub screens: Vec<u8>,
 }
@@ -109,25 +106,7 @@ pub async fn tour_info(pool: &SqlitePool, auth: &AuthSession, force: bool) -> Op
     .unwrap_or(None)
     .unwrap_or_default();
 
-    // Only tokens that could actually enrol something count: disabled, expired
-    // and used-up tokens would make screen 2 lie.
-    let has_token: i64 = sqlx::query_scalar(
-        "SELECT COUNT(*) FROM enrollment_tokens
-         WHERE tenant_id = ?
-           AND enabled = 1
-           AND (expires_at IS NULL OR expires_at > CURRENT_TIMESTAMP)
-           AND (max_uses IS NULL OR use_count < max_uses)",
-    )
-    .bind(&auth.tenant_id)
-    .fetch_one(pool)
-    .await
-    .unwrap_or(0);
-
-    Some(TourInfo {
-        server_url,
-        has_token: has_token > 0,
-        screens,
-    })
+    Some(TourInfo { server_url, screens })
 }
 
 
