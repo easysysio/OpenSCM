@@ -10,6 +10,29 @@
    4.8 MB to ~290 KB, and a tour is not the place to spend that back. This is
    AdminLTE's existing Bootstrap modal plus a few dozen lines of vanilla JS.
    ─────────────────────────────────────────────────────────────────────────── #}
+<style>
+/* Shared vocabulary for the tour diagrams. Inline SVG rather than screenshots:
+   screenshots are binary weight in the embedded templates, go stale the moment
+   the UI moves, and cannot be captured at build time anyway. These stay sharp
+   at any zoom and cost nothing. */
+#tourModal .tour-fig { width: 100%; height: auto; margin: 0.75rem 0 1rem; }
+#tourModal .tour-fig .bx      { fill: #f4f6f9; stroke: #ced4da; }
+#tourModal .tour-fig .bx-hi   { fill: #e7f1ff; stroke: #9ec5fe; }
+#tourModal .tour-fig .tx      { font-family: inherit; font-size: 13px; fill: #495057; }
+#tourModal .tour-fig .tx-sm   { font-family: inherit; font-size: 11px; fill: #6c757d; }
+#tourModal .tour-fig .tx-mono { font-family: monospace;  font-size: 11px; fill: #495057; }
+#tourModal .tour-fig .ln      { stroke: #adb5bd; stroke-width: 2; fill: none; }
+#tourModal .tour-fig .pass    { fill: #28a745; font-weight: 600; }
+#tourModal .tour-fig .fail    { fill: #dc3545; font-weight: 600; }
+#tourModal .tour-fig .na      { fill: #6c757d; font-weight: 600; }
+</style>
+<svg width="0" height="0" style="position:absolute" aria-hidden="true" focusable="false">
+  <defs>
+    <marker id="tourArrow" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto">
+      <path d="M0,0 L8,4 L0,8 z" fill="#adb5bd"/>
+    </marker>
+  </defs>
+</svg>
 <div class="modal fade" id="tourModal" tabindex="-1" role="dialog"
      data-backdrop="static" data-keyboard="true" aria-labelledby="tourTitle">
   <div class="modal-dialog modal-lg" role="document">
@@ -32,13 +55,8 @@
             OpenSCM checks your machines against rules you define and scores how
             many pass. Four steps to your first compliance report.
           </p>
-          <svg viewBox="0 0 720 96" width="100%" height="96" role="img"
+          <svg class="tour-fig" viewBox="0 0 720 96" role="img"
                aria-label="Register a system, then write a test, then group into a policy, then run it">
-            <defs>
-              <marker id="tourArrow" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto">
-                <path d="M0,0 L8,4 L0,8 z" fill="#adb5bd"/>
-              </marker>
-            </defs>
             {% set steps = ["1  Register a system", "2  Write a test", "3  Build a policy", "4  Run it"] %}
             {% for label in steps %}
             <rect x="{{ loop.index0 * 182 }}" y="24" width="158" height="48" rx="6"
@@ -62,6 +80,22 @@
             Install the agent on a machine. It enrols itself, reports its
             inventory, and stays connected.
           </p>
+          <svg class="tour-fig" viewBox="0 0 720 104" role="img"
+               aria-label="The agent on your machine enrols with the OpenSCM server, which then lists it under Systems">
+            <rect class="bx" x="1" y="26" width="196" height="54" rx="6"/>
+            <text class="tx"    x="99" y="49" text-anchor="middle">Your machine</text>
+            <text class="tx-sm" x="99" y="67" text-anchor="middle">scmclient agent</text>
+            <line class="ln" x1="200" y1="53" x2="246" y2="53" marker-end="url(#tourArrow)"/>
+            <text class="tx-sm" x="223" y="42" text-anchor="middle">enrols</text>
+            <rect class="bx-hi" x="250" y="26" width="196" height="54" rx="6"/>
+            <text class="tx"    x="348" y="49" text-anchor="middle">OpenSCM server</text>
+            <text class="tx-sm" x="348" y="67" text-anchor="middle">verifies the token</text>
+            <line class="ln" x1="449" y1="53" x2="495" y2="53" marker-end="url(#tourArrow)"/>
+            <text class="tx-sm" x="472" y="42" text-anchor="middle">reports</text>
+            <rect class="bx" x="499" y="26" width="220" height="54" rx="6"/>
+            <text class="tx"    x="609" y="49" text-anchor="middle">Systems</text>
+            <text class="tx-sm" x="609" y="67" text-anchor="middle">inventory, OS, last seen</text>
+          </svg>
           <pre id="tourInstall" class="p-2" style="background:#f4f6f9; border:1px solid #dee2e6; white-space:pre-wrap;">curl -fsSL https://repo.openscm.io/install.sh | sh -s -- \
     --server {% if tour.server_url %}{{ tour.server_url }}{% else %}https://your-openscm-server{% endif %} \
     --token  &lt;enrolment-token&gt;</pre>
@@ -94,6 +128,23 @@
             service, a sysctl value, the output of a command. Each test has
             elements and conditions that decide PASS, FAIL or N/A.
           </p>
+          <svg class="tour-fig" viewBox="0 0 720 148" role="img"
+               aria-label="A test combines elements and conditions, and evaluates to PASS, FAIL or N slash A">
+            <rect class="bx" x="1" y="8" width="392" height="116" rx="6"/>
+            <text class="tx" x="16" y="30">One test</text>
+            <rect class="bx-hi" x="16" y="42" width="362" height="30" rx="4"/>
+            <text class="tx-mono" x="28" y="61">element   FILE  /etc/passwd</text>
+            <rect class="bx-hi" x="16" y="80" width="362" height="30" rx="4"/>
+            <text class="tx-mono" x="28" y="99">condition mode is 0644</text>
+            <line class="ln" x1="397" y1="66" x2="447" y2="66" marker-end="url(#tourArrow)"/>
+            <rect class="bx" x="452" y="10" width="150" height="30" rx="4"/>
+            <text class="tx pass" x="527" y="30" text-anchor="middle">PASS</text>
+            <rect class="bx" x="452" y="51" width="150" height="30" rx="4"/>
+            <text class="tx fail" x="527" y="71" text-anchor="middle">FAIL</text>
+            <rect class="bx" x="452" y="92" width="150" height="30" rx="4"/>
+            <text class="tx na" x="527" y="112" text-anchor="middle">N/A</text>
+            <text class="tx-sm" x="527" y="140" text-anchor="middle">one verdict, per system</text>
+          </svg>
           <p class="text-muted">
             The quickest start is the <strong>Policy Store</strong>, which carries
             ready-made CIS-style content you can install and run as-is.
@@ -115,6 +166,29 @@
             A <strong>policy</strong> is a set of tests applied to a set of systems
             or groups. The policy is what gets scored, scheduled and reported on.
           </p>
+          <svg class="tour-fig" viewBox="0 0 720 132" role="img"
+               aria-label="A policy joins a set of tests to a set of systems and groups, producing a score">
+            <text class="tx-sm" x="1" y="16">Tests</text>
+            <rect class="bx" x="1" y="24" width="150" height="26" rx="4"/>
+            <text class="tx-mono" x="76" y="42" text-anchor="middle">passwd perms</text>
+            <rect class="bx" x="1" y="56" width="150" height="26" rx="4"/>
+            <text class="tx-mono" x="76" y="74" text-anchor="middle">ssh root login</text>
+            <rect class="bx" x="1" y="88" width="150" height="26" rx="4"/>
+            <text class="tx-mono" x="76" y="106" text-anchor="middle">auditd running</text>
+            <path class="ln" d="M155,37 C190,37 190,69 224,69" marker-end="url(#tourArrow)"/>
+            <path class="ln" d="M155,69 L224,69" marker-end="url(#tourArrow)"/>
+            <path class="ln" d="M155,101 C190,101 190,69 224,69" marker-end="url(#tourArrow)"/>
+            <rect class="bx-hi" x="228" y="43" width="180" height="52" rx="6"/>
+            <text class="tx"    x="318" y="66" text-anchor="middle">Policy</text>
+            <text class="tx-sm" x="318" y="84" text-anchor="middle">scored + scheduled</text>
+            <path class="ln" d="M412,69 C446,69 446,37 480,37" marker-end="url(#tourArrow)"/>
+            <path class="ln" d="M412,69 C446,69 446,101 480,101" marker-end="url(#tourArrow)"/>
+            <text class="tx-sm" x="484" y="16">Applied to</text>
+            <rect class="bx" x="484" y="24" width="235" height="26" rx="4"/>
+            <text class="tx-mono" x="601" y="42" text-anchor="middle">group: production web</text>
+            <rect class="bx" x="484" y="88" width="235" height="26" rx="4"/>
+            <text class="tx-mono" x="601" y="106" text-anchor="middle">system: db-01</text>
+          </svg>
           <a href="/policies" class="btn btn-sm btn-outline-primary">
             <i class="fa fa-shield-alt fa-fw"></i> Go to Policies
           </a>
@@ -129,6 +203,26 @@
             Run the policy now, or put it on a schedule. Results land in the
             compliance report and build a trend over time.
           </p>
+          <svg class="tour-fig" viewBox="0 0 720 132" role="img"
+               aria-label="Each run records a score, building a compliance trend over time">
+            <line class="ln" x1="40" y1="12" x2="40" y2="104"/>
+            <line class="ln" x1="40" y1="104" x2="560" y2="104"/>
+            <text class="tx-sm" x="34" y="20" text-anchor="end">100%</text>
+            <text class="tx-sm" x="34" y="108" text-anchor="end">0%</text>
+            <polyline class="ln" style="stroke:#007bff"
+                      points="80,86 160,90 240,58 320,62 400,36 480,28 540,24"/>
+            <circle cx="80"  cy="86" r="3.5" fill="#007bff"/>
+            <circle cx="160" cy="90" r="3.5" fill="#007bff"/>
+            <circle cx="240" cy="58" r="3.5" fill="#007bff"/>
+            <circle cx="320" cy="62" r="3.5" fill="#007bff"/>
+            <circle cx="400" cy="36" r="3.5" fill="#007bff"/>
+            <circle cx="480" cy="28" r="3.5" fill="#007bff"/>
+            <circle cx="540" cy="24" r="3.5" fill="#007bff"/>
+            <text class="tx-sm" x="300" y="124" text-anchor="middle">every run adds a point</text>
+            <rect class="bx-hi" x="596" y="34" width="122" height="56" rx="6"/>
+            <text class="tx"    x="657" y="60" text-anchor="middle" style="font-size:20px">92%</text>
+            <text class="tx-sm" x="657" y="78" text-anchor="middle">today</text>
+          </svg>
           <div class="custom-control custom-checkbox mt-4">
             <input type="checkbox" class="custom-control-input" id="tourDontShow" checked>
             <label class="custom-control-label" for="tourDontShow">
