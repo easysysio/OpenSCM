@@ -125,6 +125,7 @@
           {% if is_admin %}
           <a href="/settings" class="dropdown-item"><i class="fa fa-cog fa-fw"></i> Settings</a>
           {% endif %}
+          <a href="/tour/reopen" class="dropdown-item"><i class="fa fa-compass fa-fw"></i> Quick start</a>
           <div class="dropdown-divider"></div>
           <a href="/logout" class="dropdown-item text-danger">
             <i class="fa fa-sign-out-alt fa-fw"></i> Logout
@@ -480,6 +481,9 @@
 </script>
 
 {% block scripts %}{% endblock %}
+
+{# Guided first-run tour. Only the dashboard handler ever sets show_tour. #}
+{% if show_tour %}{% include "partials/tour.html" %}{% endif %}
 
 <script>
   // Strip one-shot flash query params from the URL after render so a browser

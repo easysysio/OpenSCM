@@ -1,0 +1,197 @@
+{# ───────────────────────────────────────────────────────────────────────────
+   partials/tour.html — the guided first-run walkthrough.
+
+   Included from base.html under `{% if show_tour %}`, which the dashboard
+   handler is the only page to set. Screens are gated by `tour.screens`, a
+   server-side role decision (see tour.rs::screens_for) rather than a template
+   guess, so a Runner never sees an authoring step they'd be denied at.
+
+   Deliberately no JS library: the 0.7.13 asset work cut per-page payload from
+   4.8 MB to ~290 KB, and a tour is not the place to spend that back. This is
+   AdminLTE's existing Bootstrap modal plus a few dozen lines of vanilla JS.
+   ─────────────────────────────────────────────────────────────────────────── #}
+<div class="modal fade" id="tourModal" tabindex="-1" role="dialog"
+     data-backdrop="static" data-keyboard="true" aria-labelledby="tourTitle">
+  <div class="modal-dialog modal-lg" role="document">
+    <div class="modal-content">
+
+      <div class="modal-header">
+        <h5 class="modal-title" id="tourTitle">Getting started with OpenSCM</h5>
+        <button type="button" class="close" data-dismiss="modal" aria-label="Close">
+          <span aria-hidden="true">&times;</span>
+        </button>
+      </div>
+
+      <div class="modal-body" style="min-height: 340px;">
+
+        {% if 1 in tour.screens %}
+        {# ── Screen 1 — the shape of the whole workflow ─────────────────── #}
+        <div class="tour-pane" data-pane="1">
+          <h4>Welcome to OpenSCM.</h4>
+          <p class="text-muted">
+            OpenSCM checks your machines against rules you define and scores how
+            many pass. Four steps to your first compliance report.
+          </p>
+          <svg viewBox="0 0 720 96" width="100%" height="96" role="img"
+               aria-label="Register a system, then write a test, then group into a policy, then run it">
+            <defs>
+              <marker id="tourArrow" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto">
+                <path d="M0,0 L8,4 L0,8 z" fill="#adb5bd"/>
+              </marker>
+            </defs>
+            {% set steps = ["1  Register a system", "2  Write a test", "3  Build a policy", "4  Run it"] %}
+            {% for label in steps %}
+            <rect x="{{ loop.index0 * 182 }}" y="24" width="158" height="48" rx="6"
+                  fill="#f4f6f9" stroke="#ced4da"/>
+            <text x="{{ loop.index0 * 182 + 79 }}" y="53" text-anchor="middle"
+                  font-family="sans-serif" font-size="13" fill="#495057">{{ label }}</text>
+            {% if not loop.last %}
+            <line x1="{{ loop.index0 * 182 + 160 }}" y1="48" x2="{{ loop.index0 * 182 + 178 }}" y2="48"
+                  stroke="#adb5bd" stroke-width="2" marker-end="url(#tourArrow)"/>
+            {% endif %}
+            {% endfor %}
+          </svg>
+        </div>
+        {% endif %}
+
+        {% if 2 in tour.screens %}
+        {# ── Screen 2 — register a system ───────────────────────────────── #}
+        <div class="tour-pane" data-pane="2">
+          <h4>1 &mdash; Register a system</h4>
+          <p class="text-muted">
+            Install the agent on a machine. It enrols itself, reports its
+            inventory, and stays connected.
+          </p>
+          <pre id="tourInstall" class="p-2" style="background:#f4f6f9; border:1px solid #dee2e6; white-space:pre-wrap;">curl -fsSL https://repo.openscm.io/install.sh | sh -s -- \
+    --server {% if tour.server_url %}{{ tour.server_url }}{% else %}https://your-openscm-server{% endif %} \
+    --token  &lt;enrolment-token&gt;</pre>
+          <p class="text-muted small">
+            {% if tour.has_token %}
+              Replace <code>&lt;enrolment-token&gt;</code> with one of your enrolment
+              tokens. Tokens are shown only once, when they are created &mdash; if you
+              no longer have it, issue a new one.
+            {% else %}
+              You do not have an enrolment token yet. Create one first; the token
+              value is shown only once, at creation.
+            {% endif %}
+            {% if not tour.server_url %}
+              <br><strong>Set your public URL</strong> under Settings so this command
+              is filled in for you.
+            {% endif %}
+          </p>
+          <a href="/enrollment" class="btn btn-sm btn-outline-primary">
+            <i class="fa fa-key fa-fw"></i> Manage enrolment tokens
+          </a>
+        </div>
+        {% endif %}
+
+        {% if 3 in tour.screens %}
+        {# ── Screen 3 — create a test ────────────────────────────────────── #}
+        <div class="tour-pane" data-pane="3">
+          <h4>2 &mdash; Write a test</h4>
+          <p class="text-muted">
+            A <strong>test</strong> is one check: a file permission, a running
+            service, a sysctl value, the output of a command. Each test has
+            elements and conditions that decide PASS, FAIL or N/A.
+          </p>
+          <p class="text-muted">
+            The quickest start is the <strong>Policy Store</strong>, which carries
+            ready-made CIS-style content you can install and run as-is.
+          </p>
+          <a href="/store" class="btn btn-sm btn-outline-primary">
+            <i class="fa fa-store fa-fw"></i> Browse the Policy Store
+          </a>
+          <a href="/tests" class="btn btn-sm btn-outline-secondary">
+            <i class="fa fa-vial fa-fw"></i> Create a test
+          </a>
+        </div>
+        {% endif %}
+
+        {% if 4 in tour.screens %}
+        {# ── Screen 4 — build a policy ───────────────────────────────────── #}
+        <div class="tour-pane" data-pane="4">
+          <h4>3 &mdash; Build a policy</h4>
+          <p class="text-muted">
+            A <strong>policy</strong> is a set of tests applied to a set of systems
+            or groups. The policy is what gets scored, scheduled and reported on.
+          </p>
+          <a href="/policies" class="btn btn-sm btn-outline-primary">
+            <i class="fa fa-shield-alt fa-fw"></i> Go to Policies
+          </a>
+        </div>
+        {% endif %}
+
+        {% if 5 in tour.screens %}
+        {# ── Screen 5 — run it ───────────────────────────────────────────── #}
+        <div class="tour-pane" data-pane="5">
+          <h4>4 &mdash; Run it and watch</h4>
+          <p class="text-muted">
+            Run the policy now, or put it on a schedule. Results land in the
+            compliance report and build a trend over time.
+          </p>
+          <div class="custom-control custom-checkbox mt-4">
+            <input type="checkbox" class="custom-control-input" id="tourDontShow" checked>
+            <label class="custom-control-label" for="tourDontShow">
+              Don&rsquo;t show this again
+            </label>
+          </div>
+          <p class="text-muted small mt-2">
+            You can reopen this any time from <strong>Quick start</strong> in the
+            user menu.
+          </p>
+        </div>
+        {% endif %}
+
+      </div>
+
+      <div class="modal-footer justify-content-between">
+        <div id="tourDots" class="text-muted small"></div>
+        <div>
+          <button type="button" class="btn btn-outline-secondary btn-sm" id="tourPrev">Back</button>
+          <button type="button" class="btn btn-primary btn-sm" id="tourNext">Next</button>
+          <button type="button" class="btn btn-primary btn-sm d-none" id="tourFinish">Finish</button>
+        </div>
+      </div>
+
+    </div>
+  </div>
+</div>
+
+<script>
+(function () {
+  var panes = Array.prototype.slice.call(document.querySelectorAll('#tourModal .tour-pane'));
+  if (!panes.length) { return; }
+
+  var i = 0;
+  var dots   = document.getElementById('tourDots');
+  var prev   = document.getElementById('tourPrev');
+  var next   = document.getElementById('tourNext');
+  var finish = document.getElementById('tourFinish');
+
+  function render() {
+    panes.forEach(function (p, n) { p.style.display = (n === i) ? '' : 'none'; });
+    dots.textContent = 'Step ' + (i + 1) + ' of ' + panes.length;
+    prev.disabled = (i === 0);
+    var last = (i === panes.length - 1);
+    next.classList.toggle('d-none', last);
+    finish.classList.toggle('d-none', !last);
+  }
+
+  prev.addEventListener('click', function () { if (i > 0) { i--; render(); } });
+  next.addEventListener('click', function () { if (i < panes.length - 1) { i++; render(); } });
+
+  finish.addEventListener('click', function () {
+    var box = document.getElementById('tourDontShow');
+    // Closing early (Esc or the X) deliberately does NOT dismiss: an accidental
+    // close on step 2 must not permanently bury something unread. Only Finish,
+    // with the box ticked, writes tour_done.
+    if (box && box.checked) {
+      fetch('/tour/dismiss', { method: 'POST', credentials: 'same-origin' });
+    }
+    $('#tourModal').modal('hide');
+  });
+
+  render();
+  $('#tourModal').modal('show');
+})();
+</script>

@@ -23,6 +23,7 @@ pub mod auto_groups_admin;
 pub mod enrollment;
 pub mod tests;
 pub mod pdf;
+pub mod tour;
 pub mod policies;
 pub mod reports;
 pub mod users;
@@ -112,6 +113,27 @@ pub struct AppState {
 // Loads all embedded CE templates into a Tera instance. Calls
 // init_tera_with_overrides with an empty override list.
 // ─────────────────────────────────────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────────────────────
+// Helper: collect_templates
+// Every embedded template, including those in subdirectories.
+//
+// include_dir's `Dir::files()` is NOT recursive — it yields only the files
+// directly inside the directory it is called on. Templates under
+// templates/partials/ were therefore never registered, and because Tera
+// resolves `{% include %}` at RENDER time rather than at add_raw_template
+// time, nothing failed at startup: the first request to a page using the
+// partial returned a 500 instead. Same failure shape as the 0.7.4 template
+// crash-loop, just deferred to request time, and covered by
+// tests/templates_parse.rs::subdirectory_templates_are_registered.
+// ─────────────────────────────────────────────────────────────────────────────
+fn collect_templates(dir: &'static include_dir::Dir<'static>) -> Vec<&'static include_dir::File<'static>> {
+    let mut out: Vec<_> = dir.files().collect();
+    for sub in dir.dirs() {
+        out.extend(collect_templates(sub));
+    }
+    out
+}
+
 pub fn init_tera() -> Result<Tera, Box<dyn Error>> {
     init_tera_with_overrides(&[])
 }
@@ -141,7 +163,7 @@ pub fn init_tera_with_overrides(overrides: &[(&str, &str)]) -> Result<Tera, Box<
     // Load the remaining CE templates. Skipped: (1) base.html, already loaded
     // above; (2) any file the caller supplied as an override (added in the
     // second loop below and wholly replaces the CE version).
-    for file in TEMPLATES_DIR.files() {
+    for file in collect_templates(&TEMPLATES_DIR) {
         let path = file.path().to_str()
             .ok_or_else(|| format!("Template path is not valid UTF-8: {:?}", file.path()))?;
 
@@ -325,6 +347,10 @@ pub fn create_core_router(state: AppState, cookie_key: axum_extra::extract::cook
         .route("/login", get(auth::login).post(auth::login_submit))
         .route("/logout", get(auth::logout))
         .route("/notifications/clear", get(handlers::clear_notifications))
+        // Guided first-run tour. Both are per-user and touch only the calling
+        // user's own row, so Viewer is the correct floor.
+        .route("/tour/dismiss", post(tour::tour_dismiss))
+        .route("/tour/reopen", get(tour::tour_reopen))
         .route("/admin/audit-log", get(audit::audit_log_view))
         .route("/users", get(users::users))
         .route("/users/add", get(users::users_add).post(users::users_add_save))

@@ -27,6 +27,10 @@ pub struct DashboardParams {
     pub success_message: Option<String>,
     #[serde(default)]
     pub range: Option<String>,
+    /// `?tour=1` re-opens the guided first-run tour without clearing
+    /// users.tour_done — see GET /tour/reopen.
+    #[serde(default)]
+    pub tour: Option<String>,
 }
 
 
@@ -266,6 +270,16 @@ pub async fn dashboard(auth: AuthSession, Query(params): Query<DashboardParams>,
         context.insert("success_message", msg);
     }
 
+
+    // Guided first-run tour. Only ever offered on the dashboard: a modal that
+    // can appear over any page will eventually appear over a half-filled form.
+    let force_tour = params.tour.as_deref() == Some("1");
+    if let Some(info) = crate::tour::tour_info(&pool, &auth, force_tour).await {
+        context.insert("show_tour", &true);
+        context.insert("tour", &info);
+    } else {
+        context.insert("show_tour", &false);
+    }
 
     render_template(&tera, Some(&pool), "dashboard.html", context, Some(auth)).await
 }

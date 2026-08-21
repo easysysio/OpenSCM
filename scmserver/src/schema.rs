@@ -119,6 +119,9 @@ async fn create_tables(pool: &SqlitePool) -> Result<(), sqlx::Error> {
             email_verified INTEGER NOT NULL DEFAULT 1,
             directory_id INTEGER,
             external_username TEXT,
+            -- 0 = show the guided first-run tour on the dashboard. See the
+            -- v37 → v38 migration for why fresh installs must default to 0.
+            tour_done INTEGER NOT NULL DEFAULT 0,
             UNIQUE(username, tenant_id),
             FOREIGN KEY (tenant_id) REFERENCES tenants (id) ON DELETE CASCADE
         )",
@@ -2499,6 +2502,45 @@ pub async fn run_migrations(pool: &SqlitePool) -> Result<(), sqlx::Error> {
             .execute(pool)
             .await?;
         info!("Schema migration v36 → v37 complete.");
+    }
+
+    // v37 → v38: guided first-run tour (0.8.0).
+    //
+    // users.tour_done drives the five-screen walkthrough on the dashboard.
+    //
+    // Both statements sit INSIDE the column_exists guard, and that is the
+    // whole subtlety of this migration. A fresh install already carries the
+    // column from initialize_database's CREATE TABLE (defaulting to 0), so the
+    // guard is false and neither statement runs — which matters because
+    // install.rs creates the first admin BEFORE calling run_migrations, so an
+    // unguarded backfill would mark the brand-new administrator as having
+    // already seen the tour. The one person the tour exists for.
+    //
+    // On a genuine upgrade the column is absent, so it is added and every
+    // pre-existing user is stamped 1: someone who has been running OpenSCM for
+    // months should not be greeted by "let's register your first system".
+    // Users created after the upgrade pick up the column DEFAULT of 0 and do
+    // see it.
+    if version < 38 {
+        info!("Running schema migration v37 → v38 (guided first-run tour)...");
+
+        // table_exists as well as column_exists: migrations must survive a
+        // partial schema. Test fixtures (and any hand-built database) can
+        // reach this point without a users table at all, and an unguarded
+        // ALTER would abort the whole migration run for everything after it.
+        if table_exists(pool, "users").await && !column_exists(pool, "users", "tour_done").await {
+            sqlx::query("ALTER TABLE users ADD COLUMN tour_done INTEGER NOT NULL DEFAULT 0")
+                .execute(pool)
+                .await?;
+            sqlx::query("UPDATE users SET tour_done = 1")
+                .execute(pool)
+                .await?;
+        }
+
+        sqlx::query("UPDATE schema_info SET version = 38")
+            .execute(pool)
+            .await?;
+        info!("Schema migration v37 → v38 complete.");
     }
 
     Ok(())
