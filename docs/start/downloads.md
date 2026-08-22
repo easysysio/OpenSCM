@@ -87,20 +87,22 @@ The agent is installed on every system you want to monitor.
 
     | Architecture | Package |
     | :--- | :--- |
-    | x86_64 | [:material-download: scmclient_0.8.0-1_x86_64.pkg.tar.zst](https://repo.openscm.io/stable/arch/scmclient_0.8.0-1_x86_64.pkg.tar.zst) |
-    | ARM64 (aarch64) | [:material-download: scmclient_0.8.0-1_aarch64.pkg.tar.zst](https://repo.openscm.io/stable/arch/scmclient_0.8.0-1_aarch64.pkg.tar.zst) |
-    | ARMv7h | [:material-download: scmclient_0.8.0-1_armv7h.pkg.tar.zst](https://repo.openscm.io/stable/arch/scmclient_0.8.0-1_armv7h.pkg.tar.zst) |
+    | x86_64 | [:material-download: scmclient-0.8.0-1-x86_64.pkg.tar.zst](https://repo.openscm.io/stable/arch/scmclient-0.8.0-1-x86_64.pkg.tar.zst) |
+    | ARM64 (aarch64) | [:material-download: scmclient-0.8.0-1-aarch64.pkg.tar.zst](https://repo.openscm.io/stable/arch/scmclient-0.8.0-1-aarch64.pkg.tar.zst) |
+    | ARMv7 (armhf) | [:material-download: scmclient-0.8.0-1-armhf.pkg.tar.zst](https://repo.openscm.io/stable/arch/scmclient-0.8.0-1-armhf.pkg.tar.zst) |
+    | ppc64le | [:material-download: scmclient-0.8.0-1-ppc64le.pkg.tar.zst](https://repo.openscm.io/stable/arch/scmclient-0.8.0-1-ppc64le.pkg.tar.zst) |
+    | RISC-V 64 | [:material-download: scmclient-0.8.0-1-riscv64.pkg.tar.zst](https://repo.openscm.io/stable/arch/scmclient-0.8.0-1-riscv64.pkg.tar.zst) |
 
     Install directly from the repository:
 
     ```bash
-    sudo pacman -U https://repo.openscm.io/stable/arch/scmclient_0.8.0-1_x86_64.pkg.tar.zst
+    sudo pacman -U https://repo.openscm.io/stable/arch/scmclient-0.8.0-1-x86_64.pkg.tar.zst
     ```
 
     Or install the downloaded package:
 
     ```bash
-    sudo pacman -U scmclient_0.8.0-1_x86_64.pkg.tar.zst
+    sudo pacman -U scmclient-0.8.0-1-x86_64.pkg.tar.zst
     ```
 
 === "FreeBSD"

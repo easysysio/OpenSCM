@@ -193,7 +193,7 @@ and has no runtime dependencies.
     Install directly from the repository:
 
     ```bash
-    sudo pacman -U https://repo.openscm.io/stable/arch/scmclient_0.8.0-1_x86_64.pkg.tar.zst
+    sudo pacman -U https://repo.openscm.io/stable/arch/scmclient-0.8.0-1-x86_64.pkg.tar.zst
     ```
 
     Available architectures: `x86_64`, `aarch64`, `armv7h`
