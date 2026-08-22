@@ -72,13 +72,17 @@
       <li class="nav-item d-none d-sm-inline-block"><a href="/reports" class="nav-link">Reports</a></li>
     </ul>
 
-    {% if is_saas and tenant_name %}
-    <span class="navbar-text d-none d-md-block mx-3" style="font-size:0.82rem; font-weight:600; color:#495057; letter-spacing:0.02em;">
-      <i class="fas fa-building mr-1" style="color:#6c757d;"></i>{{ tenant_name }}
-    </span>
-    {% endif %}
-
     <ul class="navbar-nav ml-auto">
+      {# Tenant name sits at the right-hand end of the navbar, immediately
+         before the dark-mode / notifications / user controls, rather than
+         trailing the left-hand links. SaaS-only: CE has no tenant to name. #}
+      {% if is_saas and tenant_name %}
+      <li class="nav-item d-none d-md-flex align-items-center mr-2">
+        <span class="navbar-text" style="font-size:0.82rem; font-weight:600; color:#495057; letter-spacing:0.02em;">
+          <i class="fas fa-building mr-1" style="color:#6c757d;"></i>{{ tenant_name }}
+        </span>
+      </li>
+      {% endif %}
       <li class="nav-item">
         <a class="nav-link" id="dark-mode-toggle" href="#" role="button">
           <i class="fas fa-moon" id="dark-mode-icon"></i>

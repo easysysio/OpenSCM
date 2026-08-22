@@ -6,6 +6,9 @@ All notable changes to OpenSCM are documented here.
 
 ## [Unreleased]
 
+### Changed
+- **SaaS: the organization name has moved to the right of the top bar**, next to the user menu, instead of trailing the Home / Systems / Policies / Reports links.
+
 ---
 
 ## [0.8.0] - 2026-08-21
