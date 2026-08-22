@@ -152,6 +152,8 @@ Add `--dry-run` to see exactly what it would do without changing anything, and
 | `--heartbeat SECS` | Check-in interval | `300` |
 | `--token TOKEN` | Enrollment token — auto-approves this system | — |
 | `--dry-run` | Print every action, change nothing | — |
+| `--uninstall` | Remove the agent | — |
+| `--purge` | With `--uninstall`: also remove config, logs and the repository | — |
 
 !!! tip "Rolling out to many machines"
     Pass `--token` with an [enrollment token](../guide/systems.md) and the
@@ -176,6 +178,24 @@ Add `--dry-run` to see exactly what it would do without changing anything, and
 Supported: Debian, Ubuntu, RHEL, Fedora, CentOS, Rocky, Alma, openSUSE, Arch,
 FreeBSD and macOS — on every architecture the repository publishes. The script
 picks the correct one for the machine it runs on.
+
+### Removing the agent
+
+```bash
+curl -fsSL https://repo.openscm.io/install.sh | sh -s -- --uninstall
+```
+
+Stops the service and removes the package, leaving the config and the OpenSCM
+package repository in place. Add `--purge` to remove those too.
+
+!!! note "What `--purge` will not touch"
+    `/etc/openscm` is shared with the server: it holds `scmserver.config` and
+    `keys/scmserver.key`. `--purge` removes only the agent's own files, and if
+    `scmserver` is installed it also leaves the package repository and log
+    directory alone rather than cutting the server off from updates.
+
+The system stays listed in **Systems** until you delete it there; it simply
+stops checking in.
 
 ### Windows
 
