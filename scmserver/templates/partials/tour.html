@@ -97,8 +97,14 @@
             <text class="tx"    x="609" y="49" text-anchor="middle">Active</text>
             <text class="tx-sm" x="609" y="67" text-anchor="middle">receiving compliance tests</text>
           </svg>
+          {# --organization is emitted only when this tenant is not the default
+             one. In SaaS every tenant has its own id, and omitting it would
+             enrol the agent into 'default' — the wrong organization, or one
+             that does not exist. In CE it is almost always 'default', so the
+             command stays a clean single argument there. #}
           <pre class="p-2 mb-2" style="background:#f4f6f9; border:1px solid #dee2e6; white-space:pre-wrap; font-size:11px;">curl -fsSL https://repo.openscm.io/install.sh | sh -s -- \
-    --server {% if tour.server_url %}{{ tour.server_url }}{% else %}https://your-openscm-server{% endif %}</pre>
+    --server {% if tour.server_url %}{{ tour.server_url }}{% else %}https://your-openscm-server{% endif %}{% if tenant_id and tenant_id != "default" %} \
+    --organization {{ tenant_id }}{% endif %}</pre>
           <p class="text-muted small">
             Works on Debian, Ubuntu, RHEL, Fedora, Arch, FreeBSD and macOS &mdash;
             it detects the platform and installs the right package. Add
