@@ -150,7 +150,23 @@ Add `--dry-run` to see exactly what it would do without changing anything, and
 | `--channel NAME` | `stable` or `testing` | `stable` |
 | `--version X.Y.Z` | Pin a specific version | newest published |
 | `--heartbeat SECS` | Check-in interval | `300` |
+| `--token TOKEN` | Enrollment token — auto-approves this system | — |
 | `--dry-run` | Print every action, change nothing | — |
+
+!!! tip "Rolling out to many machines"
+    Pass `--token` with an [enrollment token](../guide/systems.md) and the
+    system is approved automatically instead of waiting in **Systems** as
+    pending. Mint tokens in the UI under **Enrollment**.
+
+    The token is a credential: prefer the `OPENSCM_ENROLLMENT_TOKEN`
+    environment variable over the command line, which is visible in `ps` and
+    recorded in shell history.
+
+    ```bash
+    export OPENSCM_ENROLLMENT_TOKEN=...
+    curl -fsSL https://repo.openscm.io/install.sh | sh -s -- \
+        --server https://your-openscm-server
+    ```
 
 !!! tip "SaaS users"
     Pass `--organization` with your organization identifier. Without it the
