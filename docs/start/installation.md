@@ -125,131 +125,122 @@ The server only needs to be installed once on a central host.
 
 ## Agent Installation
 
-Install the agent on every system you want to monitor. The agent is lightweight
-and has no runtime dependencies.
+Install the agent on every system you want to monitor. It is a single static
+binary with no runtime dependencies.
+
+### Linux, macOS and FreeBSD — one command
+
+```bash
+curl -fsSL https://repo.openscm.io/install.sh | sh -s -- \
+    --server https://your-openscm-server
+```
+
+The script detects your distribution and CPU, installs the right package using
+your own package manager, writes the agent config, and starts the service. On
+Debian and RHEL-family systems it adds the OpenSCM package repository, so
+`apt upgrade` / `dnf upgrade` keeps the agent current afterwards.
+
+Add `--dry-run` to see exactly what it would do without changing anything, and
+`--help` for the full list of options.
+
+| Option | Description | Default |
+|---|---|---|
+| `--server URL` | Your OpenSCM server URL | *required* |
+| `--organization ID` | Organization / tenant identifier | `default` |
+| `--channel NAME` | `stable` or `testing` | `stable` |
+| `--version X.Y.Z` | Pin a specific version | newest published |
+| `--heartbeat SECS` | Check-in interval | `300` |
+| `--dry-run` | Print every action, change nothing | — |
+
+!!! tip "SaaS users"
+    Pass `--organization` with your organization identifier. Without it the
+    agent enrolls into `default`, which is not your organization. The command
+    shown in the first-run tour already has your value filled in.
+
+Supported: Debian, Ubuntu, RHEL, Fedora, CentOS, Rocky, Alma, openSUSE, Arch,
+FreeBSD and macOS — on every architecture the repository publishes. The script
+picks the correct one for the machine it runs on.
+
+### Windows
+
+Download the installer from the [Downloads](downloads.md) page and run the
+setup wizard. The agent is registered as a **Windows Service** automatically,
+and the wizard prompts for the server URL.
+
+### Installing manually
+
+The one-line installer is a convenience, not a requirement — it does exactly
+what the steps below do. Use these if you need to inspect each step, are
+building your own automation, or are working offline.
 
 === "Debian / Ubuntu"
-
-    **1. Set up the repository:**
 
     ```bash
     curl -sS https://repo.openscm.io/openscm.gpg | sudo gpg --dearmor -o /usr/share/keyrings/openscm.gpg
     echo "deb [signed-by=/usr/share/keyrings/openscm.gpg] https://repo.openscm.io/stable/debian stable main" | sudo tee /etc/apt/sources.list.d/openscm.list
     sudo apt update
-    ```
-
-    **2. Install:**
-
-    ```bash
     sudo apt install scmclient
     ```
 
 === "RedHat / Fedora / CentOS"
 
-    **1. Set up the repository:**
-
     ```bash
     sudo tee /etc/yum.repos.d/openscm.repo <<EOF
     [openscm]
-    name=OpenSCM Stable
-    baseurl=https://repo.openscm.io/stable/redhat/
+    name=OpenSCM
+    baseurl=https://repo.openscm.io/stable/redhat
     enabled=1
     gpgcheck=1
     gpgkey=https://repo.openscm.io/openscm.gpg
     EOF
-    ```
-
-    **2. Install:**
-
-    ```bash
     sudo yum install scmclient
     ```
 
 === "openSUSE"
 
-    **1. Set up the repository:**
-
     ```bash
     sudo zypper addrepo https://repo.openscm.io/stable/redhat/ openscm
     sudo zypper refresh
-    ```
-
-    **2. Install:**
-
-    ```bash
     sudo zypper install scmclient
     ```
 
 === "Arch Linux"
 
-    Import the OpenSCM signing key:
-
     ```bash
     curl -sS https://repo.openscm.io/openscm.gpg -o /tmp/openscm.gpg
     sudo pacman-key --add /tmp/openscm.gpg
     sudo pacman-key --lsign-key 8A39E120F8B52DBB
-    ```
-
-    Install directly from the repository:
-
-    ```bash
     sudo pacman -U https://repo.openscm.io/stable/arch/scmclient-0.8.0-1-x86_64.pkg.tar.zst
     ```
 
-    Available architectures: `x86_64`, `aarch64`, `armv7h`
-
-    !!! note
-        Arch Linux packages are available for x86_64, ARM64, and ARMv7 only.
-        For i686, s390x, and LoongArch64 use the Debian or RPM packages.
+    Published for `x86_64`, `aarch64`, `armhf`, `ppc64le` and `riscv64`. For
+    i686, s390x and LoongArch64 use the Debian or RPM packages.
 
 === "FreeBSD"
 
-    Download the package from the [Downloads](downloads.md) page and run:
-
     ```bash
-    pkg add scmclient-0.8.0-freebsd-amd64.pkg
-    ```
-
-    The service will start automatically after installation. Edit the config
-    to point to your server then restart:
-
-    ```bash
-    vi /usr/local/etc/openscm/scmclient.config
-    service scmclient restart
+    pkg add https://repo.openscm.io/stable/freebsd/scmclient-0.8.0-1-freebsd-amd64.pkg
     ```
 
 === "macOS"
 
-    Download the package from the [Downloads](downloads.md) page and double-click
-    to install, or from the terminal:
-
     ```bash
+    curl -LO https://repo.openscm.io/stable/macos/scmclient_0.8.0-1_macos.pkg
     sudo installer -pkg scmclient_0.8.0-1_macos.pkg -target /
     ```
 
-    Edit the config to point to your server then restart:
-
-    ```bash
-    sudo vi /usr/local/etc/openscm/scmclient.config
-    sudo launchctl bootout system/io.openscm.scmclient
-    sudo launchctl bootstrap system /Library/LaunchDaemons/io.openscm.scmclient.plist
-    ```
-
-=== "Windows"
-
-    Download the installer from the [Downloads](downloads.md) page and run the
-    setup wizard. The agent will be registered as a **Windows Service** automatically.
-
-=== "Direct Download"
-
-    ```bash
-    # Debian/Ubuntu example
-    sudo dpkg -i scmclient_0.8.0-1_amd64.deb
-    ```
+Every architecture is listed on the [Downloads](downloads.md) page if you need
+a specific file. After a manual install, follow **Post-Installation Setup**
+below — the one-line installer does those steps for you.
 
 ---
 
 ## Post-Installation Setup
+
+!!! info "Using the one-line installer?"
+    Steps 1 and 2 are done for you — the agent is already configured and
+    running. Go straight to **[3. Approve the Agent](#3-approve-the-agent)**,
+    which is always required.
 
 ### 1. Configure the Agent
 

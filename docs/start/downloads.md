@@ -2,9 +2,18 @@
 
 Choose your platform to download OpenSCM. Version **0.8.0** is the current stable release.
 
-!!! tip "Package Repository"
-    For automatic updates, we recommend using the package repository instead of
-    direct downloads. See the [Installation Guide](installation.md) for setup instructions.
+!!! tip "Most people do not need this page"
+    On Linux, macOS and FreeBSD, one command installs the agent, picks the
+    right architecture and configures it:
+
+    ```bash
+    curl -fsSL https://repo.openscm.io/install.sh | sh -s -- \
+        --server https://your-openscm-server
+    ```
+
+    The tables below are for choosing a specific file — air-gapped installs,
+    your own automation, or building a golden image. See the
+    [Installation Guide](installation.md) for both routes.
 
 ---
 
@@ -47,7 +56,9 @@ The central server manages agents, policies, and compliance reports.
 
 ## Agent (`scmclient`)
 
-The agent is installed on every system you want to monitor.
+The agent is installed on every system you want to monitor. Unless you need a
+particular file, use the one-line installer above — it selects the correct
+package for the machine it runs on.
 
 === "Debian / Ubuntu"
 
@@ -72,8 +83,8 @@ The agent is installed on every system you want to monitor.
     | :--- | :--- |
     | x86_64 | [:material-download: scmclient-0.8.0-1.x86_64.rpm](https://repo.openscm.io/stable/redhat/scmclient-0.8.0-1.x86_64.rpm) |
     | ARM64 (aarch64) | [:material-download: scmclient-0.8.0-1.aarch64.rpm](https://repo.openscm.io/stable/redhat/scmclient-0.8.0-1.aarch64.rpm) |
-    | ARMv7 (armhf) | [:material-download: scmclient-0.8.0-1.armhfp.rpm](https://repo.openscm.io/stable/redhat/scmclient-0.8.0-1.armhfp.rpm) |
-    | i686 (32-bit x86) | [:material-download: scmclient-0.8.0-1.i686.rpm](https://repo.openscm.io/stable/redhat/scmclient-0.8.0-1.i686.rpm) |
+    | ARMv7 (armhf) | [:material-download: scmclient-0.8.0-1.armhf.rpm](https://repo.openscm.io/stable/redhat/scmclient-0.8.0-1.armhf.rpm) |
+    | i686 (32-bit x86) | [:material-download: scmclient-0.8.0-1.i386.rpm](https://repo.openscm.io/stable/redhat/scmclient-0.8.0-1.i386.rpm) |
     | RISC-V 64 | [:material-download: scmclient-0.8.0-1.riscv64.rpm](https://repo.openscm.io/stable/redhat/scmclient-0.8.0-1.riscv64.rpm) |
     | PowerPC 64 LE | [:material-download: scmclient-0.8.0-1.ppc64le.rpm](https://repo.openscm.io/stable/redhat/scmclient-0.8.0-1.ppc64le.rpm) |
     | s390x (IBM Z) | [:material-download: scmclient-0.8.0-1.s390x.rpm](https://repo.openscm.io/stable/redhat/scmclient-0.8.0-1.s390x.rpm) |
