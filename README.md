@@ -39,8 +39,8 @@ To check out docs, visit [openscm.io](https://openscm.io).
 | Linux | ARM64 (aarch64) | ✅ | ✅ | deb, rpm, pkg.tar.zst |
 | Linux | ARMv7 (armhf) | ❌ | ✅ | deb, rpm, pkg.tar.zst |
 | Linux | i686 (32-bit x86) | ❌ | ✅ | deb, rpm |
-| Linux | RISC-V 64 | ❌ | ✅ | deb, rpm |
-| Linux | PowerPC64LE | ❌ | ✅ | deb, rpm |
+| Linux | RISC-V 64 | ❌ | ✅ | deb, rpm, pkg.tar.zst |
+| Linux | PowerPC64LE | ❌ | ✅ | deb, rpm, pkg.tar.zst |
 | Linux | s390x (IBM Z) | ❌ | ✅ | deb, rpm |
 | Linux | LoongArch64 | ❌ | ✅ | deb, rpm |
 | Windows | x86_64 | ✅ | ✅ | exe (NSIS) |
@@ -52,25 +52,41 @@ To check out docs, visit [openscm.io](https://openscm.io).
 
 ## ⚡ Installation
 
-### 🐧 Ubuntu / Debian
+### Agent — one command
+
+Run this on every machine you want to monitor. It detects the OS and CPU,
+installs the right package, points the agent at your server and starts it:
 
 ```bash
-# Add repository
+curl -fsSL https://repo.openscm.io/install.sh | sh -s -- \
+    --server https://your-openscm-server
+```
+
+Debian, Ubuntu, RHEL, Fedora, CentOS, Rocky, Alma, openSUSE, Arch, FreeBSD and
+macOS, on every architecture the repository publishes. Add `--dry-run` to see
+what it would do first, or `--help` for all options.
+
+The machine then appears in OpenSCM under **Systems** as *pending* — approve it
+there and it starts receiving compliance tests.
+
+On **Windows**, download the installer from
+**[openscm.io/start/downloads](https://openscm.io/start/downloads/)** and run
+the setup wizard; the agent is registered as a Windows Service.
+
+### Server
+
+**Ubuntu / Debian**
+
+```bash
 curl -sS https://repo.openscm.io/openscm.gpg | sudo gpg --dearmor -o /usr/share/keyrings/openscm.gpg
 echo "deb [signed-by=/usr/share/keyrings/openscm.gpg] https://repo.openscm.io/stable/debian stable main" | sudo tee /etc/apt/sources.list.d/openscm.list
 sudo apt update
-
-# Install server
 sudo apt install scmserver
-
-# Install agent (on systems to be monitored)
-sudo apt install scmclient
 ```
 
-### 🐧 RedHat / CentOS / SUSE
+**RedHat / CentOS / Fedora**
 
 ```bash
-# Add repository
 sudo tee /etc/yum.repos.d/openscm.repo <<EOF
 [openscm]
 name=OpenSCM Stable
@@ -79,74 +95,15 @@ enabled=1
 gpgcheck=1
 gpgkey=https://repo.openscm.io/openscm.gpg
 EOF
-
-# Install server
 sudo yum install scmserver
-
-# Install agent (on systems to be monitored)
-sudo yum install scmclient
 ```
 
-### 🐧 Arch Linux
+Windows installers and every other platform are on
+**[openscm.io/start/downloads](https://openscm.io/start/downloads/)**.
 
-```bash
-# Import the OpenSCM signing key
-curl -sS https://repo.openscm.io/openscm.gpg -o /tmp/openscm.gpg
-sudo pacman-key --add /tmp/openscm.gpg
-sudo pacman-key --lsign-key 8A39E120F8B52DBB
-
-# Install agent directly from the repository
-sudo pacman -U https://repo.openscm.io/stable/arch/scmclient_0.2.0-1_x86_64.pkg.tar.zst
-```
-
-Packages for `x86_64`, `aarch64`, and `armv7h` are available on **[openscm.io/start/downloads](https://openscm.io/start/downloads/)**.
-
-### 🪟 Windows
-
-Download the latest installer from **[openscm.io/start/downloads](https://openscm.io/start/downloads/)**.
-
-The agent can be configured to run as a Windows Service during installation.
-
-### 😈 FreeBSD
-
-```bash
-pkg add scmclient-<version>.pkg
-```
-
-### 🍎 macOS
-
-Download the latest pkg from **[openscm.io/start/downloads](https://openscm.io/start/downloads/)** and double-click to install.
-
-Or from the terminal:
-```bash
-sudo installer -pkg scmclient-<version>.pkg -target /
-```
-
-
-### 🐳 Docker
-
-
-```bash
-docker run -d \
-  --name openscm \
-  -p 8000:8000 \
-  -v openscm_config:/etc/openscm \
-  -v openscm_data:/var/lib/openscm \
-  openscm/scmserver:latest
-```
-
-
-
----
-
-After installation, access the dashboard at **http://your-server:8000**
-
-On first visit, a setup screen will guide you through creating your admin account.
-
-> For production deployments, run the server behind a reverse proxy (Nginx, Caddy)
-> with HTTPS enabled. See [openscm.io](https://openscm.io) for details.
-
----
+Then browse to the server and the first-run setup will create your admin
+account. Full instructions, including manual and air-gapped agent installs, are
+in the **[installation guide](https://openscm.io/start/installation/)**.
 
 ## ⚖️ Licensing
 
