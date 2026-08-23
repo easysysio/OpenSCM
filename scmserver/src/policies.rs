@@ -908,16 +908,21 @@ pub async fn policies_report_exclude(
     Extension(pool): Extension<SqlitePool>,
     Extension(sync_tx): Extension<mpsc::Sender<()>>,
     ip: crate::handlers::ClientIp,
+    RawForm(body): RawForm,
 ) -> impl IntoResponse {
     if let Some(redir) = auth::authorize(&auth.role, UserRole::Editor) {
         return redir;
     }
 
+    let reason = crate::systems::exclusion_reason(&body);
+
     let res = sqlx::query(
-        "UPDATE results SET excluded = 1, excluded_by = ?, excluded_at = CURRENT_TIMESTAMP
+        "UPDATE results SET excluded = 1, excluded_by = ?, excluded_at = CURRENT_TIMESTAMP,
+                            excluded_reason = ?
          WHERE tenant_id = ? AND system_id = ? AND test_id = ?",
     )
     .bind(&auth.username)
+    .bind(&reason)
     .bind(&auth.tenant_id)
     .bind(system_id)
     .bind(test_id)
@@ -970,7 +975,8 @@ pub async fn policies_report_unexclude(
     }
 
     let res = sqlx::query(
-        "UPDATE results SET excluded = 0, excluded_by = NULL, excluded_at = NULL
+        "UPDATE results SET excluded = 0, excluded_by = NULL, excluded_at = NULL,
+                            excluded_reason = NULL
          WHERE tenant_id = ? AND system_id = ? AND test_id = ?",
     )
     .bind(&auth.tenant_id)
@@ -1061,6 +1067,7 @@ pub async fn policies_report(
             t.name as test_name,
             r.result as status,
             r.excluded as is_excluded,
+            r.excluded_reason as excluded_reason,
             r.evidence as evidence
         FROM results r
         JOIN systems s ON r.system_id = s.id AND r.tenant_id = s.tenant_id
@@ -1092,12 +1099,14 @@ pub async fn policies_report(
         let status_raw: String = row.get("status");
         let status = normalize_status(&status_raw).to_string();
         let is_excluded: bool = row.try_get::<i64, _>("is_excluded").unwrap_or(0) != 0;
+        let excluded_reason: Option<String> = row.try_get("excluded_reason").ok().flatten();
         let system_id: Option<i64> = row.try_get("system_id").ok();
         let test_id:   Option<i64> = row.try_get("test_id").ok();
         system_map.entry(system_name).or_insert_with(Vec::new).push(IndividualResult {
             test_name,
             status,
             is_excluded,
+            excluded_reason,
             is_excludable: true, // live report → right-click menu enabled
             system_id,
             test_id,
@@ -1240,6 +1249,9 @@ pub(crate) fn assemble_container_groups(
             test_name: row.get("test_name"),
             status: normalize_status(&row.get::<String, _>("status")).to_string(),
             is_excluded: row.try_get::<i64, _>("is_excluded").unwrap_or(0) != 0,
+            // Container exclusions are keyed on (system, test) independent of
+            // the container, so there is no per-container reason to surface.
+            excluded_reason: None,
             is_excludable: false,
             system_id: row.try_get("system_id").ok(),
             test_id: row.try_get("test_id").ok(),
@@ -1439,6 +1451,7 @@ async fn fetch_live_policy_report_data(
             t.name as test_name,
             r.result as status,
             r.excluded as is_excluded,
+            r.excluded_reason as excluded_reason,
             r.evidence as evidence
         FROM results r
         JOIN systems s ON r.system_id = s.id
@@ -1460,12 +1473,14 @@ async fn fetch_live_policy_report_data(
         let status_raw: String = row.get("status");
         let status = normalize_status(&status_raw).to_string();
         let is_excluded: bool = row.try_get::<i64, _>("is_excluded").unwrap_or(0) != 0;
+        let excluded_reason: Option<String> = row.try_get("excluded_reason").ok().flatten();
         let system_id: Option<i64> = row.try_get("system_id").ok();
         let test_id:   Option<i64> = row.try_get("test_id").ok();
         system_map.entry(system_name).or_insert_with(Vec::new).push(IndividualResult {
             test_name,
             status,
             is_excluded,
+            excluded_reason,
             // PDF / email / saved snapshot — not interactive; freeze the badge.
             is_excludable: false,
             system_id,

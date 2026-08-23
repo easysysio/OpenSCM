@@ -39,6 +39,7 @@ fn render(tpl: &str, is_editor: bool, excludable: bool, excluded: bool, status: 
         "system_id": 7,
         "test_id": 42,
         "evidence": serde_json::Value::Null,
+        "excluded_reason": if excluded { serde_json::json!("Compensating control — ticket OPS-1421") } else { serde_json::Value::Null },
     });
     let sys = serde_json::json!({
         "system_id": 7, "system_name": "host-1", "os": "Ubuntu", "arch": "x86_64",
@@ -110,4 +111,43 @@ fn non_editors_and_archived_snapshots_get_no_button() {
 #[test]
 fn not_scanned_rows_get_no_button_on_the_system_report() {
     assert_eq!(count(&render("systems_report.html", true, true, false, "NOT_SCANNED")), 0);
+}
+
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Exclusion reason (0.8.2)
+// ─────────────────────────────────────────────────────────────────────────────
+
+// The recorded reason must be visible on the report, not merely stored — the
+// point of capturing it is that an auditor can read it later.
+#[test]
+fn a_recorded_reason_is_shown_on_the_report() {
+    for tpl in ["systems_report.html", "policies_report.html"] {
+        let h = render(tpl, true, true, true, "FAIL");
+        assert!(!h.starts_with("RENDER_ERROR"), "{tpl}");
+        assert!(
+            h.contains("Compensating control"),
+            "{tpl}: the exclusion reason must appear on the page"
+        );
+    }
+}
+
+// Excluding prompts for a reason; the field is mandatory. Without this the
+// column fills with NULLs and the feature is decorative.
+#[test]
+fn the_reason_prompt_is_present_and_required() {
+    for tpl in ["systems_report.html", "policies_report.html"] {
+        let h = render(tpl, true, true, false, "FAIL");
+        assert!(h.contains("excludeReasonModal"), "{tpl}: no reason dialog");
+        assert!(h.contains("name=\"reason\""), "{tpl}: no reason field");
+        assert!(h.contains("maxlength=\"500\" required"), "{tpl}: reason must be required");
+    }
+}
+
+// Viewers get neither the dialog nor the button.
+#[test]
+fn viewers_get_no_reason_dialog() {
+    for tpl in ["systems_report.html", "policies_report.html"] {
+        assert!(!render(tpl, false, true, false, "FAIL").contains("excludeReasonModal"), "{tpl}");
+    }
 }

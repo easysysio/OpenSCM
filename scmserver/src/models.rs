@@ -626,6 +626,12 @@ pub struct IndividualResult {
     /// Parsed and rendered by the report template's "why" panel.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub evidence: Option<String>,
+    /// Why this finding was excluded, recorded at exclusion time. None for
+    /// findings that are not excluded, and for exclusions made before 0.8.2 —
+    /// those genuinely have no reason on record. #[serde(default)] keeps saved
+    /// reports from before the field existed deserialising cleanly.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub excluded_reason: Option<String>,
 }
 
 

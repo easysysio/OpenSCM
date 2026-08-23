@@ -6,6 +6,11 @@ All notable changes to OpenSCM are documented here.
 
 ## [Unreleased]
 
+### Added
+- **Excluding a finding now records why.** Suppressing a result from the compliance score is exactly the change an auditor asks about months later, and until now OpenSCM recorded *who* excluded it and *when* but not *what for*. Clicking exclude now asks for a reason before anything is suppressed, and the reason is shown under the finding on the report, carried into saved report snapshots, and cleared automatically if the finding is put back.
+
+  The prompt is mandatory — an optional field would fill the column with blanks and leave the feature decorative. Exclusions made before this release genuinely have no reason on record and are shown as such rather than being backfilled with invented text.
+
 ---
 
 ## [0.8.1] - 2026-08-23

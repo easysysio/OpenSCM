@@ -402,6 +402,9 @@ async fn create_tables(pool: &SqlitePool) -> Result<(), sqlx::Error> {
             excluded     INTEGER NOT NULL DEFAULT 0,
             excluded_by  TEXT,
             excluded_at  DATETIME,
+            -- Why the finding was excluded. Nullable: exclusions predating the
+            -- v38 → v39 migration have no recorded reason.
+            excluded_reason TEXT,
             container_id INTEGER NOT NULL DEFAULT 0,
             evidence     TEXT,
             PRIMARY KEY (tenant_id, system_id, test_id, container_id),
@@ -2541,6 +2544,34 @@ pub async fn run_migrations(pool: &SqlitePool) -> Result<(), sqlx::Error> {
             .execute(pool)
             .await?;
         info!("Schema migration v37 → v38 complete.");
+    }
+
+    // v38 → v39: why a finding was excluded (0.8.2).
+    //
+    // results already recorded WHO excluded a finding and WHEN, but not WHY.
+    // A suppressed control with no recorded rationale is the first thing an
+    // auditor challenges, and the person who excluded it has usually forgotten
+    // by the time anyone asks.
+    //
+    // Nullable with no backfill: exclusions made before this release genuinely
+    // have no recorded reason, and inventing one ("Legacy exclusion") would put
+    // words in an operator's mouth in an audit trail. The UI shows those as
+    // "no reason recorded", which is the truth.
+    if version < 39 {
+        info!("Running schema migration v38 → v39 (exclusion reason)...");
+
+        if table_exists(pool, "results").await
+            && !column_exists(pool, "results", "excluded_reason").await
+        {
+            sqlx::query("ALTER TABLE results ADD COLUMN excluded_reason TEXT")
+                .execute(pool)
+                .await?;
+        }
+
+        sqlx::query("UPDATE schema_info SET version = 39")
+            .execute(pool)
+            .await?;
+        info!("Schema migration v38 → v39 complete.");
     }
 
     Ok(())

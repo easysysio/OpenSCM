@@ -290,10 +290,19 @@
                   {% else %}
                     {{ res.test_name }}
                   {% endif %}
+                  {# The reason lives under the test name, not in the Status
+                     column: that column is 150px and a sentence wraps to three
+                     lines there, shoving the controls out of alignment. #}
+                  {% if res.excluded_reason %}
+                    <div class="text-muted text-xs mt-1" style="white-space:normal;">
+                      <i class="fas fa-quote-left mr-1"></i>{{ res.excluded_reason }}
+                    </div>
+                  {% endif %}
                 </td>
                 <td class="text-center">
                   {% if res.is_excluded %}
-                    <span class="badge badge-secondary" title="Excluded — does not affect compliance score"><i class="fas fa-ban mr-1"></i>EXCLUDED</span>
+                    <span class="badge badge-secondary" title="{% if res.excluded_reason %}{{ res.excluded_reason }}{% else %}Excluded — no reason recorded{% endif %}"><i class="fas fa-ban mr-1"></i>EXCLUDED</span>
+
                   {% elif res.status == "PASS" %}
                     <span class="badge badge-success-soft text-success"><i class="fas fa-check-circle mr-1"></i>PASS</span>
                   {% elif res.status == "NA" %}
@@ -483,9 +492,47 @@
 
 {# Right-click context menu — only rendered for Editors on the live report #}
 {% if is_editor %}
+{# Reason prompt. Excluding suppresses a finding from the compliance score, so
+   it is exactly the kind of change an auditor asks about later; capturing the
+   why at the moment of the decision is the only time anyone actually knows it.
+   Unexcluding does not prompt — putting a control back needs no justification. #}
+<div class="modal fade" id="excludeReasonModal" tabindex="-1" role="dialog" aria-labelledby="excludeReasonTitle">
+  <div class="modal-dialog" role="document">
+    <form id="exclude-reason-form" method="POST">
+      <div class="modal-content">
+        <div class="modal-header">
+          <h5 class="modal-title" id="excludeReasonTitle">
+            <i class="fas fa-ban text-secondary mr-2"></i>Exclude this finding
+          </h5>
+          <button type="button" class="close" data-dismiss="modal" aria-label="Close">
+            <span aria-hidden="true">&times;</span>
+          </button>
+        </div>
+        <div class="modal-body">
+          <p class="text-muted mb-2" id="exclude-reason-test"></p>
+          <label for="exclude-reason-input" class="mb-1">Why is this being excluded?</label>
+          <textarea class="form-control" id="exclude-reason-input" name="reason" rows="3"
+                    maxlength="500" required
+                    placeholder="e.g. Compensating control in place — reviewed 2026-08, ticket OPS-1421"></textarea>
+          <small class="form-text text-muted">
+            Recorded against the finding with your name and the date, and shown
+            on the report. Up to 500 characters.
+          </small>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-outline-secondary btn-sm" data-dismiss="modal">Cancel</button>
+          <button type="submit" class="btn btn-secondary btn-sm">
+            <i class="fas fa-ban mr-1"></i> Exclude
+          </button>
+        </div>
+      </div>
+    </form>
+  </div>
+</div>
+
 <div id="exclude-menu" role="menu">
   <form id="exclude-menu-form" method="POST" style="margin:0;">
-    <button type="submit"><i class="fas fa-ban mr-2"></i><span id="exclude-menu-label">Exclude</span></button>
+    <button type="button" id="exclude-menu-go"><i class="fas fa-ban mr-2"></i><span id="exclude-menu-label">Exclude</span></button>
   </form>
 </div>
 {% endif %}
@@ -601,22 +648,61 @@
       };
     }
 
-    // Visible button — submits immediately, no menu.
+    // Excluding asks for a reason first; unexcluding does not — putting a
+    // control back needs no justification, and prompting for one would just be
+    // a dialog people learn to dismiss.
+    var reasonModal = document.getElementById('excludeReasonModal');
+    var reasonForm  = document.getElementById('exclude-reason-form');
+    var reasonInput = document.getElementById('exclude-reason-input');
+    var reasonTest  = document.getElementById('exclude-reason-test');
+
+    function start(row) {
+      var a = actionFor(row);
+      if (a.excluded) {              // unexclude — straight through
+        form.setAttribute('action', a.url);
+        form.submit();
+        return;
+      }
+      if (!reasonModal || !reasonForm) {   // no modal: do not silently drop it
+        form.setAttribute('action', a.url);
+        form.submit();
+        return;
+      }
+      reasonForm.setAttribute('action', a.url);
+      reasonInput.value = '';
+      var nameCell = row.querySelector('td');
+      reasonTest.textContent = nameCell ? nameCell.innerText.trim() : '';
+      $('#excludeReasonModal').modal('show');
+    }
+
+    // Focus the box when the dialog opens, so it can be typed into immediately.
+    $('#excludeReasonModal').on('shown.bs.modal', function () { reasonInput.focus(); });
+
+    // Visible button.
     document.addEventListener('click', function (e) {
       var btn = e.target.closest('.exclude-toggle');
       if (!btn) return;
       e.preventDefault();
       e.stopPropagation();
       var row = btn.closest('.result-row');
-      if (!row) return;
-      form.setAttribute('action', actionFor(row).url);
-      form.submit();
+      if (row) start(row);
+    });
+
+    var menuRow = null;
+
+    // The menu button now routes through start() like the visible button does,
+    // so both paths get the same reason prompt.
+    document.getElementById('exclude-menu-go').addEventListener('click', function (e) {
+      e.preventDefault();
+      hideMenu();
+      if (menuRow) start(menuRow);
     });
 
     document.addEventListener('contextmenu', function (e) {
       var row = e.target.closest('.result-row');
       if (!row) return;
       e.preventDefault();
+      menuRow = row;
       var a = actionFor(row);
       form.setAttribute('action', a.url);
       label.textContent = a.excluded ? 'Unexclude' : 'Exclude';

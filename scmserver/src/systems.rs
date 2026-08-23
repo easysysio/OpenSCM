@@ -1007,6 +1007,7 @@ pub async fn fetch_system_report_data(
             t.name        AS test_name,
             COALESCE(r.result, 'NOT_SCANNED') AS status,
             COALESCE(r.excluded, 0) AS is_excluded,
+            r.excluded_reason AS excluded_reason,
             r.evidence AS evidence
         FROM systems_in_groups sig
         JOIN systems_in_policy sip
@@ -1067,10 +1068,12 @@ pub async fn fetch_system_report_data(
             }
         }
         let evidence: Option<String> = row.try_get("evidence").ok().flatten();
+        let excluded_reason: Option<String> = row.try_get("excluded_reason").ok().flatten();
         entry.results.push(IndividualResult {
             test_name,
             status,
             is_excluded,
+            excluded_reason,
             // System report is read-only; no right-click menu, but show the badge.
             is_excludable: false,
             system_id: Some(system_id as i64),
@@ -1271,7 +1274,8 @@ pub async fn container_detail(
     // Recent per-container results joined to test names.
     let result_rows = sqlx::query(r#"
         SELECT t.id AS test_id, t.name AS test_name, r.result AS status,
-               r.excluded AS is_excluded, r.evidence AS evidence
+               r.excluded AS is_excluded, r.excluded_reason AS excluded_reason,
+               r.evidence AS evidence
         FROM results r
         JOIN tests t ON r.test_id = t.id AND r.tenant_id = t.tenant_id
         WHERE r.container_id = ? AND r.tenant_id = ?
@@ -1288,6 +1292,7 @@ pub async fn container_detail(
         test_name: rr.get("test_name"),
         status: normalize_status(&rr.get::<String, _>("status")).to_string(),
         is_excluded: rr.try_get::<i64, _>("is_excluded").unwrap_or(0) != 0,
+        excluded_reason: rr.try_get("excluded_reason").ok().flatten(),
         is_excludable: false,
         system_id: Some(system_id),
         test_id: rr.try_get("test_id").ok(),
@@ -1406,21 +1411,62 @@ pub async fn system_report_run_policy(
 // system report instead of a policy report.
 // Role: Editor
 // ─────────────────────────────────────────────────────────────────────────────
+// Helper: exclusion_reason
+// Pulls `reason` out of a urlencoded body and normalises it.
+//
+// Uses RawForm rather than Form<T> because these handlers already take Path
+// and several Extensions, and a typed Form must be the final extractor; RawForm
+// keeps the signatures free to grow. An absent or blank reason becomes None
+// rather than Some(""), so "no reason recorded" stays distinguishable from a
+// reason that is genuinely empty.
+//
+// Capped at 500 characters: this is an audit note, not a document, and an
+// unbounded field reachable by any Editor is a cheap way to bloat the database.
+// ─────────────────────────────────────────────────────────────────────────────
+pub fn exclusion_reason(body: &[u8]) -> Option<String> {
+    let mut out: Option<String> = None;
+    for pair in body.split(|b| *b == b'&') {
+        let mut it = pair.splitn(2, |b| *b == b'=');
+        let k = it.next().unwrap_or(&[]);
+        if k != b"reason" {
+            continue;
+        }
+        let v = it.next().unwrap_or(&[]);
+        // application/x-www-form-urlencoded encodes spaces as '+'.
+        let v: Vec<u8> = v.iter().map(|b| if *b == b'+' { b' ' } else { *b }).collect();
+        let decoded = urlencoding::decode(&String::from_utf8_lossy(&v))
+            .map(|c| c.into_owned())
+            .unwrap_or_default();
+        let trimmed = decoded.trim();
+        if !trimmed.is_empty() {
+            out = Some(trimmed.chars().take(500).collect());
+        }
+    }
+    out
+}
+
+
+// ─────────────────────────────────────────────────────────────────────────────
 pub async fn system_report_exclude(
     auth: AuthSession,
     Path((system_id, test_id)): Path<(i32, i32)>,
     Extension(pool): Extension<SqlitePool>,
     Extension(sync_tx): Extension<mpsc::Sender<()>>,
+    RawForm(body): RawForm,
 ) -> impl IntoResponse {
     if let Some(redir) = auth::authorize(&auth.role, UserRole::Editor) {
         return redir;
     }
 
+    let reason = exclusion_reason(&body);
+
     let res = sqlx::query(
-        "UPDATE results SET excluded = 1, excluded_by = ?, excluded_at = CURRENT_TIMESTAMP
+        "UPDATE results SET excluded = 1, excluded_by = ?, excluded_at = CURRENT_TIMESTAMP,
+                            excluded_reason = ?
          WHERE tenant_id = ? AND system_id = ? AND test_id = ?",
     )
     .bind(&auth.username)
+    .bind(&reason)
     .bind(&auth.tenant_id)
     .bind(system_id)
     .bind(test_id)
@@ -1462,7 +1508,8 @@ pub async fn system_report_unexclude(
     }
 
     let res = sqlx::query(
-        "UPDATE results SET excluded = 0, excluded_by = NULL, excluded_at = NULL
+        "UPDATE results SET excluded = 0, excluded_by = NULL, excluded_at = NULL,
+                            excluded_reason = NULL
          WHERE tenant_id = ? AND system_id = ? AND test_id = ?",
     )
     .bind(&auth.tenant_id)
