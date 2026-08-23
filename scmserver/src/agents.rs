@@ -76,6 +76,36 @@ fn platform_from_filename(name: &str) -> Option<String> {
 
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Helper: version_from_binary
+// Reads an agent's version out of the binary itself.
+//
+// The client embeds `<<OPENSCM_AGENT_VERSION:x.y.z>>` as a contiguous, linker-
+// retained byte string (see scmclient/src/main.rs). Finding it is a plain byte
+// scan with no executable-format parsing, so one implementation covers Mach-O,
+// ELF — little and big endian — and PE alike. Verified on macOS aarch64, Linux
+// x86_64/aarch64/riscv64 musl, s390x gnu and Windows x86_64.
+//
+// This makes the advertised version an OBSERVATION of the payload rather than
+// an assertion about it, which is what the whole upgrade path depends on: a
+// version that does not match its binary produces upgrades that apply cleanly,
+// report success, and change nothing, forever.
+// ─────────────────────────────────────────────────────────────────────────────
+fn version_from_binary(bytes: &[u8]) -> Option<String> {
+    const PREFIX: &[u8] = b"<<OPENSCM_AGENT_VERSION:";
+    const SUFFIX: &[u8] = b">>";
+    const MAX_LEN: usize = 32; // "255.255.255-something" and then some
+
+    let start = bytes
+        .windows(PREFIX.len())
+        .position(|w| w == PREFIX)?
+        + PREFIX.len();
+    let tail = &bytes[start..bytes.len().min(start + MAX_LEN)];
+    let end = tail.windows(SUFFIX.len()).position(|w| w == SUFFIX)?;
+    let v = std::str::from_utf8(&tail[..end]).ok()?.trim();
+    if v.is_empty() { None } else { Some(v.to_string()) }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // startup_scan
 // Walks the embedded `static/agents/` directory and upserts agent_packages
 // for every recognised client binary found there.
@@ -154,6 +184,19 @@ pub async fn startup_scan(pool: &SqlitePool) {
         // server base URL before fetching.
         let url = format!("/agents/{}", name);
 
+        // Prefer what the binary says about itself; fall back to the bundle's
+        // VERSION file, then to the server's version (the historically broken
+        // behaviour, kept only so older bundles still function).
+        let file_version = version_from_binary(file.contents()).unwrap_or_else(|| {
+            warn!(
+                "{} carries no embedded version marker — falling back to {}. \
+                 If that is not this binary's real version, upgrades to it will \
+                 apply cleanly and never take effect.",
+                name, version
+            );
+            version.clone()
+        });
+
         match sqlx::query(
             "INSERT INTO agent_packages (platform, version, sha256, url, updated_at)
              VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)
@@ -164,7 +207,7 @@ pub async fn startup_scan(pool: &SqlitePool) {
                updated_at = excluded.updated_at",
         )
         .bind(&platform)
-        .bind(&version)
+        .bind(&file_version)
         .bind(&sha256)
         .bind(&url)
         .execute(pool)

@@ -5,6 +5,28 @@ mod compliance;
 mod runner;
 mod containers;
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Version stamp — machine-readable from the outside.
+//
+// The server bundles agent binaries for platforms it cannot execute (a Linux
+// server serving a macOS or Windows agent), so it cannot ask a binary its
+// version by running it. Nor can it recover the version from the ordinary
+// compiled-in string: Rust packs literals into one .rodata blob with no null
+// terminators and nothing tying the number to any nearby text.
+//
+// This static is a contiguous, self-describing byte string that a plain byte
+// scan can find in any executable format — Mach-O, ELF or PE alike — with no
+// format parsing at all. #[used] and #[no_mangle] keep the linker from
+// discarding it: nothing in the program reads it.
+//
+// The server matches on the prefix and reads the version that follows, so the
+// advertised upgrade version describes the payload instead of asserting it.
+// ─────────────────────────────────────────────────────────────────────────────
+#[used]
+#[unsafe(no_mangle)]
+pub static OPENSCM_AGENT_VERSION_TAG: &[u8] =
+    concat!("<<OPENSCM_AGENT_VERSION:", env!("CARGO_PKG_VERSION"), ">>").as_bytes();
+
 use tokio::time::{sleep, Duration};
 use tracing_subscriber::{fmt, EnvFilter, layer::SubscriberExt, util::SubscriberInitExt, reload};
 use tracing::{debug, info, warn, error};

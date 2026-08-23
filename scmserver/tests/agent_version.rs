@@ -80,3 +80,42 @@ fn ci_verifies_the_version_file_against_the_built_agent() {
         "a mismatch between agents/VERSION and the built agent must fail the build"
     );
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Reading the version out of the payload
+// ─────────────────────────────────────────────────────────────────────────────
+
+// The marker must be found in the real bundled binary, in whatever executable
+// format it happens to be — this is the mechanism the whole upgrade path now
+// rests on.
+#[test]
+fn the_version_is_readable_from_the_bundled_agent() {
+    let path = concat!(env!("CARGO_MANIFEST_DIR"), "/static/agents/scmclient-aarch64-macos");
+    let Ok(bytes) = std::fs::read(path) else {
+        eprintln!("no bundled agent here (CI supplies these) — skipping");
+        return;
+    };
+    let marker = b"<<OPENSCM_AGENT_VERSION:";
+    let at = bytes.windows(marker.len()).position(|w| w == marker);
+    assert!(at.is_some(), "the bundled agent carries no version marker");
+
+    let start = at.unwrap() + marker.len();
+    let tail = &bytes[start..(start + 32).min(bytes.len())];
+    let end = tail.windows(2).position(|w| w == b">>").expect("unterminated marker");
+    let v = std::str::from_utf8(&tail[..end]).expect("marker is not utf-8");
+    assert!(
+        v.split('.').count() == 3 && v.chars().next().unwrap().is_ascii_digit(),
+        "marker does not contain a version: {v:?}"
+    );
+}
+
+// The client must actually emit the marker, and it must survive the linker.
+#[test]
+fn the_client_embeds_a_version_marker() {
+    let src = include_str!("../../scmclient/src/main.rs");
+    assert!(src.contains("OPENSCM_AGENT_VERSION"), "client must embed the marker");
+    assert!(
+        src.contains("#[used]"),
+        "the marker must be #[used] or the linker will drop it — nothing reads it"
+    );
+}

@@ -9,7 +9,7 @@ All notable changes to OpenSCM are documented here.
 ### Fixed
 - **Agent upgrades that appeared to succeed but never took effect.** The server advertised bundled agents using **its own** version rather than the version of the agent it was actually serving. When the two differed, the agent did everything correctly — downloaded the payload, verified its checksum, replaced itself, restarted — and came back reporting the same version as before, so the server offered the upgrade again, indefinitely. Nothing logged an error at any point; every line on both sides reported success.
 
-  The advertised version is now read from the bundle itself, so it describes the payload instead of assuming it matches. If a bundle predates this and carries no version marker, the server still falls back to its own version but now warns loudly that it is doing so.
+  The agent now stamps its version into its own binary, and the server reads it back directly — so the version it advertises is measured from the payload rather than assumed. This works identically for every platform and architecture, because finding the stamp is a byte scan rather than executable-format parsing. Bundles that predate the stamp still fall back to the older behaviour, but the server now warns loudly when it does so.
 
   This only affected installations whose bundled agents differed from the server build — most visibly locally built servers. A stale agent binary that had been committed to the repository is no longer tracked, since CI supplies these at build time.
 
