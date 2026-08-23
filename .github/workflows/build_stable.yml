@@ -525,6 +525,22 @@ jobs:
           # makes upgrades appear to succeed while never taking effect.
           echo "${VERSION}" > build/agents/VERSION
 
+          # Prove the number matches the payload rather than just asserting it.
+          # The version cannot be read back out of the binaries at runtime —
+          # the string is in .rodata with nothing tying it to a marker — so this
+          # is the one moment it can be checked. Every agent here is built from
+          # the same scmclient/Cargo.toml in the same run, so verifying the
+          # Linux one (the only binary this runner can execute) establishes the
+          # version for all of them.
+          ACTUAL=$(./build/agents/scmclient-x86_64-linux -ver \
+                   | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1)
+          if [ "$ACTUAL" != "$VERSION" ]; then
+            echo "::error::agents/VERSION says ${VERSION} but the built agent reports ${ACTUAL}."
+            echo "Shipping this would make every upgrade appear to succeed and never take effect."
+            exit 1
+          fi
+          echo "Verified: bundled agents report v${ACTUAL}"
+
           echo "Staged agents for v${VERSION}:"
           ls -lh build/agents/
 

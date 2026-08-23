@@ -56,3 +56,27 @@ fn ci_writes_the_version_file_into_the_bundle() {
         "the stable workflow must write build/agents/VERSION alongside the binaries"
     );
 }
+
+// The sidecar is an assertion unless something checks it against the payload.
+// CI is the only place that can: at runtime the version cannot be recovered
+// from the binaries (the string sits in .rodata with nothing tying it to the
+// "OpenSCM Client version" marker, ~800KB away in a different region), and the
+// server cannot execute agents built for other platforms.
+#[test]
+fn ci_verifies_the_version_file_against_the_built_agent() {
+    let wf = include_str!("../../.github/workflows/build_stable.yml");
+    let stage = wf
+        .split("Stage Agent Binaries")
+        .nth(1)
+        .expect("the stable workflow must stage agent binaries");
+    let stage = &stage[..stage.find("upload-artifact").unwrap_or(stage.len())];
+
+    assert!(
+        stage.contains("-ver"),
+        "CI must run the built agent to read back its real version"
+    );
+    assert!(
+        stage.contains("exit 1"),
+        "a mismatch between agents/VERSION and the built agent must fail the build"
+    );
+}
