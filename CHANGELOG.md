@@ -6,13 +6,6 @@ All notable changes to OpenSCM are documented here.
 
 ## [Unreleased]
 
-### Fixed
-- **Agent upgrades that appeared to succeed but never took effect.** The server advertised bundled agents using **its own** version rather than the version of the agent it was actually serving. When the two differed, the agent did everything correctly — downloaded the payload, verified its checksum, replaced itself, restarted — and came back reporting the same version as before, so the server offered the upgrade again, indefinitely. Nothing logged an error at any point; every line on both sides reported success.
-
-  The agent now stamps its version into its own binary, and the server reads it back directly — so the version it advertises is measured from the payload rather than assumed. This works identically for every platform and architecture, because finding the stamp is a byte scan rather than executable-format parsing. Bundles that predate the stamp still fall back to the older behaviour, but the server now warns loudly when it does so.
-
-  This only affected installations whose bundled agents differed from the server build — most visibly locally built servers. A stale agent binary that had been committed to the repository is no longer tracked, since CI supplies these at build time.
-
 ---
 
 ## [0.8.2] - 2026-08-23
@@ -21,6 +14,13 @@ All notable changes to OpenSCM are documented here.
 - **Excluding a finding now records why.** Suppressing a result from the compliance score is exactly the change an auditor asks about months later, and until now OpenSCM recorded *who* excluded it and *when* but not *what for*. Clicking exclude now asks for a reason before anything is suppressed, and the reason is shown under the finding on the report, carried into saved report snapshots, and cleared automatically if the finding is put back.
 
   The prompt is mandatory — an optional field would fill the column with blanks and leave the feature decorative. Exclusions made before this release genuinely have no reason on record and are shown as such rather than being backfilled with invented text.
+
+### Fixed
+- **Agent upgrades that appeared to succeed but never took effect.** The server advertised bundled agents using **its own** version rather than the version of the agent it was actually serving. When the two differed, the agent did everything correctly — downloaded the payload, verified its checksum, replaced itself, restarted — and came back reporting the same version as before, so the server offered the upgrade again, indefinitely. Nothing logged an error at any point; every line on both sides reported success.
+
+  The agent now stamps its version into its own binary, and the server reads it back directly — so the version it advertises is measured from the payload rather than assumed. This works identically for every platform and architecture, because finding the stamp is a byte scan rather than executable-format parsing. Bundles that predate the stamp still fall back to the older behaviour, but the server now warns loudly when it does so.
+
+  This only affected installations whose bundled agents differed from the server build — most visibly locally built servers. A stale agent binary that had been committed to the repository is no longer tracked, since CI supplies these at build time.
 
 ---
 
