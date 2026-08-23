@@ -520,6 +520,11 @@ jobs:
                      build/agents/scmclient-x86_64-macos \
                      build/agents/scmclient-x86_64-freebsd
 
+          # The server advertises THIS as the upgrade target version. Without
+          # it the server falls back to its own version, and any divergence
+          # makes upgrades appear to succeed while never taking effect.
+          echo "${VERSION}" > build/agents/VERSION
+
           echo "Staged agents for v${VERSION}:"
           ls -lh build/agents/
 

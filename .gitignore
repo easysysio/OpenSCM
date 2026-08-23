@@ -29,3 +29,11 @@ keys
 
 # MkDocs build output (docs site)
 site/
+
+# Bundled agent binaries. CI downloads the agents-bundle artifact into
+# scmserver/static/agents before building the server, so these are build
+# inputs, not source. A committed one goes stale and makes a locally built
+# server advertise an upgrade that can never take effect — the agent applies
+# it, restarts, and reports the same version forever.
+scmserver/static/agents/*
+!scmserver/static/agents/.gitkeep

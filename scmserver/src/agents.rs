@@ -10,15 +10,17 @@
 // startup_scan
 //   Called once after DB migrations on server startup. Iterates the embedded
 //   `static/agents/` directory, computes SHA256 over each binary's in-memory
-//   bytes, and upserts agent_packages. The agent version is the server's own
-//   CARGO_PKG_VERSION — embedded agents are always built alongside the server
-//   in the same release, so the two are guaranteed to match. If the directory
-//   is empty (e.g. a dev build with no bundled agents) the scan is skipped.
+//   bytes, and upserts agent_packages. The agent version is read from the
+//   bundled `agents/VERSION` file. It used to be the server's own
+//   CARGO_PKG_VERSION on the reasoning that agents ship alongside the server
+//   "so the two are guaranteed to match" — they are not, and when they diverge
+//   the upgrade silently loops forever. See startup_scan. If the directory is
+//   empty (e.g. a dev build with no bundled agents) the scan is skipped.
 // =============================================================================
 
 use sha2::{Digest, Sha256};
 use sqlx::SqlitePool;
-use tracing::{error, info};
+use tracing::{error, info, warn};
 
 use crate::STATIC_FILES_DIR;
 
@@ -76,8 +78,23 @@ fn platform_from_filename(name: &str) -> Option<String> {
 // ─────────────────────────────────────────────────────────────────────────────
 // startup_scan
 // Walks the embedded `static/agents/` directory and upserts agent_packages
-// for every recognised client binary found there. The version string is read
-// from a `VERSION` file bundled alongside the binaries by the CI workflow.
+// for every recognised client binary found there.
+//
+// The advertised version comes from the `VERSION` file the CI workflow bundles
+// alongside the binaries — NOT from the server's own version.
+//
+// This used to stamp env!("CARGO_PKG_VERSION"), i.e. whatever the SERVER was
+// built as. When server and bundled agent are built from the same tag those
+// agree and the bug is invisible, which is why it survived so long. When they
+// diverge — a stale bundle, a hand-placed binary, a dev build — the server
+// advertises an upgrade to a version the payload does not contain. The agent
+// then does everything right: downloads, verifies the SHA, replaces itself,
+// restarts... and reports the SAME version it had before, so the server offers
+// the upgrade again, forever, with no error anywhere. Every log line says
+// success.
+//
+// Reading the version from the payload's own metadata makes the advertised
+// version an observation rather than an assumption.
 // ─────────────────────────────────────────────────────────────────────────────
 pub async fn startup_scan(pool: &SqlitePool) {
     let agents_dir = match STATIC_FILES_DIR.get_dir("agents") {
@@ -90,7 +107,26 @@ pub async fn startup_scan(pool: &SqlitePool) {
         }
     };
 
-    let version = env!("CARGO_PKG_VERSION");
+    // Falls back to the server's version only if the bundle predates the
+    // VERSION file, and says so loudly — that fallback is the broken behaviour.
+    let version: String = match agents_dir.get_file("agents/VERSION") {
+        Some(f) => match std::str::from_utf8(f.contents()) {
+            Ok(v) if !v.trim().is_empty() => v.trim().to_string(),
+            _ => {
+                warn!("agents/VERSION is unreadable — falling back to the server version.");
+                env!("CARGO_PKG_VERSION").to_string()
+            }
+        },
+        None => {
+            warn!(
+                "Bundled agents have no VERSION file — advertising the server version ({}). \
+                 If the bundled agents are not that version, upgrades will appear to succeed \
+                 and never take effect.",
+                env!("CARGO_PKG_VERSION")
+            );
+            env!("CARGO_PKG_VERSION").to_string()
+        }
+    };
 
     let mut count: u32 = 0;
 
