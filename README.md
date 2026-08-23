@@ -73,6 +73,14 @@ On **Windows**, download the installer from
 **[openscm.io/start/downloads](https://openscm.io/start/downloads/)** and run
 the setup wizard; the agent is registered as a Windows Service.
 
+To remove the agent again:
+
+```bash
+curl -fsSL https://repo.openscm.io/install.sh | sh -s -- --uninstall
+```
+
+Add `--purge` to also drop its config, logs and the package repository.
+
 ### Server
 
 **Ubuntu / Debian**

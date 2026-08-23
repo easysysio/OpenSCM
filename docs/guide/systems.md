@@ -199,6 +199,24 @@ Telemetry appears as a compact line under each system's name in the Managed Syst
     If the agent is still running on the endpoint it will attempt to re-register
     as a new pending system and require re-approval.
 
+### Decommissioning a System
+
+Deleting a system in the UI does not remove the agent from the machine, which
+is why a live endpoint reappears as pending. To retire a machine properly,
+uninstall the agent on it first:
+
+```bash
+curl -fsSL https://repo.openscm.io/install.sh | sh -s -- --uninstall
+```
+
+Then delete the system here. Add `--purge` to the command to also remove the
+agent's config, its logs and the OpenSCM package repository. See
+[Removing the agent](../start/installation.md#removing-the-agent).
+
+!!! tip "Order matters"
+    Uninstall first, then delete. Deleting first leaves a window in which the
+    agent checks in again and comes back as a new pending system.
+
 ---
 
 ## System Groups
