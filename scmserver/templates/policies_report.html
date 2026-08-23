@@ -284,6 +284,15 @@
   		  {% else %}
     		    <span class="badge badge-danger-soft text-danger"><i class="fas fa-times-circle mr-1"></i>FAIL</span>
   		  {% endif %}
+                  {# Visible exclude control. The right-click menu below does the
+                     same thing, but a right-click-only action has no affordance
+                     at all and does not exist on touch devices. #}
+                  {% if res.is_excludable and is_editor and res.system_id and res.test_id %}
+                    <button type="button" class="btn btn-link btn-xs p-0 ml-2 exclude-toggle text-muted"
+                            title="{% if res.is_excluded %}Include this finding in the score again{% else %}Exclude this finding from the score{% endif %}">
+                      <i class="fas {% if res.is_excluded %}fa-rotate-left{% else %}fa-ban{% endif %}"></i>
+                    </button>
+                  {% endif %}
                   {# "Why?" — per-condition breakdown for failed / NA rows that carry evidence #}
                   {% if res.evidence and (res.status == "FAIL" or res.status == "NA") %}
                     <button type="button" class="btn btn-link btn-xs p-0 ml-2 evidence-toggle"
@@ -577,19 +586,39 @@
 
     function hideMenu() { menu.style.display = 'none'; }
 
-    document.addEventListener('contextmenu', function (e) {
-      var row = e.target.closest('.result-row');
-      if (!row) return;
-      e.preventDefault();
+    // One place that knows the URL shape, used by both the button and the
+    // right-click menu so they cannot drift apart.
+    function actionFor(row) {
       var policyId = row.getAttribute('data-policy-id');
       var systemId = row.getAttribute('data-system-id');
       var testId   = row.getAttribute('data-test-id');
       var excluded = row.getAttribute('data-excluded') === 'true';
-      var action = excluded
-        ? '/policies/report/' + policyId + '/unexclude/' + systemId + '/' + testId
-        : '/policies/report/' + policyId + '/exclude/' + systemId + '/' + testId;
-      form.setAttribute('action', action);
-      label.textContent = excluded ? 'Unexclude' : 'Exclude';
+      return {
+        url: '/policies/report/' + policyId + (excluded ? '/unexclude/' : '/exclude/')
+             + systemId + '/' + testId,
+        excluded: excluded
+      };
+    }
+
+    // Visible button — submits immediately, no menu.
+    document.addEventListener('click', function (e) {
+      var btn = e.target.closest('.exclude-toggle');
+      if (!btn) return;
+      e.preventDefault();
+      e.stopPropagation();
+      var row = btn.closest('.result-row');
+      if (!row) return;
+      form.setAttribute('action', actionFor(row).url);
+      form.submit();
+    });
+
+    document.addEventListener('contextmenu', function (e) {
+      var row = e.target.closest('.result-row');
+      if (!row) return;
+      e.preventDefault();
+      var a = actionFor(row);
+      form.setAttribute('action', a.url);
+      label.textContent = a.excluded ? 'Unexclude' : 'Exclude';
       menu.style.display = 'block';
       menu.style.left = e.pageX + 'px';
       menu.style.top  = e.pageY + 'px';

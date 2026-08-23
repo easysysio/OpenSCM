@@ -6,6 +6,12 @@ All notable changes to OpenSCM are documented here.
 
 ## [Unreleased]
 
+### Added
+- **A visible button to exclude a finding.** Excluding a result from the compliance score was possible only by **right-clicking** a row on a live report — an action with no on-screen affordance, and one that does not exist at all on touch devices. Each result row now carries a small control in the Status column: 🚫 to exclude, ↩ to put it back. Right-click still works.
+
+  It appears exactly where the action was already permitted — Editors and above, on live reports only, for results that were actually scanned — and never on saved report snapshots, which stay frozen.
+- **`install.sh`** — a one-command agent installer at `https://repo.openscm.io/install.sh`. Detects the OS and CPU, installs `scmclient` with your own package manager, writes the config pointed at your server, and starts the service. `--token` for enrollment-token rollouts, `--uninstall` (with `--purge`) to remove it again, `--dry-run` to see everything it would do first.
+
 ### Changed
 - **SaaS: the organization name has moved to the right of the top bar**, next to the user menu, instead of trailing the Home / Systems / Policies / Reports links.
 
