@@ -6,6 +6,10 @@ All notable changes to OpenSCM are documented here.
 
 ## [Unreleased]
 
+---
+
+## [0.8.1] - 2026-08-23
+
 ### Added
 - **A visible button to exclude a finding.** Excluding a result from the compliance score was possible only by **right-clicking** a row on a live report — an action with no on-screen affordance, and one that does not exist at all on touch devices. Each result row now carries a small control in the Status column: 🚫 to exclude, ↩ to put it back. Right-click still works.
 
