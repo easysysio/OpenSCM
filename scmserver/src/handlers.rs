@@ -59,6 +59,26 @@ pub fn store_update_count(tenant_id: &str) -> u32 {
 // Populates global context (version, edition, pending count, notifications,
 // session info) then renders the named Tera template to HTML.
 // ─────────────────────────────────────────────────────────────────────────────
+// Helper: escape_json_for_script
+// Makes a JSON string safe to embed inside a <script> block.
+//
+// JSON does not escape `/`, so a string VALUE containing "</script>" closes the
+// block early and everything after it is parsed as HTML. Container names come
+// straight from an agent heartbeat, so a monitored host could name a container
+// `</script><img src=x onerror=...>` and run script in an admin's session.
+//
+// `<`, `>` and `&` are escaped to their \uXXXX forms. They never appear in JSON
+// structure — only inside string values — so this cannot corrupt the document,
+// and JSON.parse decodes them back to the original characters.
+// ─────────────────────────────────────────────────────────────────────────────
+pub fn escape_json_for_script(json: &str) -> String {
+    json.replace('<', "\\u003c")
+        .replace('>', "\\u003e")
+        .replace('&', "\\u0026")
+}
+
+
+// ─────────────────────────────────────────────────────────────────────────────
 pub async fn render_template(
     tera: &Tera,
     pool: Option<&SqlitePool>,

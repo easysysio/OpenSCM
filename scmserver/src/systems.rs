@@ -319,7 +319,11 @@ pub async fn systems(
                 "last_seen":        row.try_get::<Option<String>, _>("last_seen").ok().flatten(),
             }));
         }
-        serde_json::to_string(&map).unwrap_or_else(|_| "{}".to_string())
+        // Escaped for <script> embedding: container names are agent-supplied
+        // and JSON alone does not neutralise a literal "</script>".
+        crate::handlers::escape_json_for_script(
+            &serde_json::to_string(&map).unwrap_or_else(|_| "{}".to_string()),
+        )
     };
 
     context.insert("systems", &systems);

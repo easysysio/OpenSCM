@@ -170,8 +170,8 @@
 
                     {# 2. Run Policy (Runner Role) #}
                     <a class="btn btn-success btn-sm ml-1 {% if not is_runner %}disabled{% endif %}" 
-                       href="{% if is_runner %}/policies/run/{{ policy.policy_id }}{% else %}#{% endif %}"
-                       title="Execute Scan">
+                       href="#"
+                       title="Execute Scan" onclick="return postTo('{% if is_runner %}/policies/run/{{ policy.policy_id }}{% else %}#{% endif %}')">
                       <i class="fas {% if is_runner %}fa-rocket{% else %}fa-lock{% endif %}"></i>
                     </a>
 
@@ -191,8 +191,8 @@
 
                     {# 5. Delete Policy (Editor Role) #}
                     <a class="btn btn-danger btn-sm ml-1 {% if not is_editor %}disabled{% endif %}"
-                       onclick="{% if is_editor %}return confirm('Delete this policy? This cannot be undone.');{% endif %}"
-                       href="{% if is_editor %}/policies/delete/{{ policy.policy_id }}{% else %}#{% endif %}"
+                       onclick="return postTo('{% if is_editor %}/policies/delete/{{ policy.policy_id }}{% else %}#{% endif %}', 'Delete this policy? This cannot be undone.')"
+                       href="#"
                        {% if not is_editor %}style="filter: grayscale(100%);"{% endif %}
                        title="Delete Policy">
                       <i class="fas {% if is_editor %}fa-trash{% else %}fa-lock{% endif %}"></i>

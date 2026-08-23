@@ -116,7 +116,7 @@
           {% endfor %}
 
           <div class="dropdown-divider"></div>
-          <a href="/notifications/clear" class="dropdown-item dropdown-footer">Clear All Notifications</a>
+          <a href="#" class="dropdown-item dropdown-footer" onclick="return postTo('/notifications/clear')">Clear All Notifications</a>
         </div>
       </li>
 
@@ -482,6 +482,30 @@
              pad(d.getHours()) + ':' + pad(d.getMinutes());
     });
   };
+</script>
+
+<script>
+// postTo — issue a state-changing request as a POST.
+//
+// These actions used to be plain links. A GET that deletes is reachable by
+// anything that follows a URL: a link clicked from another site carries the
+// session cookie (SameSite=Lax permits top-level navigation), and mail security
+// scanners, chat unfurlers and browser prefetchers fetch URLs unprompted — so a
+// /systems/delete/42 link in an email could delete a system with nobody
+// clicking it. Routing through a form makes the request a POST, which Lax does
+// not attach cookies to cross-site and which nothing follows speculatively.
+function postTo(url, confirmMessage) {
+  // Templates render '#' as the target when the user lacks the role for the
+  // action; posting that would reload the current page as a POST.
+  if (!url || url === '#') { return false; }
+  if (confirmMessage && !confirm(confirmMessage)) { return false; }
+  var f = document.createElement('form');
+  f.method = 'POST';
+  f.action = url;
+  document.body.appendChild(f);
+  f.submit();
+  return false;
+}
 </script>
 
 {% block scripts %}{% endblock %}

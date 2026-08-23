@@ -165,8 +165,8 @@
                      <i class="fas {% if is_editor %}fa-pencil-alt{% else %}fa-lock{% endif %}"></i>
                   </a>
                   <a class="btn btn-danger btn-sm {% if not is_editor %}disabled{% endif %}"
-                     onclick="{% if is_editor %}return confirm('Delete test? All historical data will be lost.'){% else %}return false;{% endif %}"
-                     href="{% if is_editor %}/tests/delete/{{ test.id }}{% else %}#{% endif %}"
+                     onclick="return postTo('{% if is_editor %}/tests/delete/{{ test.id }}{% else %}#{% endif %}', 'Delete test? All historical data will be lost.')"
+                     href="#"
                      title="{% if is_editor %}Delete{% else %}Permission Required{% endif %}"
                      {% if not is_editor %}style="opacity: 0.5; cursor: not-allowed;"{% endif %}>
                      <i class="fas {% if is_editor %}fa-trash{% else %}fa-lock{% endif %}"></i>

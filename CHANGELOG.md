@@ -6,6 +6,13 @@ All notable changes to OpenSCM are documented here.
 
 ## [Unreleased]
 
+### Security
+- **Cross-tenant data loss via Reset Database (SaaS).** Resetting an organisation ran `DELETE FROM tenant_keys WHERE tenant_id != 'default'` — deleting the agent signing keys of *every other* organisation. The action needs only the **Admin** role, so any customer's administrator could break agent authentication for every other customer on the platform. Single-tenant installations were unaffected, since the statement matched nothing there. The reset no longer touches signing keys at all, and every statement in it is now scoped to the caller's own organisation.
+- **Stored cross-site scripting via container names.** The Systems page embedded the container inventory as JSON inside a `<script>` block. JSON does not escape `/`, so a container named `</script>...` closed the block early and the remainder ran as HTML in the browser of anyone viewing that page. Container names come from the agent, so a monitored host could attack the console. Data embedded in script blocks is now escaped so it cannot terminate the block.
+- **Destructive actions are no longer performed by following a link.** Deleting a system, user, policy, test, report or enrollment token, approving a pending system, running a policy and clearing notifications were all plain `GET` URLs. Anything that follows a URL could trigger them: a link clicked from another site carried the session, and mail scanners, chat unfurlers and browser prefetchers fetch URLs unprompted — so such a link in an email could delete a system with nobody clicking it. Approving a pending system was the sharpest, admitting an unapproved agent into the fleet in one click. All of these now require a POST.
+- **Session cookies are marked `Secure` when the server is configured for HTTPS.** The flag was previously hardcoded off so that plain-HTTP deployments kept working; it is now derived from **app_url**, and the server warns at login when it cannot be set.
+- The database reset now binds the organisation identifier instead of interpolating it into SQL.
+
 ---
 
 ## [0.8.2] - 2026-08-23

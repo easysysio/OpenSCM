@@ -319,9 +319,9 @@
                 </div>
               </div>
               <div class="card-footer d-flex justify-content-between align-items-center">
-                <a href="/tests/delete/{{ test.id }}"
+                <a href="#"
                    class="btn btn-outline-danger"
-                   onclick="return confirm('Permanently delete this test and remove it from any policies it is linked to? This cannot be undone.');">
+                   onclick="return postTo('/tests/delete/{{ test.id }}', 'Permanently delete this test and remove it from any policies it is linked to? This cannot be undone.')">
                   <i class="fas fa-trash mr-1"></i> Delete Test
                 </a>
                 <div>

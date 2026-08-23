@@ -553,35 +553,42 @@ pub async fn settings_reset(
         // but we delete explicitly to be safe with all SQLite pragma states).
         for sql in &[
             // Results & history
-            format!("DELETE FROM results            WHERE tenant_id = '{tenant}'"),
-            format!("DELETE FROM compliance_history WHERE tenant_id = '{tenant}'"),
+            "DELETE FROM results            WHERE tenant_id = ?",
+            "DELETE FROM compliance_history WHERE tenant_id = ?",
             // Reports
-            format!("DELETE FROM system_reports     WHERE tenant_id = '{tenant}'"),
-            format!("DELETE FROM reports            WHERE tenant_id = '{tenant}'"),
+            "DELETE FROM system_reports     WHERE tenant_id = ?",
+            "DELETE FROM reports            WHERE tenant_id = ?",
             // Scheduler
-            format!("DELETE FROM policy_schedules   WHERE tenant_id = '{tenant}'"),
+            "DELETE FROM policy_schedules   WHERE tenant_id = ?",
             // Policy / test relations
-            format!("DELETE FROM tests_in_policy    WHERE tenant_id = '{tenant}'"),
-            format!("DELETE FROM test_conditions    WHERE tenant_id = '{tenant}'"),
+            "DELETE FROM tests_in_policy    WHERE tenant_id = ?",
+            "DELETE FROM test_conditions    WHERE tenant_id = ?",
             // System relations
-            format!("DELETE FROM systems_in_policy  WHERE tenant_id = '{tenant}'"),
-            format!("DELETE FROM systems_in_groups  WHERE tenant_id = '{tenant}'"),
+            "DELETE FROM systems_in_policy  WHERE tenant_id = ?",
+            "DELETE FROM systems_in_groups  WHERE tenant_id = ?",
             // Top-level entities
-            format!("DELETE FROM policies           WHERE tenant_id = '{tenant}'"),
-            format!("DELETE FROM tests              WHERE tenant_id = '{tenant}'"),
-            format!("DELETE FROM system_groups      WHERE tenant_id = '{tenant}'"),
-            format!("DELETE FROM systems            WHERE tenant_id = '{tenant}'"),
+            "DELETE FROM policies           WHERE tenant_id = ?",
+            "DELETE FROM tests              WHERE tenant_id = ?",
+            "DELETE FROM system_groups      WHERE tenant_id = ?",
+            "DELETE FROM systems            WHERE tenant_id = ?",
             // Notifications
-            format!("DELETE FROM notify             WHERE tenant_id = '{tenant}'"),
+            "DELETE FROM notify             WHERE tenant_id = ?",
             // Auth tokens (base schema — present in all editions)
-            format!("DELETE FROM email_verifications WHERE tenant_id = '{tenant}'"),
-            format!("DELETE FROM password_resets     WHERE user_id IN (SELECT id FROM users WHERE tenant_id = '{tenant}')"),
+            "DELETE FROM email_verifications WHERE tenant_id = ?",
+            "DELETE FROM password_resets WHERE user_id IN (SELECT id FROM users WHERE tenant_id = ?)",
             // Users — keep bootstrap admin (id=1, default tenant)
-            format!("DELETE FROM users WHERE tenant_id = '{tenant}' AND NOT (id = 1 AND tenant_id = 'default')"),
-            // Tenant keys — keep only default tenant keys
-            "DELETE FROM tenant_keys WHERE tenant_id != 'default'".to_string(),
+            "DELETE FROM users WHERE tenant_id = ? AND NOT (id = 1 AND tenant_id = 'default')",
+            // NOTE: this list previously ended with
+            //     DELETE FROM tenant_keys WHERE tenant_id != 'default'
+            // which deletes every OTHER tenant's agent-signing keys. In CE that
+            // is a no-op — the only tenant is 'default' — but SaaS merges this
+            // router, and the handler requires only Admin, so any customer's
+            // administrator could destroy agent authentication for every other
+            // customer by resetting their own organisation. It is removed
+            // rather than scoped: a tenant's own keys must survive its reset
+            // too, or its agents can no longer verify the server.
         ] {
-            sqlx::query(sql).execute(&mut *tx).await?;
+            sqlx::query(sql).bind(tenant).execute(&mut *tx).await?;
         }
 
         tx.commit().await

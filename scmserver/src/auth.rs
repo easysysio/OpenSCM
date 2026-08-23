@@ -300,10 +300,30 @@ pub async fn login_submit(
             cookie.set_http_only(true);
             cookie.set_same_site(SameSite::Lax);
             cookie.set_max_age(time::Duration::hours(8));
-            // M4: set_secure(true) is the correct production setting; kept false here so that
-            // plain-HTTP deployments behind a reverse proxy continue to work.
-            // Set this to true when the server is directly exposed over HTTPS.
-            cookie.set_secure(false);
+            // Secure is derived from the configured public URL rather than
+            // hardcoded off. A session cookie without it travels in clear text,
+            // which is a poor default for a product whose job is compliance —
+            // but forcing it on would silently break plain-HTTP deployments
+            // behind a terminating proxy, where the browser never sees HTTPS.
+            // app_url is what the operator has told us they are reachable on,
+            // so it is the one honest signal available here.
+            let secure = sqlx::query_scalar::<_, String>(
+                "SELECT value FROM settings WHERE skey = 'app_url' AND tenant_id = ?",
+            )
+            .bind(&tenant_id)
+            .fetch_optional(&pool)
+            .await
+            .ok()
+            .flatten()
+            .map(|u| u.trim().to_lowercase().starts_with("https://"))
+            .unwrap_or(false);
+            if !secure {
+                warn!(
+                    "Session cookie issued without the Secure flag — app_url is not https. \
+                     Set it under Settings so sessions are not sent in clear text."
+                );
+            }
+            cookie.set_secure(secure);
 
             info!("User '{}' logged in successfully for tenant '{}'", username, tenant_id);
             crate::audit::record_raw(
