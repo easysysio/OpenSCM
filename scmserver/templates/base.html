@@ -220,6 +220,13 @@
               <p>Reports</p>
             </a>
           </li>
+          {# Alerts: reading is Viewer, managing is Admin (see alerts_admin.rs). #}
+          <li class="nav-item">
+            <a href="/alerts" class="nav-link">
+              <i class="nav-icon fas fa-bell"></i>
+              <p>Alerts</p>
+            </a>
+          </li>
 
 	  {% if is_admin %}
 	  <li class="nav-item has-treeview">

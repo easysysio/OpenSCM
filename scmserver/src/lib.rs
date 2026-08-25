@@ -15,6 +15,7 @@ pub mod auth;
 pub mod agents;
 pub mod alerts;
 pub mod alert_delivery;
+pub mod alerts_admin;
 pub mod audit;
 pub mod client;
 pub mod dashboard;
@@ -349,6 +350,18 @@ pub fn create_core_router(state: AppState, cookie_key: axum_extra::extract::cook
         .route("/login", get(auth::login).post(auth::login_submit))
         .route("/logout", get(auth::logout))
         .route("/notifications/clear", post(handlers::clear_notifications))
+        // Alerts. Reading is Viewer; managing a rule is Admin, because a rule
+        // holds a recipient list and a webhook secret and makes the server
+        // emit traffic to an address of the operator's choosing.
+        .route("/alerts", get(alerts_admin::alerts_page))
+        .route("/alerts/history", get(alerts_admin::alerts_history))
+        .route("/alerts/new", get(alerts_admin::alerts_form))
+        .route("/alerts/create", post(alerts_admin::alerts_save))
+        .route("/alerts/{id}/edit", get(alerts_admin::alerts_form))
+        .route("/alerts/{id}/update", post(alerts_admin::alerts_save))
+        .route("/alerts/{id}/toggle", post(alerts_admin::alerts_toggle))
+        .route("/alerts/{id}/delete", post(alerts_admin::alerts_delete))
+        .route("/alerts/{id}/test", post(alerts_admin::alerts_test))
         // Guided first-run tour. Both are per-user and touch only the calling
         // user's own row, so Viewer is the correct floor.
         .route("/tour/dismiss", post(tour::tour_dismiss))

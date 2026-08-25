@@ -6,6 +6,17 @@ All notable changes to OpenSCM are documented here.
 
 ## [Unreleased]
 
+### Added
+- **Alerting.** A new **Alerts** section tells you when compliance moves, instead of waiting for someone to open a page. A rule watches one policy or all of them, and fires when the score **drops by** or **rises by** a number of points, or **falls below** or **rises above** a percentage. It can notify inside OpenSCM, send an email, POST to a webhook, or write to a syslog server.
+
+  Alerts are evaluated whenever a score actually changes — a scheduled run, a manual run, a group edit, an exclusion — rather than on a timer, so a dip that recovers within the hour is still caught.
+
+  Every rule is **edge triggered**: crossing a threshold alerts once and re-arms only after the score recovers, so a policy sitting below its limit does not alert on every recalculation. A per-rule **cooldown** bounds a flapping policy to one message per period. A policy that has never been scanned is not treated as zero, so it cannot masquerade as a catastrophic drop. And the first recalculation after a restart records where everything stands **without notifying anyone**, so coming back from an outage does not announce the outage.
+
+  Each rule has a **Send test** button that puts a real message through the real transport — a mistyped webhook URL or a firewalled syslog port is otherwise invisible until a real incident fails to reach anyone. **Delivery history** shows what was sent, what failed and why; failures retry with backoff, and if a transport gives up entirely an administrator is told inside OpenSCM.
+
+  Reading alerts requires the Viewer role; creating and editing them requires Admin, since a rule holds a recipient list and a webhook secret and makes the server send traffic to an address of your choosing.
+
 ---
 
 ## [0.8.3] - 2026-08-23

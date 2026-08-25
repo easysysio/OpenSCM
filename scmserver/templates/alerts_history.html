@@ -1,0 +1,82 @@
+{% extends "base.html" %}
+{% block title %}Alert history{% endblock %}
+{% block content %}
+<div class="content-header">
+  <div class="container-fluid">
+    <div class="row mb-2">
+      <div class="col-sm-6"><h1 class="m-0 font-weight-bold">Alert delivery history</h1></div>
+      <div class="col-sm-6">
+        <ol class="breadcrumb float-sm-right">
+          <li class="breadcrumb-item"><a href="/">Home</a></li>
+          <li class="breadcrumb-item"><a href="/alerts">Alerts</a></li>
+          <li class="breadcrumb-item active">History</li>
+        </ol>
+      </div>
+    </div>
+  </div>
+</div>
+
+<section class="content">
+  <div class="container-fluid">
+    <div class="card">
+      <div class="card-body p-0">
+        {% if deliveries | length == 0 %}
+          <div class="text-center text-muted py-5">
+            <i class="fas fa-inbox fa-2x mb-3 d-block"></i>
+            <p class="mb-0">Nothing has been delivered yet.</p>
+          </div>
+        {% else %}
+        <table class="table table-hover mb-0">
+          <thead>
+            <tr>
+              <th style="padding-left:20px;">When</th>
+              <th>Alert</th>
+              <th>Policy</th>
+              <th class="text-center">Score</th>
+              <th>Delivered to</th>
+              <th class="text-center" style="width:130px;">Status</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for d in deliveries %}
+            <tr>
+              <td style="padding-left:20px;" class="text-sm">
+                <span class="local-time" data-utc="{{ d.fired_at }}">{{ d.fired_at }}</span>
+              </td>
+              <td>{{ d.alert_name }}</td>
+              <td class="text-sm">{{ d.policy_name }}</td>
+              <td class="text-center text-sm">
+                {{ d.old_score | round(precision=2) }}% → <strong>{{ d.new_score | round(precision=2) }}%</strong>
+              </td>
+              <td class="text-sm">
+                {% if d.action == "notify" %}<i class="fas fa-bell fa-fw mr-1"></i>OpenSCM
+                {% else %}<i class="fas fa-paper-plane fa-fw mr-1"></i>{{ d.action }} — {{ d.target }}
+                {% endif %}
+              </td>
+              <td class="text-center">
+                {% if d.status == "sent" %}
+                  <span class="badge badge-success-soft text-success"><i class="fas fa-check mr-1"></i>Sent</span>
+                {% elif d.status == "pending" %}
+                  <span class="badge badge-light text-secondary"><i class="fas fa-clock mr-1"></i>Queued</span>
+                {% else %}
+                  {# The error is shown, not hidden behind a status word: a
+                     broken webhook is only actionable if you can see why. #}
+                  <span class="badge badge-danger-soft text-danger" title="{{ d.last_error }}">
+                    <i class="fas fa-times mr-1"></i>Failed
+                  </span>
+                {% endif %}
+                {% if d.attempts > 1 %}<div class="text-muted text-xs">{{ d.attempts }} attempts</div>{% endif %}
+              </td>
+            </tr>
+            {% if d.status == "failed" and d.last_error %}
+            <tr><td colspan="6" class="bg-light text-danger text-xs px-4 py-1">{{ d.last_error }}</td></tr>
+            {% endif %}
+            {% endfor %}
+          </tbody>
+        </table>
+        {% endif %}
+      </div>
+    </div>
+  </div>
+</section>
+{% endblock %}

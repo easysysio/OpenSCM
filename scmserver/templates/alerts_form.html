@@ -1,0 +1,184 @@
+{% extends "base.html" %}
+{% block title %}{% if alert %}Edit alert{% else %}New alert{% endif %}{% endblock %}
+{% block content %}
+<div class="content-header">
+  <div class="container-fluid">
+    <h1 class="m-0 font-weight-bold">{% if alert %}Edit alert{% else %}New alert{% endif %}</h1>
+  </div>
+</div>
+
+<section class="content">
+  <div class="container-fluid">
+    <form method="POST"
+          action="{% if alert %}/alerts/{{ alert.id }}/update{% else %}/alerts/create{% endif %}">
+      <div class="card">
+        <div class="card-body">
+
+          <div class="form-group">
+            <label for="name">Name</label>
+            <input type="text" class="form-control" id="name" name="name" required
+                   maxlength="120" placeholder="e.g. Production CIS drop"
+                   value="{% if alert %}{{ alert.name }}{% endif %}">
+          </div>
+
+          <div class="custom-control custom-checkbox mb-4">
+            <input type="checkbox" class="custom-control-input" id="enabled" name="enabled"
+                   {% if not alert or alert.enabled %}checked{% endif %}>
+            <label class="custom-control-label" for="enabled">Enabled</label>
+          </div>
+
+          <h5 class="font-weight-bold">When</h5>
+          <div class="form-row">
+            <div class="form-group col-md-5">
+              <label for="scope_type">Policy</label>
+              <select class="form-control" id="scope_type" name="scope_type">
+                <option value="policy" {% if alert and alert.scope_type == "policy" %}selected{% endif %}>A single policy</option>
+                <option value="all_policies" {% if alert and alert.scope_type == "all_policies" %}selected{% endif %}>All policies</option>
+              </select>
+            </div>
+            <div class="form-group col-md-7" id="policy-picker">
+              <label for="policy_id">&nbsp;</label>
+              <select class="form-control" id="policy_id" name="policy_id">
+                {% for p in policies %}
+                <option value="{{ p.0 }}" {% if alert and alert.policy_id == p.0 %}selected{% endif %}>{{ p.1 }}</option>
+                {% endfor %}
+              </select>
+            </div>
+          </div>
+
+          <div class="form-row">
+            <div class="form-group col-md-5">
+              <label for="trigger_type">Compliance</label>
+              <select class="form-control" id="trigger_type" name="trigger_type">
+                <option value="drop"  {% if alert and alert.trigger_type == "drop"  %}selected{% endif %}>drops by</option>
+                <option value="gain"  {% if alert and alert.trigger_type == "gain"  %}selected{% endif %}>rises by</option>
+                <option value="below" {% if alert and alert.trigger_type == "below" %}selected{% endif %}>falls below</option>
+                <option value="above" {% if alert and alert.trigger_type == "above" %}selected{% endif %}>rises above</option>
+              </select>
+            </div>
+            <div class="form-group col-md-3">
+              <label for="threshold">Threshold</label>
+              <div class="input-group">
+                <input type="number" step="0.1" min="0.1" class="form-control" id="threshold"
+                       name="threshold" required
+                       value="{% if alert %}{{ alert.threshold }}{% else %}10{% endif %}">
+                {# The unit changes with the trigger. "drops by 10%" and "falls
+                   below 10%" are very different rules; leaving the unit
+                   ambiguous is how someone creates the wrong one. #}
+                <div class="input-group-append">
+                  <span class="input-group-text" id="threshold-unit">points</span>
+                </div>
+              </div>
+            </div>
+            <div class="form-group col-md-4">
+              <label for="score_axis">Measuring</label>
+              <select class="form-control" id="score_axis" name="score_axis">
+                <option value="test"   {% if alert and alert.score_axis == "test"   %}selected{% endif %}>Test compliance</option>
+                <option value="system" {% if alert and alert.score_axis == "system" %}selected{% endif %}>System compliance</option>
+              </select>
+              <small class="form-text text-muted">
+                Pinned to this rule, so changing the display setting later cannot
+                quietly change what it means.
+              </small>
+            </div>
+          </div>
+
+          <h5 class="font-weight-bold mt-3">Then</h5>
+          <div class="form-row">
+            <div class="form-group col-md-5">
+              <label for="action">Action</label>
+              <select class="form-control" id="action" name="action">
+                <option value="notify"  {% if alert and alert.action == "notify"  %}selected{% endif %}>Notify in OpenSCM</option>
+                <option value="email"   {% if alert and alert.action == "email"   %}selected{% endif %}>Email</option>
+                <option value="webhook" {% if alert and alert.action == "webhook" %}selected{% endif %}>Webhook</option>
+                <option value="syslog"  {% if alert and alert.action == "syslog"  %}selected{% endif %}>Syslog</option>
+              </select>
+            </div>
+            <div class="form-group col-md-7" id="target-field">
+              <label for="target" id="target-label">Destination</label>
+              <input type="text" class="form-control" id="target" name="target"
+                     value="{% if alert %}{{ alert.target }}{% endif %}">
+              <small class="form-text text-muted" id="target-help"></small>
+            </div>
+          </div>
+
+          <div class="form-group" id="secret-field">
+            <label for="target_secret">Authorization header <span class="text-muted">(optional)</span></label>
+            <input type="password" class="form-control" id="target_secret" name="target_secret"
+                   placeholder="{% if alert %}unchanged{% else %}e.g. Bearer …{% endif %}"
+                   autocomplete="new-password">
+            <small class="form-text text-muted">
+              Sent as the <code>Authorization</code> header. Leave blank to keep the existing value.
+            </small>
+          </div>
+
+          <div class="form-group col-md-4 pl-0">
+            <label for="cooldown_minutes">Cooldown</label>
+            <div class="input-group">
+              <input type="number" min="0" class="form-control" id="cooldown_minutes"
+                     name="cooldown_minutes"
+                     value="{% if alert %}{{ alert.cooldown_minutes }}{% else %}60{% endif %}">
+              <div class="input-group-append"><span class="input-group-text">minutes</span></div>
+            </div>
+            <small class="form-text text-muted">
+              Minimum gap between alerts for the same policy. Bounds a flapping
+              policy to one message per period.
+            </small>
+          </div>
+
+        </div>
+        <div class="card-footer text-right">
+          <a href="/alerts" class="btn btn-outline-secondary btn-sm">Cancel</a>
+          <button type="submit" class="btn btn-primary btn-sm">
+            <i class="fas fa-save mr-1"></i> Save alert
+          </button>
+        </div>
+      </div>
+    </form>
+  </div>
+</section>
+{% endblock %}
+
+{% block scripts %}
+<script>
+(function () {
+  var trigger = document.getElementById('trigger_type');
+  var unit    = document.getElementById('threshold-unit');
+  var action  = document.getElementById('action');
+  var scope   = document.getElementById('scope_type');
+
+  // The threshold unit follows the trigger: drops/rises are POINTS of
+  // movement, falls-below/rises-above are an absolute PERCENTAGE.
+  function syncUnit() {
+    var t = trigger.value;
+    unit.textContent = (t === 'drop' || t === 'gain') ? 'points' : '%';
+  }
+
+  var TARGETS = {
+    notify:  { label: 'Destination', help: 'Goes to the bell icon for every administrator. No address needed.', show: false, secret: false },
+    email:   { label: 'Email address', help: 'Comma-separate several addresses. Requires SMTP to be configured.', show: true, secret: false },
+    webhook: { label: 'Webhook URL', help: 'A POST with a JSON body. Reaches Slack, Teams, PagerDuty and anything else that accepts HTTP.', show: true, secret: true },
+    syslog:  { label: 'Syslog server', help: 'host or host:port — RFC 5424 over UDP, port 514 by default. UDP is fire-and-forget: a send cannot confirm arrival.', show: true, secret: false }
+  };
+
+  function syncAction() {
+    var cfg = TARGETS[action.value] || TARGETS.notify;
+    document.getElementById('target-label').textContent = cfg.label;
+    document.getElementById('target-help').textContent  = cfg.help;
+    document.getElementById('target-field').style.display  = cfg.show ? '' : 'none';
+    document.getElementById('secret-field').style.display  = cfg.secret ? '' : 'none';
+    document.getElementById('target').required = cfg.show;
+  }
+
+  function syncScope() {
+    document.getElementById('policy-picker').style.display =
+      scope.value === 'all_policies' ? 'none' : '';
+  }
+
+  trigger.addEventListener('change', syncUnit);
+  action.addEventListener('change', syncAction);
+  scope.addEventListener('change', syncScope);
+  syncUnit(); syncAction(); syncScope();
+})();
+</script>
+{% endblock %}

@@ -1,0 +1,110 @@
+{% extends "base.html" %}
+{% block title %}Alerts{% endblock %}
+{% block content %}
+<div class="content-header">
+  <div class="container-fluid">
+    <div class="row mb-2">
+      <div class="col-sm-6"><h1 class="m-0 font-weight-bold">Alerts</h1></div>
+      <div class="col-sm-6">
+        <ol class="breadcrumb float-sm-right">
+          <li class="breadcrumb-item"><a href="/">Home</a></li>
+          <li class="breadcrumb-item active">Alerts</li>
+        </ol>
+      </div>
+    </div>
+  </div>
+</div>
+
+<section class="content">
+  <div class="container-fluid">
+    <div class="card">
+      <div class="card-header d-flex align-items-center">
+        <h3 class="card-title font-weight-bold mb-0">
+          <i class="fas fa-bell mr-2 text-warning"></i>Alert Rules
+        </h3>
+        <div class="ml-auto">
+          <a href="/alerts/history" class="btn btn-outline-secondary btn-sm mr-1">
+            <i class="fas fa-history mr-1"></i> Delivery history
+          </a>
+          {% if is_admin %}
+          <a href="/alerts/new" class="btn btn-primary btn-sm">
+            <i class="fas fa-plus mr-1"></i> New alert
+          </a>
+          {% endif %}
+        </div>
+      </div>
+
+      <div class="card-body p-0">
+        {% if alerts | length == 0 %}
+          <div class="text-center text-muted py-5">
+            <i class="fas fa-bell-slash fa-2x mb-3 d-block"></i>
+            <p class="mb-1">No alerts yet.</p>
+            <p class="small mb-0">
+              OpenSCM records a compliance score every time a policy runs. An alert
+              tells you when one moves, instead of waiting for someone to look.
+            </p>
+          </div>
+        {% else %}
+        <table class="table table-hover mb-0">
+          <thead>
+            <tr>
+              <th style="padding-left:20px;">Name</th>
+              <th>Watches</th>
+              <th>When</th>
+              <th>Then</th>
+              <th class="text-center" style="width:110px;">Last fired</th>
+              <th class="text-right" style="width:190px;"></th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for a in alerts %}
+            <tr {% if not a.enabled %}class="text-muted"{% endif %}>
+              <td style="padding-left:20px;">
+                <strong>{{ a.name }}</strong>
+                {% if not a.enabled %}<span class="badge badge-secondary ml-1">Disabled</span>{% endif %}
+              </td>
+              <td>{{ a.policy_name }}</td>
+              <td class="text-sm">{{ a.condition }}</td>
+              <td class="text-sm">
+                {% if a.action == "notify" %}<i class="fas fa-bell fa-fw mr-1"></i>Notify in OpenSCM
+                {% elif a.action == "email" %}<i class="fas fa-envelope fa-fw mr-1"></i>{{ a.target }}
+                {% elif a.action == "webhook" %}<i class="fas fa-link fa-fw mr-1"></i>{{ a.target }}
+                {% else %}<i class="fas fa-server fa-fw mr-1"></i>syslog {{ a.target }}
+                {% endif %}
+              </td>
+              <td class="text-center text-sm">
+                {% if a.last_fired_at %}<span class="local-time" data-utc="{{ a.last_fired_at }}">{{ a.last_fired_at }}</span>
+                {% else %}<span class="text-muted">—</span>{% endif %}
+              </td>
+              <td class="text-right" style="white-space:nowrap;">
+                {% if is_admin %}
+                <button type="button" class="btn btn-outline-secondary btn-xs"
+                        onclick="return postTo('/alerts/{{ a.id }}/test', 'Send a test delivery through this alert\'s transport?')"
+                        title="Send a test delivery">
+                  <i class="fas fa-paper-plane"></i> Test
+                </button>
+                <a href="/alerts/{{ a.id }}/edit" class="btn btn-outline-secondary btn-xs" title="Edit">
+                  <i class="fas fa-edit"></i>
+                </a>
+                <button type="button" class="btn btn-outline-secondary btn-xs"
+                        onclick="return postTo('/alerts/{{ a.id }}/toggle')"
+                        title="{% if a.enabled %}Disable{% else %}Enable{% endif %}">
+                  <i class="fas {% if a.enabled %}fa-pause{% else %}fa-play{% endif %}"></i>
+                </button>
+                <button type="button" class="btn btn-outline-danger btn-xs"
+                        onclick="return postTo('/alerts/{{ a.id }}/delete', 'Delete this alert? Its delivery history is kept.')"
+                        title="Delete">
+                  <i class="fas fa-trash"></i>
+                </button>
+                {% endif %}
+              </td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+        {% endif %}
+      </div>
+    </div>
+  </div>
+</section>
+{% endblock %}
