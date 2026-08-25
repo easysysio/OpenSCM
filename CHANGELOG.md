@@ -6,6 +6,10 @@ All notable changes to OpenSCM are documented here.
 
 ## [Unreleased]
 
+---
+
+## [0.9.0] - 2026-08-25
+
 ### Added
 - **Alerting.** A new **Alerts** section tells you when compliance moves, instead of waiting for someone to open a page. A rule watches one policy or all of them, and fires when the score **drops by** or **rises by** a number of points, or **falls below** or **rises above** a percentage. It can notify inside OpenSCM, send an email, POST to a webhook, or write to a syslog server.
 
