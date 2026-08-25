@@ -316,3 +316,216 @@ pub async fn queue_delivery(
         );
     }
 }
+
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Enum: AlertMode
+// Whether a recalculation may deliver. BaselineOnly records state without
+// notifying anyone — used by the first recalculation after boot.
+// ─────────────────────────────────────────────────────────────────────────────
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AlertMode {
+    Deliver,
+    BaselineOnly,
+}
+
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Struct: PolicyScore
+// A policy's identity and both compliance axes, as read either side of a
+// recalculation. Both axes are captured because a rule pins the axis it
+// watches at creation time.
+// ─────────────────────────────────────────────────────────────────────────────
+#[derive(Debug, Clone)]
+pub struct PolicyScore {
+    pub id: i64,
+    pub tenant_id: String,
+    pub name: String,
+    pub score_test: f64,
+    pub score_system: f64,
+}
+
+impl PolicyScore {
+    fn by_axis(&self, axis: &str) -> f64 {
+        match axis {
+            "system" => self.score_system,
+            _ => self.score_test,
+        }
+    }
+}
+
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Public: snapshot_scores
+// Every policy's current scores, for comparison either side of a recalc.
+// Returns an empty map on error: failing to alert is bad, but failing a
+// recalculation because alerting could not read is worse.
+// ─────────────────────────────────────────────────────────────────────────────
+pub async fn snapshot_scores(
+    pool: &SqlitePool,
+    tenant: Option<&str>,
+) -> std::collections::HashMap<i64, PolicyScore> {
+    let sql = "SELECT id, tenant_id, name, score_test, score_system FROM policies";
+    let rows = match tenant {
+        Some(t) => sqlx::query(&format!("{sql} WHERE tenant_id = ?")).bind(t).fetch_all(pool).await,
+        None => sqlx::query(sql).fetch_all(pool).await,
+    };
+
+    let mut out = std::collections::HashMap::new();
+    match rows {
+        Ok(rows) => {
+            for r in rows {
+                let id: i64 = r.try_get("id").unwrap_or_default();
+                out.insert(
+                    id,
+                    PolicyScore {
+                        id,
+                        tenant_id: r.try_get("tenant_id").unwrap_or_default(),
+                        name: r.try_get("name").unwrap_or_default(),
+                        score_test: r.try_get("score_test").unwrap_or(-1.0),
+                        score_system: r.try_get("score_system").unwrap_or(-1.0),
+                    },
+                );
+            }
+        }
+        Err(e) => error!("Alert snapshot failed: {}", e),
+    }
+    out
+}
+
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Public: evaluate_all
+// Compares two snapshots and acts on every rule that applies.
+//
+// State is written for EVERY decision, not only when firing: a rule that stays
+// quiet still needs its baseline advanced, or the next comparison is made
+// against a score from an arbitrary point in the past.
+// ─────────────────────────────────────────────────────────────────────────────
+pub async fn evaluate_all(
+    pool: &SqlitePool,
+    tenant: Option<&str>,
+    before: &std::collections::HashMap<i64, PolicyScore>,
+    after: &std::collections::HashMap<i64, PolicyScore>,
+    mode: AlertMode,
+) {
+    let rules = load_rules(pool, tenant).await;
+    if rules.is_empty() {
+        return;
+    }
+
+    for rule in &rules {
+        for (policy_id, now) in after {
+            if now.tenant_id != rule.tenant_id || !applies_to(rule, *policy_id) {
+                continue;
+            }
+
+            let current = now.by_axis(&rule.score_axis);
+            // A policy with no "before" is new to this recalculation; there is
+            // nothing to compare it against, so record the baseline only.
+            let previous = match before.get(policy_id) {
+                Some(p) => p.by_axis(&rule.score_axis),
+                None => {
+                    write_state(pool, rule.id, *policy_id, current, "ok", false).await;
+                    continue;
+                }
+            };
+
+            let obs = Observation { previous, current };
+            let muted = in_cooldown(pool, rule, *policy_id).await;
+            let decision = evaluate(rule, obs, muted);
+
+            match decision {
+                Decision::Fire if mode == AlertMode::Deliver => {
+                    queue_delivery(pool, rule, *policy_id, &now.name, obs).await;
+                    write_state(pool, rule.id, *policy_id, current, "firing", true).await;
+                }
+                Decision::Fire => {
+                    // BaselineOnly: record that this is the firing state so the
+                    // guard is correct, but tell nobody.
+                    write_state(pool, rule.id, *policy_id, current, "firing", false).await;
+                }
+                Decision::Muted => {
+                    write_state(pool, rule.id, *policy_id, current, "firing", false).await;
+                }
+                Decision::Quiet => {
+                    write_state(pool, rule.id, *policy_id, current, "ok", false).await;
+                }
+                Decision::NoComparison => {
+                    // Baseline only; leave the firing state untouched, since
+                    // an unscanned policy has not recovered, it has gone quiet.
+                    write_state_score_only(pool, rule.id, *policy_id, current).await;
+                }
+            }
+        }
+    }
+}
+
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Helper: in_cooldown
+// Whether this (alert, policy) pair fired recently enough to stay muted.
+// ─────────────────────────────────────────────────────────────────────────────
+async fn in_cooldown(pool: &SqlitePool, rule: &Rule, policy_id: i64) -> bool {
+    if rule.cooldown_minutes <= 0 {
+        return false;
+    }
+    sqlx::query_scalar::<_, i64>(
+        "SELECT COUNT(*) FROM alert_state
+         WHERE alert_id = ? AND policy_id = ?
+           AND last_fired_at IS NOT NULL
+           AND last_fired_at > datetime('now', ?)",
+    )
+    .bind(rule.id)
+    .bind(policy_id)
+    .bind(format!("-{} minutes", rule.cooldown_minutes))
+    .fetch_one(pool)
+    .await
+    .unwrap_or(0)
+        > 0
+}
+
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Helper: write_state / write_state_score_only
+// ─────────────────────────────────────────────────────────────────────────────
+async fn write_state(
+    pool: &SqlitePool,
+    alert_id: i64,
+    policy_id: i64,
+    score: f64,
+    state: &str,
+    fired: bool,
+) {
+    let sql = if fired {
+        "INSERT INTO alert_state (alert_id, policy_id, last_score, state, last_fired_at)
+         VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)
+         ON CONFLICT(alert_id, policy_id) DO UPDATE SET
+           last_score = excluded.last_score, state = excluded.state,
+           last_fired_at = CURRENT_TIMESTAMP"
+    } else {
+        "INSERT INTO alert_state (alert_id, policy_id, last_score, state)
+         VALUES (?, ?, ?, ?)
+         ON CONFLICT(alert_id, policy_id) DO UPDATE SET
+           last_score = excluded.last_score, state = excluded.state"
+    };
+    if let Err(e) = sqlx::query(sql)
+        .bind(alert_id).bind(policy_id).bind(score).bind(state)
+        .execute(pool).await
+    {
+        error!("Failed to write alert state ({alert_id},{policy_id}): {e}");
+    }
+}
+
+async fn write_state_score_only(pool: &SqlitePool, alert_id: i64, policy_id: i64, score: f64) {
+    if let Err(e) = sqlx::query(
+        "INSERT INTO alert_state (alert_id, policy_id, last_score)
+         VALUES (?, ?, ?)
+         ON CONFLICT(alert_id, policy_id) DO UPDATE SET last_score = excluded.last_score",
+    )
+    .bind(alert_id).bind(policy_id).bind(score)
+    .execute(pool).await
+    {
+        error!("Failed to write alert baseline ({alert_id},{policy_id}): {e}");
+    }
+}

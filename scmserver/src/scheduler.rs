@@ -419,6 +419,14 @@ async fn update_container_stats(
 
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Enum: AlertMode
+// Whether a recalculation may deliver alerts. BaselineOnly records the new
+// scores as alert state without notifying anyone — see
+// recalculate_current_compliance_at_startup.
+// ─────────────────────────────────────────────────────────────────────────────
+pub use crate::alerts::AlertMode;
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Private: run_recalc
 // Core aggregation. `tenant = None` recalculates every tenant (startup, manual
 // sync_tx edits); `tenant = Some(id)` scopes all four passes to one tenant —
@@ -430,7 +438,15 @@ async fn update_container_stats(
 // tenant-local, so per-tenant scoping yields identical numbers to the global
 // pass for that tenant — it just skips touching everyone else.
 // ─────────────────────────────────────────────────────────────────────────────
-async fn run_recalc(pool: &SqlitePool, tenant: Option<&str>) -> Result<(), sqlx::Error> {
+async fn run_recalc(
+    pool: &SqlitePool,
+    tenant: Option<&str>,
+    alerts: AlertMode,
+) -> Result<(), sqlx::Error> {
+    // Scores BEFORE the recalculation. This is the only moment the previous
+    // value is still available, and alerting is entirely a comparison.
+    let before = crate::alerts::snapshot_scores(pool, tenant).await;
+
     let mut tx = pool.begin().await?;
 
     purge_ghost_results(&mut tx, tenant).await?;
@@ -440,6 +456,14 @@ async fn run_recalc(pool: &SqlitePool, tenant: Option<&str>) -> Result<(), sqlx:
     update_policy_stats(&mut tx, tenant).await?;
 
     tx.commit().await?;
+
+    // AFTER the commit, never inside the transaction: evaluation queues rows
+    // and the delivery that follows is network I/O. Holding a SQLite write
+    // transaction open across a hung webhook blocks every writer in the
+    // process.
+    let after = crate::alerts::snapshot_scores(pool, tenant).await;
+    crate::alerts::evaluate_all(pool, tenant, &before, &after, alerts).await;
+
     Ok(())
 }
 
@@ -451,7 +475,7 @@ async fn run_recalc(pool: &SqlitePool, tenant: Option<&str>) -> Result<(), sqlx:
 // ─────────────────────────────────────────────────────────────────────────────
 pub async fn recalculate_current_compliance(pool: &SqlitePool) -> Result<(), sqlx::Error> {
     info!("Starting compliance aggregation (all tenants, active systems only)...");
-    run_recalc(pool, None).await?;
+    run_recalc(pool, None, AlertMode::Deliver).await?;
     info!("Compliance recalculation complete.");
     Ok(())
 }
@@ -465,7 +489,28 @@ pub async fn recalculate_current_compliance_for_tenant(
     pool: &SqlitePool,
     tenant_id: &str,
 ) -> Result<(), sqlx::Error> {
-    run_recalc(pool, Some(tenant_id)).await?;
+    run_recalc(pool, Some(tenant_id), AlertMode::Deliver).await?;
+    Ok(())
+}
+
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Public: recalculate_current_compliance_at_startup
+// The first recalculation after boot, which records alert baselines but
+// delivers nothing.
+//
+// After a long outage this pass can move hundreds of scores at once — every
+// one of them looking like a fresh excursion — and would fire an alert storm
+// describing an outage the operator already knows about. Same failure shape as
+// the prune_inactive_systems data loss fixed in 0.7.6: a restart is not an
+// event, it is the absence of observation.
+// ─────────────────────────────────────────────────────────────────────────────
+pub async fn recalculate_current_compliance_at_startup(
+    pool: &SqlitePool,
+) -> Result<(), sqlx::Error> {
+    info!("Starting compliance aggregation (startup — alerts suppressed)...");
+    run_recalc(pool, None, AlertMode::BaselineOnly).await?;
+    info!("Compliance recalculation complete.");
     Ok(())
 }
 
@@ -618,7 +663,7 @@ pub async fn start_background_scheduler(pool: SqlitePool) {
     let startup_pool = pool.clone();
     tokio::spawn(async move {
         info!("Initiating startup compliance synchronization...");
-        if let Err(e) = recalculate_current_compliance(&startup_pool).await {
+        if let Err(e) = recalculate_current_compliance_at_startup(&startup_pool).await {
             error!("Startup compliance recalculation failed: {}", e);
         } else {
             info!("Compliance status successfully synchronized on startup.");
