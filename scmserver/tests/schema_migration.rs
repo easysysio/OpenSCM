@@ -27,7 +27,7 @@ use sqlx::SqlitePool;
 /// The schema version the code currently migrates to. Bump this together
 /// with the migration that raises it — the assertion below is deliberately
 /// exact so a version change has to be a conscious edit, not a silent drift.
-const CURRENT_SCHEMA_VERSION: i64 = 39;
+const CURRENT_SCHEMA_VERSION: i64 = 40;
 
 async fn in_memory_pool() -> SqlitePool {
     SqlitePool::connect("sqlite::memory:").await.expect("in-memory pool")

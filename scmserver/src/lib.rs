@@ -13,6 +13,7 @@ pub mod config;
 pub mod schema;
 pub mod auth;
 pub mod agents;
+pub mod alerts;
 pub mod audit;
 pub mod client;
 pub mod dashboard;

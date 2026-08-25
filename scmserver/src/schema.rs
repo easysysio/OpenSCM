@@ -2574,6 +2574,96 @@ pub async fn run_migrations(pool: &SqlitePool) -> Result<(), sqlx::Error> {
         info!("Schema migration v38 → v39 complete.");
     }
 
+    // v39 → v40: compliance alerting (0.9.0).
+    //
+    // Design: docs/design/0.9.0-alerting.md. Three tables:
+    //   alerts            — the rule
+    //   alert_state       — edge detection, keyed (alert, policy)
+    //   alert_deliveries  — the outbox and the audit trail
+    if version < 40 {
+        info!("Running schema migration v39 → v40 (compliance alerting)...");
+
+        sqlx::query(
+            "CREATE TABLE IF NOT EXISTS alerts (
+                id               INTEGER PRIMARY KEY AUTOINCREMENT,
+                tenant_id        VARCHAR(191) NOT NULL DEFAULT 'default',
+                name             TEXT    NOT NULL,
+                enabled          INTEGER NOT NULL DEFAULT 1,
+                scope_type       TEXT    NOT NULL DEFAULT 'policy',
+                policy_id        INTEGER,
+                trigger_type     TEXT    NOT NULL,
+                threshold        REAL    NOT NULL,
+                -- Which compliance axis this rule watches, pinned at creation.
+                -- The tenant's display toggle must not silently change what an
+                -- existing alert means (the 0.6.6 dual-mode lesson).
+                score_axis       TEXT    NOT NULL DEFAULT 'test',
+                action           TEXT    NOT NULL,
+                target           TEXT,
+                target_secret    TEXT,
+                cooldown_minutes INTEGER NOT NULL DEFAULT 60,
+                created_at       DATETIME DEFAULT CURRENT_TIMESTAMP,
+                created_by       INTEGER,
+                FOREIGN KEY (tenant_id) REFERENCES tenants (id)  ON DELETE CASCADE,
+                FOREIGN KEY (policy_id) REFERENCES policies (id) ON DELETE CASCADE
+            )",
+        ).execute(pool).await?;
+        sqlx::query("CREATE INDEX IF NOT EXISTS idx_alerts_tenant_enabled ON alerts (tenant_id, enabled)")
+            .execute(pool).await?;
+
+        // Keyed (alert, policy), not on the alert row: an all_policies rule
+        // tracks each policy independently, so one policy sitting below a
+        // threshold must not suppress the alert for another.
+        sqlx::query(
+            "CREATE TABLE IF NOT EXISTS alert_state (
+                alert_id      INTEGER NOT NULL,
+                policy_id     INTEGER NOT NULL,
+                last_score    REAL,
+                state         TEXT NOT NULL DEFAULT 'ok',
+                last_fired_at DATETIME,
+                PRIMARY KEY (alert_id, policy_id),
+                FOREIGN KEY (alert_id)  REFERENCES alerts (id)   ON DELETE CASCADE,
+                FOREIGN KEY (policy_id) REFERENCES policies (id) ON DELETE CASCADE
+            )",
+        ).execute(pool).await?;
+
+        // alert_id is deliberately NOT cascaded: deleting a rule must not erase
+        // the record of alerts it already sent. The column goes NULL and the
+        // row survives with its action, target and scores intact.
+        sqlx::query(
+            "CREATE TABLE IF NOT EXISTS alert_deliveries (
+                id            INTEGER PRIMARY KEY AUTOINCREMENT,
+                tenant_id     VARCHAR(191) NOT NULL DEFAULT 'default',
+                alert_id      INTEGER,
+                policy_id     INTEGER,
+                alert_name    TEXT,
+                policy_name   TEXT,
+                fired_at      DATETIME DEFAULT CURRENT_TIMESTAMP,
+                old_score     REAL,
+                new_score     REAL,
+                action        TEXT NOT NULL,
+                target        TEXT,
+                status        TEXT NOT NULL DEFAULT 'pending',
+                attempts      INTEGER NOT NULL DEFAULT 0,
+                last_error    TEXT,
+                next_retry_at DATETIME,
+                FOREIGN KEY (tenant_id) REFERENCES tenants (id) ON DELETE CASCADE
+            )",
+        ).execute(pool).await?;
+        sqlx::query("CREATE INDEX IF NOT EXISTS idx_alert_deliv_retry ON alert_deliveries (status, next_retry_at)")
+            .execute(pool).await?;
+        sqlx::query("CREATE INDEX IF NOT EXISTS idx_alert_deliv_tenant ON alert_deliveries (tenant_id, fired_at)")
+            .execute(pool).await?;
+
+        sqlx::query(
+            "INSERT OR IGNORE INTO settings (tenant_id, skey, value, description) VALUES
+             ('default', 'alert_history_retention_days', '90',
+              'Days to keep alert delivery history before auto-pruning (0 = keep forever)')"
+        ).execute(pool).await?;
+
+        sqlx::query("UPDATE schema_info SET version = 40").execute(pool).await?;
+        info!("Schema migration v39 → v40 complete.");
+    }
+
     Ok(())
 }
 
