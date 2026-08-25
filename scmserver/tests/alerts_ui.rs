@@ -108,3 +108,21 @@ fn history_shows_the_failure_reason() {
     assert!(!h.starts_with("RENDER_ERROR"), "{}", &h[..h.len().min(400)]);
     assert!(h.contains("HTTP 502"), "a failed delivery must show why, not just 'failed'");
 }
+
+// AdminLTE offsets page content past the fixed sidebar with .content-wrapper.
+// Without it a page renders UNDERNEATH the sidebar and its left edge is
+// unreachable — which is exactly how the Alerts pages first shipped, because
+// nothing in Tera or the browser complains about a missing layout div.
+#[test]
+fn every_page_is_offset_past_the_sidebar() {
+    for (name, body) in [
+        ("alerts.html",         include_str!("../templates/alerts.html")),
+        ("alerts_form.html",    include_str!("../templates/alerts_form.html")),
+        ("alerts_history.html", include_str!("../templates/alerts_history.html")),
+    ] {
+        assert!(
+            body.contains(r#"<div class="content-wrapper">"#),
+            "{name} has no .content-wrapper — it will render under the sidebar"
+        );
+    }
+}
