@@ -6,6 +6,9 @@ All notable changes to OpenSCM are documented here.
 
 ## [Unreleased]
 
+### Fixed
+- **The Alerts pages rendered underneath the left navigation.** All three Alerts screens were missing the layout element that offsets page content past the sidebar, so the sidebar covered their left edge and the pages were effectively unusable. Alerts itself worked throughout — rules were evaluated and delivered normally — but they could not be managed from the interface.
+
 ---
 
 ## [0.9.0] - 2026-08-25
