@@ -223,6 +223,25 @@
                 </div>
               </div>
             </div>
+            <div class="row">
+              <div class="col-md-6">
+                <div class="form-group">
+                  <label for="alert_history_retention_days">
+                    <i class="fas fa-bell mr-1 text-muted"></i>
+                    Alert History Retention (days)
+                  </label>
+                  <input type="number" class="form-control" id="alert_history_retention_days"
+                    name="alert_history_retention_days" value="{{ settings.alert_history_retention_days }}"
+                    min="0" max="10000">
+                  <small class="form-text text-muted">
+                    How long to keep the record of alerts that were sent, shown under
+                    <strong>Alerts &rarr; Delivery history</strong>. Set to <strong>0</strong> to keep
+                    forever. Default is <strong>90</strong>.
+                  </small>
+                </div>
+              </div>
+            </div>
+
           </div>
 
           <!-- Compliance Tab -->

@@ -34,6 +34,7 @@ nav:
       - Compliance Tests: guide/tests.md
       - Policies: guide/policies.md
       - Reports: guide/reports.md
+      - Alerts: guide/alerts.md
       - Scheduler: guide/scheduler.md
       - Admin Settings: guide/admin.md
       - LDAP Directories: guide/directories.md
