@@ -778,6 +778,12 @@ pub async fn start_background_scheduler(pool: SqlitePool) {
                 }
             }
 
+            // --- TASK G: DRAIN THE ALERT OUTBOX ---
+            // Deliveries are queued by the evaluator and sent here, so a slow
+            // webhook never delays a recalculation and a restart mid-delivery
+            // loses nothing — the row is still pending.
+            crate::alert_delivery::deliver_pending(&loop_pool).await;
+
             // --- TASK B: AUTO-PRUNE INACTIVE SYSTEMS ---
             prune_inactive_systems(&loop_pool, started_at.elapsed()).await;
 
@@ -1114,12 +1120,19 @@ async fn prune_containers(pool: &SqlitePool) {
 // ─────────────────────────────────────────────────────────────────────────────
 pub async fn prune_trends(pool: &SqlitePool) {
     // (skey, table, audit action) — both passes share the loop body.
-    let passes: [(&str, &str, &str); 2] = [
-        ("entity_trend_retention_days", "entity_compliance_history", "retention.entity_trends_pruned"),
-        ("fleet_trend_retention_days",  "compliance_history",        "retention.fleet_trends_pruned"),
+    // (skey, table, timestamp column, audit action). The column is explicit
+    // because alert_deliveries ages on fired_at while the trend tables use
+    // check_date — hardcoding one of them silently prunes nothing in the other.
+    let passes: [(&str, &str, &str, &str); 3] = [
+        ("entity_trend_retention_days", "entity_compliance_history", "check_date",
+         "retention.entity_trends_pruned"),
+        ("fleet_trend_retention_days",  "compliance_history",        "check_date",
+         "retention.fleet_trends_pruned"),
+        ("alert_history_retention_days", "alert_deliveries",         "fired_at",
+         "retention.alert_history_pruned"),
     ];
 
-    for (skey, table, action) in passes {
+    for (skey, table, date_col, action) in passes {
         let tenants: Vec<(String, i64)> = match sqlx::query_as::<_, (String, i64)>(
             &format!(
                 "SELECT tenant_id, CAST(value AS INTEGER) FROM settings
@@ -1136,7 +1149,7 @@ pub async fn prune_trends(pool: &SqlitePool) {
             let res = sqlx::query(&format!(
                 "DELETE FROM {}
                  WHERE tenant_id = ?
-                   AND check_date < strftime('%Y-%m-%d %H:%M:%S', 'now', '-' || ? || ' days')", table))
+                   AND {} < strftime('%Y-%m-%d %H:%M:%S', 'now', '-' || ? || ' days')", table, date_col))
             .bind(&tenant_id).bind(days)
             .execute(pool).await;
 

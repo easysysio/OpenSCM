@@ -14,6 +14,7 @@ pub mod schema;
 pub mod auth;
 pub mod agents;
 pub mod alerts;
+pub mod alert_delivery;
 pub mod audit;
 pub mod client;
 pub mod dashboard;
