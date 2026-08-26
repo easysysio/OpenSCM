@@ -6,6 +6,9 @@ All notable changes to OpenSCM are documented here.
 
 ## [Unreleased]
 
+### Fixed
+- **The Alerts pages showed no confirmation or error messages.** Saving, deleting or testing an alert redirected back with a message that was never displayed, so a successful save and a rejected one looked identical — a webhook URL refused for pointing at a private address simply appeared to do nothing. The Alerts screens now show the same success and error banners as the rest of the product.
+
 ---
 
 ## [0.9.1] - 2026-08-25

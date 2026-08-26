@@ -126,3 +126,35 @@ fn every_page_is_offset_past_the_sidebar() {
         );
     }
 }
+
+// The handlers redirect with ?success_message= / ?error_message=. Without a
+// block rendering them the messages are parsed, placed in the context and
+// silently dropped — so a rejected webhook URL or a failed save looks exactly
+// like nothing happening.
+#[test]
+fn pages_render_flash_messages() {
+    for tpl in ["alerts.html", "alerts_history.html"] {
+        let mut c = base_ctx(true);
+        c.insert("alerts", &Vec::<u8>::new());
+        c.insert("deliveries", &Vec::<u8>::new());
+        c.insert("error_message", "Webhook URL must use https://");
+        let h = render(tpl, c);
+        assert!(!h.starts_with("RENDER_ERROR"), "{tpl}");
+        assert!(h.contains("alert-danger"), "{tpl} does not render error_message");
+        assert!(h.contains("must use https"), "{tpl} drops the message text");
+    }
+}
+
+// A stray closing tag in a title block is invisible to Tera and to the tests
+// above, but shows up in the browser tab and leaves the layout unclosed.
+#[test]
+fn title_blocks_contain_no_markup() {
+    for (name, body) in [
+        ("alerts.html",         include_str!("../templates/alerts.html")),
+        ("alerts_form.html",    include_str!("../templates/alerts_form.html")),
+        ("alerts_history.html", include_str!("../templates/alerts_history.html")),
+    ] {
+        let line = body.lines().find(|l| l.contains("block title")).expect("title block");
+        assert!(!line.contains("</"), "{name}: closing tag inside the title block: {line}");
+    }
+}
