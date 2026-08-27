@@ -33,13 +33,22 @@ pub struct AlertRow {
     pub trigger_type: String,
     pub threshold: f64,
     pub score_axis: String,
-    pub action: String,
-    pub target: String,
+    /// Every action, for display and for re-checking boxes on the edit form.
+    pub actions: Vec<ActionRow>,
     pub cooldown_minutes: i64,
     pub last_fired_at: Option<String>,
     /// Rendered here rather than in the template: "drops by 10 points" and
     /// "falls below 10%" are different rules and must never look alike.
     pub condition: String,
+}
+
+#[derive(Serialize, Clone)]
+pub struct ActionRow {
+    pub action: String,
+    pub target: String,
+    /// Whether a secret is stored. The value itself is never sent to the
+    /// browser; the form only needs to know whether to say "unchanged".
+    pub has_secret: bool,
 }
 
 #[derive(Serialize)]
@@ -82,8 +91,8 @@ async fn load_alerts(pool: &SqlitePool, tenant: &str) -> Vec<AlertRow> {
     let rows = sqlx::query(
         "SELECT a.id, a.name, a.enabled, a.scope_type, a.policy_id,
                 COALESCE(p.name, '') AS policy_name,
-                a.trigger_type, a.threshold, a.score_axis, a.action,
-                COALESCE(a.target, '') AS target, a.cooldown_minutes,
+                a.trigger_type, a.threshold, a.score_axis,
+                a.cooldown_minutes,
                 (SELECT MAX(last_fired_at) FROM alert_state s WHERE s.alert_id = a.id) AS last_fired_at
          FROM alerts a
          LEFT JOIN policies p ON p.id = a.policy_id AND p.tenant_id = a.tenant_id
@@ -95,13 +104,14 @@ async fn load_alerts(pool: &SqlitePool, tenant: &str) -> Vec<AlertRow> {
     .await
     .unwrap_or_default();
 
-    rows.into_iter()
-        .map(|r| {
+    let mut out = Vec::new();
+    for r in rows {
+        {
             let trigger: String = r.try_get("trigger_type").unwrap_or_default();
             let threshold: f64 = r.try_get("threshold").unwrap_or_default();
             let axis: String = r.try_get("score_axis").unwrap_or_else(|_| "test".into());
             let scope: String = r.try_get("scope_type").unwrap_or_else(|_| "policy".into());
-            AlertRow {
+            let row = AlertRow {
                 id: r.try_get("id").unwrap_or_default(),
                 name: r.try_get("name").unwrap_or_default(),
                 enabled: r.try_get::<i64, _>("enabled").unwrap_or(1) != 0,
@@ -116,13 +126,40 @@ async fn load_alerts(pool: &SqlitePool, tenant: &str) -> Vec<AlertRow> {
                 trigger_type: trigger,
                 threshold,
                 score_axis: axis,
-                action: r.try_get("action").unwrap_or_default(),
-                target: r.try_get("target").unwrap_or_default(),
+                actions: load_action_rows(pool, r.try_get("id").unwrap_or_default()).await,
                 cooldown_minutes: r.try_get("cooldown_minutes").unwrap_or(60),
                 last_fired_at: r.try_get("last_fired_at").ok().flatten(),
-            }
+            };
+            out.push(row);
+        }
+    }
+    out
+}
+
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Helper: load_action_rows
+// ─────────────────────────────────────────────────────────────────────────────
+async fn load_action_rows(pool: &SqlitePool, alert_id: i64) -> Vec<ActionRow> {
+    sqlx::query("SELECT action, COALESCE(target,'') AS target, target_secret
+                 FROM alert_actions WHERE alert_id = ? ORDER BY id")
+        .bind(alert_id)
+        .fetch_all(pool)
+        .await
+        .map(|rows| {
+            rows.into_iter()
+                .map(|r| ActionRow {
+                    action: r.try_get("action").unwrap_or_default(),
+                    target: r.try_get("target").unwrap_or_default(),
+                    has_secret: r
+                        .try_get::<Option<String>, _>("target_secret")
+                        .ok()
+                        .flatten()
+                        .is_some_and(|s| !s.is_empty()),
+                })
+                .collect()
         })
-        .collect()
+        .unwrap_or_default()
 }
 
 
@@ -198,9 +235,8 @@ struct FormValues {
     trigger_type: String,
     threshold: f64,
     score_axis: String,
-    action: String,
-    target: Option<String>,
-    target_secret: Option<String>,
+    /// (action, target, secret) — one per checked action.
+    actions: Vec<(String, Option<String>, Option<String>)>,
     cooldown_minutes: i64,
     enabled: i64,
 }
@@ -243,20 +279,32 @@ fn read_form(raw: &str) -> Result<FormValues, String> {
 
     let score_axis = if get("score_axis") == "system" { "system" } else { "test" }.to_string();
 
-    let action = get("action");
-    if !matches!(action.as_str(), "notify" | "email" | "webhook" | "syslog") {
-        return Err("Unknown action".into());
+    // Each action is an independent checkbox with its own destination field,
+    // so a rule can email AND notify AND post to a webhook from one event.
+    let mut actions: Vec<(String, Option<String>, Option<String>)> = Vec::new();
+    for kind in ["notify", "email", "webhook", "syslog"] {
+        if get(&format!("action_{kind}")) != "on" {
+            continue;
+        }
+        let target = get(&format!("target_{kind}")).trim().to_string();
+        if kind != "notify" && target.is_empty() {
+            return Err(format!("The {kind} action needs a destination"));
+        }
+        if kind == "webhook" {
+            crate::alert_delivery::validate_webhook_target(
+                &target, crate::handlers::is_saas_mode(),
+            )?;
+        }
+        let secret = get(&format!("secret_{kind}")).trim().to_string();
+        actions.push((
+            kind.to_string(),
+            if target.is_empty() { None } else { Some(target) },
+            if secret.is_empty() { None } else { Some(secret) },
+        ));
     }
-
-    let target = get("target").trim().to_string();
-    if action != "notify" && target.is_empty() {
-        return Err("This action needs a destination".into());
+    if actions.is_empty() {
+        return Err("Choose at least one action — an alert that does nothing is not an alert".into());
     }
-    if action == "webhook" {
-        crate::alert_delivery::validate_webhook_target(&target, crate::handlers::is_saas_mode())?;
-    }
-
-    let secret = get("target_secret").trim().to_string();
 
     Ok(FormValues {
         name,
@@ -265,12 +313,51 @@ fn read_form(raw: &str) -> Result<FormValues, String> {
         trigger_type,
         threshold,
         score_axis,
-        action,
-        target: if target.is_empty() { None } else { Some(target) },
-        target_secret: if secret.is_empty() { None } else { Some(secret) },
+        actions,
         cooldown_minutes: get("cooldown_minutes").trim().parse().unwrap_or(60),
         enabled: if get("enabled") == "on" { 1 } else { 0 },
     })
+}
+
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Helper: save_actions
+// Replaces a rule's actions wholesale.
+//
+// A blank secret means "leave it alone", not "clear it" — the form never sends
+// the stored value back to the browser, so an edit that does not retype it must
+// not wipe it.
+// ─────────────────────────────────────────────────────────────────────────────
+async fn save_actions(
+    pool: &SqlitePool,
+    alert_id: i64,
+    actions: &[(String, Option<String>, Option<String>)],
+) {
+    let existing: Vec<(String, Option<String>)> = sqlx::query_as(
+        "SELECT action, target_secret FROM alert_actions WHERE alert_id = ?",
+    )
+    .bind(alert_id)
+    .fetch_all(pool)
+    .await
+    .unwrap_or_default();
+
+    let _ = sqlx::query("DELETE FROM alert_actions WHERE alert_id = ?")
+        .bind(alert_id).execute(pool).await;
+
+    for (kind, target, secret) in actions {
+        let keep = secret.clone().or_else(|| {
+            existing.iter().find(|(k, _)| k == kind).and_then(|(_, s)| s.clone())
+        });
+        if let Err(e) = sqlx::query(
+            "INSERT INTO alert_actions (alert_id, action, target, target_secret)
+             VALUES (?, ?, ?, ?)",
+        )
+        .bind(alert_id).bind(kind).bind(target).bind(&keep)
+        .execute(pool).await
+        {
+            error!("Failed to save {} action for alert {}: {}", kind, alert_id, e);
+        }
+    }
 }
 
 
@@ -298,30 +385,35 @@ pub async fn alerts_save(
 
     let result = match id {
         Some(Path(alert_id)) => {
-            sqlx::query(
+            let r = sqlx::query(
                 "UPDATE alerts SET name=?, enabled=?, scope_type=?, policy_id=?, trigger_type=?,
-                                   threshold=?, score_axis=?, action=?, target=?,
-                                   target_secret=COALESCE(?, target_secret), cooldown_minutes=?
+                                   threshold=?, score_axis=?, cooldown_minutes=?
                  WHERE id=? AND tenant_id=?",
             )
             .bind(&v.name).bind(v.enabled).bind(&v.scope_type).bind(v.policy_id)
             .bind(&v.trigger_type).bind(v.threshold).bind(&v.score_axis)
-            .bind(&v.action).bind(&v.target).bind(&v.target_secret)
             .bind(v.cooldown_minutes).bind(alert_id).bind(&auth.tenant_id)
-            .execute(&*pool).await
+            .execute(&*pool).await;
+            if r.is_ok() {
+                save_actions(&pool, alert_id, &v.actions).await;
+            }
+            r
         }
         None => {
-            sqlx::query(
+            let r = sqlx::query(
                 "INSERT INTO alerts (tenant_id, name, enabled, scope_type, policy_id,
-                                     trigger_type, threshold, score_axis, action, target,
-                                     target_secret, cooldown_minutes, created_by)
-                 VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                                     trigger_type, threshold, score_axis,
+                                     cooldown_minutes, created_by)
+                 VALUES (?,?,?,?,?,?,?,?,?,?)",
             )
             .bind(&auth.tenant_id).bind(&v.name).bind(v.enabled).bind(&v.scope_type)
             .bind(v.policy_id).bind(&v.trigger_type).bind(v.threshold).bind(&v.score_axis)
-            .bind(&v.action).bind(&v.target).bind(&v.target_secret)
             .bind(v.cooldown_minutes).bind(auth.userid)
-            .execute(&*pool).await
+            .execute(&*pool).await;
+            if let Ok(ref res) = r {
+                save_actions(&pool, res.last_insert_rowid(), &v.actions).await;
+            }
+            r
         }
     };
 
@@ -396,27 +488,34 @@ pub async fn alerts_test(
         return redir;
     }
 
-    let row = sqlx::query("SELECT name, action, target FROM alerts WHERE id = ? AND tenant_id = ?")
-        .bind(id).bind(&auth.tenant_id)
-        .fetch_optional(&*pool).await.ok().flatten();
-    let Some(row) = row else {
+    let name: Option<String> = sqlx::query_scalar(
+        "SELECT name FROM alerts WHERE id = ? AND tenant_id = ?",
+    )
+    .bind(id).bind(&auth.tenant_id)
+    .fetch_optional(&*pool).await.ok().flatten();
+    let Some(name) = name else {
         return Redirect::to("/alerts?error_message=Alert+not+found").into_response();
     };
 
-    let name: String = row.try_get("name").unwrap_or_default();
-    let action: String = row.try_get("action").unwrap_or_default();
-    let target: Option<String> = row.try_get("target").ok().flatten();
+    // Every action, not just the first: the point of the button is to prove
+    // each transport works, and they fail independently.
+    let actions = crate::alerts::load_actions(&pool, id).await;
+    if actions.is_empty() {
+        return Redirect::to("/alerts?error_message=This+alert+has+no+actions+to+test").into_response();
+    }
 
-    let _ = sqlx::query(
-        "INSERT INTO alert_deliveries
-            (tenant_id, alert_id, policy_id, alert_name, policy_name,
-             old_score, new_score, action, target, status, next_retry_at)
-         VALUES (?, ?, NULL, ?, 'Test — no policy', 100.0, 0.0, ?, ?, 'pending', CURRENT_TIMESTAMP)",
-    )
-    .bind(&auth.tenant_id).bind(id)
-    .bind(format!("{name} (test)"))
-    .bind(&action).bind(&target)
-    .execute(&*pool).await;
+    for act in &actions {
+        let _ = sqlx::query(
+            "INSERT INTO alert_deliveries
+                (tenant_id, alert_id, action_id, policy_id, alert_name, policy_name,
+                 old_score, new_score, action, target, status, next_retry_at)
+             VALUES (?, ?, ?, NULL, ?, 'Test — no policy', 100.0, 0.0, ?, ?, 'pending', CURRENT_TIMESTAMP)",
+        )
+        .bind(&auth.tenant_id).bind(id).bind(act.id)
+        .bind(format!("{name} (test)"))
+        .bind(&act.action).bind(&act.target)
+        .execute(&*pool).await;
+    }
 
     info!("Test delivery queued for alert {} by '{}'", id, auth.username);
     Redirect::to("/alerts/history?success_message=Test+queued+—+it+is+sent+within+a+minute")

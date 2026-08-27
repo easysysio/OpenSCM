@@ -17,8 +17,9 @@ fn rule(trigger: &str, threshold: f64) -> Rule {
         trigger_type: trigger.into(),
         threshold,
         score_axis: "test".into(),
-        action: "notify".into(),
-        target: None,
+        actions: vec![scmserver::alerts::Action {
+            id: 1, action: "notify".into(), target: None,
+        }],
         cooldown_minutes: 60,
     }
 }

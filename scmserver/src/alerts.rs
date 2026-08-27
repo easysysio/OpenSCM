@@ -38,9 +38,24 @@ pub struct Rule {
     pub trigger_type: String,
     pub threshold: f64,
     pub score_axis: String,
+    /// Every action this rule performs when it fires. Cooldown and edge state
+    /// stay on the RULE, so one event mutes all of its actions together;
+    /// only delivery is per action, so a failing webhook does not hold up the
+    /// email beside it.
+    pub actions: Vec<Action>,
+    pub cooldown_minutes: i64,
+}
+
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Struct: Action
+// One thing a rule does when it fires.
+// ─────────────────────────────────────────────────────────────────────────────
+#[derive(Debug, Clone)]
+pub struct Action {
+    pub id: i64,
     pub action: String,
     pub target: Option<String>,
-    pub cooldown_minutes: i64,
 }
 
 
@@ -227,7 +242,7 @@ pub fn summary_line(policy_name: &str, obs: Observation) -> String {
 // ─────────────────────────────────────────────────────────────────────────────
 pub async fn load_rules(pool: &SqlitePool, tenant: Option<&str>) -> Vec<Rule> {
     let sql = "SELECT id, tenant_id, name, scope_type, policy_id, trigger_type,
-                      threshold, score_axis, action, target, cooldown_minutes
+                      threshold, score_axis, cooldown_minutes
                FROM alerts
                WHERE enabled = 1";
     let rows = match tenant {
@@ -237,28 +252,52 @@ pub async fn load_rules(pool: &SqlitePool, tenant: Option<&str>) -> Vec<Rule> {
         None => sqlx::query(sql).fetch_all(pool).await,
     };
 
-    match rows {
-        Ok(rows) => rows
-            .into_iter()
-            .map(|r| Rule {
-                id: r.try_get("id").unwrap_or_default(),
-                tenant_id: r.try_get("tenant_id").unwrap_or_default(),
-                name: r.try_get("name").unwrap_or_default(),
-                scope_type: r.try_get("scope_type").unwrap_or_else(|_| "policy".into()),
-                policy_id: r.try_get("policy_id").ok().flatten(),
-                trigger_type: r.try_get("trigger_type").unwrap_or_default(),
-                threshold: r.try_get("threshold").unwrap_or_default(),
-                score_axis: r.try_get("score_axis").unwrap_or_else(|_| "test".into()),
-                action: r.try_get("action").unwrap_or_else(|_| "notify".into()),
-                target: r.try_get("target").ok().flatten(),
-                cooldown_minutes: r.try_get("cooldown_minutes").unwrap_or(60),
-            })
-            .collect(),
+    let rows = match rows {
+        Ok(r) => r,
         Err(e) => {
             error!("Failed to load alert rules: {}", e);
-            Vec::new()
+            return Vec::new();
         }
+    };
+
+    let mut out = Vec::new();
+    for r in rows {
+        let id: i64 = r.try_get("id").unwrap_or_default();
+        out.push(Rule {
+            id,
+            tenant_id: r.try_get("tenant_id").unwrap_or_default(),
+            name: r.try_get("name").unwrap_or_default(),
+            scope_type: r.try_get("scope_type").unwrap_or_else(|_| "policy".into()),
+            policy_id: r.try_get("policy_id").ok().flatten(),
+            trigger_type: r.try_get("trigger_type").unwrap_or_default(),
+            threshold: r.try_get("threshold").unwrap_or_default(),
+            score_axis: r.try_get("score_axis").unwrap_or_else(|_| "test".into()),
+            actions: load_actions(pool, id).await,
+            cooldown_minutes: r.try_get("cooldown_minutes").unwrap_or(60),
+        });
     }
+    out
+}
+
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Public: load_actions
+// ─────────────────────────────────────────────────────────────────────────────
+pub async fn load_actions(pool: &SqlitePool, alert_id: i64) -> Vec<Action> {
+    sqlx::query("SELECT id, action, target FROM alert_actions WHERE alert_id = ? ORDER BY id")
+        .bind(alert_id)
+        .fetch_all(pool)
+        .await
+        .map(|rows| {
+            rows.into_iter()
+                .map(|r| Action {
+                    id: r.try_get("id").unwrap_or_default(),
+                    action: r.try_get("action").unwrap_or_else(|_| "notify".into()),
+                    target: r.try_get("target").ok().flatten(),
+                })
+                .collect()
+        })
+        .unwrap_or_default()
 }
 
 
@@ -290,31 +329,43 @@ pub async fn queue_delivery(
     policy_name: &str,
     obs: Observation,
 ) {
-    if let Err(e) = sqlx::query(
-        "INSERT INTO alert_deliveries
-            (tenant_id, alert_id, policy_id, alert_name, policy_name,
-             old_score, new_score, action, target, status, next_retry_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', CURRENT_TIMESTAMP)",
-    )
-    .bind(&rule.tenant_id)
-    .bind(rule.id)
-    .bind(policy_id)
-    .bind(&rule.name)
-    .bind(policy_name)
-    .bind(obs.previous)
-    .bind(obs.current)
-    .bind(&rule.action)
-    .bind(&rule.target)
-    .execute(pool)
-    .await
-    {
-        error!("Failed to queue alert delivery for alert {}: {}", rule.id, e);
-    } else {
-        info!(
-            "Alert '{}' fired for policy {} ({}) — queued {} delivery",
-            rule.name, policy_id, summary_line(policy_name, obs), rule.action
-        );
+    if rule.actions.is_empty() {
+        error!("Alert '{}' fired but has no actions configured.", rule.name);
+        return;
     }
+
+    // One row per action. Separate rows mean each transport retries on its own
+    // schedule and appears separately in the history, so a webhook that is down
+    // neither delays nor hides the email that fired with it.
+    for act in &rule.actions {
+        if let Err(e) = sqlx::query(
+            "INSERT INTO alert_deliveries
+                (tenant_id, alert_id, action_id, policy_id, alert_name, policy_name,
+                 old_score, new_score, action, target, status, next_retry_at)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', CURRENT_TIMESTAMP)",
+        )
+        .bind(&rule.tenant_id)
+        .bind(rule.id)
+        .bind(act.id)
+        .bind(policy_id)
+        .bind(&rule.name)
+        .bind(policy_name)
+        .bind(obs.previous)
+        .bind(obs.current)
+        .bind(&act.action)
+        .bind(&act.target)
+        .execute(pool)
+        .await
+        {
+            error!("Failed to queue {} delivery for alert {}: {}", act.action, rule.id, e);
+        }
+    }
+
+    info!(
+        "Alert '{}' fired for policy {} ({}) — queued {} deliver{}",
+        rule.name, policy_id, summary_line(policy_name, obs),
+        rule.actions.len(), if rule.actions.len() == 1 { "y" } else { "ies" }
+    );
 }
 
 

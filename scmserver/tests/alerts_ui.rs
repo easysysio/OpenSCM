@@ -44,7 +44,7 @@ fn viewers_get_no_management_controls() {
     c.insert("alerts", &serde_json::json!([{
         "id": 1, "name": "prod drop", "enabled": true, "scope_type": "policy",
         "policy_id": 1, "policy_name": "CIS", "trigger_type": "drop", "threshold": 10.0,
-        "score_axis": "test", "action": "notify", "target": "", "cooldown_minutes": 60,
+        "score_axis": "test", "actions": [{"action":"notify","target":"","has_secret":false}], "cooldown_minutes": 60,
         "last_fired_at": serde_json::Value::Null,
         "condition": "test compliance drops by 10 points or more"
     }]));
@@ -69,7 +69,9 @@ fn the_form_renders_for_create_and_edit() {
     c.insert("alert", &serde_json::json!({
         "id": 7, "name": "prod drop", "enabled": true, "scope_type": "policy",
         "policy_id": 1, "policy_name": "CIS", "trigger_type": "below", "threshold": 80.0,
-        "score_axis": "system", "action": "webhook", "target": "https://hooks.example.com/x",
+        "score_axis": "system",
+        "actions": [{"action":"webhook","target":"https://hooks.example.com/x","has_secret":true},
+                    {"action":"notify","target":"","has_secret":false}],
         "cooldown_minutes": 30, "last_fired_at": serde_json::Value::Null, "condition": "x"
     }));
     let edit = render("alerts_form.html", c);
@@ -87,9 +89,10 @@ fn the_webhook_secret_is_never_echoed() {
     c.insert("alert", &serde_json::json!({
         "id": 7, "name": "n", "enabled": true, "scope_type": "policy", "policy_id": 1,
         "policy_name": "CIS", "trigger_type": "drop", "threshold": 10.0, "score_axis": "test",
-        "action": "webhook", "target": "https://x/y", "cooldown_minutes": 60,
-        "last_fired_at": serde_json::Value::Null, "condition": "x",
-        "target_secret": "Bearer SUPERSECRET"
+        "actions": [{"action":"webhook","target":"https://x/y","has_secret":true,
+                     "target_secret":"Bearer SUPERSECRET"}],
+        "cooldown_minutes": 60,
+        "last_fired_at": serde_json::Value::Null, "condition": "x"
     }));
     let h = render("alerts_form.html", c);
     assert!(!h.contains("SUPERSECRET"), "a stored webhook secret must not be sent back to the browser");

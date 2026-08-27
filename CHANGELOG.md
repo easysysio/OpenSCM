@@ -6,6 +6,13 @@ All notable changes to OpenSCM are documented here.
 
 ## [Unreleased]
 
+### Added
+- **An alert can now perform several actions.** One rule can email *and* notify *and* post to a webhook, instead of needing a separate rule per destination — which meant two rules watching the same policy with independent cooldowns that could drift apart, so one might fire while the other stayed muted.
+
+  Cooldown and threshold behaviour stay with the **rule**, so a single event delivers every action together, or mutes them all together. Delivery is per action, so a webhook that is down neither delays nor hides the email that fired alongside it, each retries on its own schedule, and each appears separately in the delivery history. **Test** now exercises every configured action.
+
+  Existing alerts are carried across unchanged and keep firing.
+
 ### Fixed
 - **The Alerts pages showed no confirmation or error messages.** Saving, deleting or testing an alert redirected back with a message that was never displayed, so a successful save and a rejected one looked identical — a webhook URL refused for pointing at a private address simply appeared to do nothing. The Alerts screens now show the same success and error banners as the rest of the product.
 

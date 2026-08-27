@@ -82,11 +82,15 @@
               <td>{{ a.policy_name }}</td>
               <td class="text-sm">{{ a.condition }}</td>
               <td class="text-sm">
-                {% if a.action == "notify" %}<i class="fas fa-bell fa-fw mr-1"></i>Notify in OpenSCM
-                {% elif a.action == "email" %}<i class="fas fa-envelope fa-fw mr-1"></i>{{ a.target }}
-                {% elif a.action == "webhook" %}<i class="fas fa-link fa-fw mr-1"></i>{{ a.target }}
-                {% else %}<i class="fas fa-server fa-fw mr-1"></i>syslog {{ a.target }}
-                {% endif %}
+                {% for act in a.actions %}
+                <div>
+                  {% if act.action == "notify" %}<i class="fas fa-bell fa-fw mr-1 text-muted"></i>Notify in OpenSCM
+                  {% elif act.action == "email" %}<i class="fas fa-envelope fa-fw mr-1 text-muted"></i>{{ act.target }}
+                  {% elif act.action == "webhook" %}<i class="fas fa-link fa-fw mr-1 text-muted"></i>{{ act.target }}
+                  {% else %}<i class="fas fa-server fa-fw mr-1 text-muted"></i>syslog {{ act.target }}
+                  {% endif %}
+                </div>
+                {% endfor %}
               </td>
               <td class="text-center text-sm">
                 {% if a.last_fired_at %}<span class="local-time" data-utc="{{ a.last_fired_at }}">{{ a.last_fired_at }}</span>

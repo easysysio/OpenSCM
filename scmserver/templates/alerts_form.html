@@ -100,32 +100,88 @@
           </div>
 
           <h5 class="font-weight-bold mt-3">Then</h5>
-          <div class="form-row">
-            <div class="form-group col-md-5">
-              <label for="action">Action</label>
-              <select class="form-control" id="action" name="action">
-                <option value="notify"  {% if alert and alert.action == "notify"  %}selected{% endif %}>Notify in OpenSCM</option>
-                <option value="email"   {% if alert and alert.action == "email"   %}selected{% endif %}>Email</option>
-                <option value="webhook" {% if alert and alert.action == "webhook" %}selected{% endif %}>Webhook</option>
-                <option value="syslog"  {% if alert and alert.action == "syslog"  %}selected{% endif %}>Syslog</option>
-              </select>
-            </div>
-            <div class="form-group col-md-7" id="target-field">
-              <label for="target" id="target-label">Destination</label>
-              <input type="text" class="form-control" id="target" name="target"
-                     value="{% if alert %}{{ alert.target }}{% endif %}">
-              <small class="form-text text-muted" id="target-help"></small>
+          <p class="text-muted small">
+            Choose one or more. Each is delivered and retried independently, so a
+            webhook that is down does not hold up the email beside it.
+          </p>
+
+          {% set act_notify  = false %}{% set tgt_notify  = "" %}
+          {% set act_email   = false %}{% set tgt_email   = "" %}
+          {% set act_webhook = false %}{% set tgt_webhook = "" %}{% set sec_webhook = false %}
+          {% set act_syslog  = false %}{% set tgt_syslog  = "" %}
+          {% if alert %}{% for a in alert.actions %}
+            {% if a.action == "notify"  %}{% set_global act_notify  = true %}{% endif %}
+            {% if a.action == "email"   %}{% set_global act_email   = true %}{% set_global tgt_email   = a.target %}{% endif %}
+            {% if a.action == "webhook" %}{% set_global act_webhook = true %}{% set_global tgt_webhook = a.target %}{% set_global sec_webhook = a.has_secret %}{% endif %}
+            {% if a.action == "syslog"  %}{% set_global act_syslog  = true %}{% set_global tgt_syslog  = a.target %}{% endif %}
+          {% endfor %}{% endif %}
+
+          <div class="card card-body bg-light py-2 mb-2">
+            <div class="custom-control custom-checkbox">
+              <input type="checkbox" class="custom-control-input action-toggle" id="action_notify"
+                     name="action_notify" data-target-row="row_notify" {% if act_notify %}checked{% endif %}>
+              <label class="custom-control-label" for="action_notify">
+                <i class="fas fa-bell fa-fw mr-1 text-muted"></i>Notify in OpenSCM
+              </label>
+              <small class="form-text text-muted">
+                The bell icon, for every administrator. Nothing to configure, and it
+                cannot fail — which is why it is also used to tell you when another
+                action has given up.
+              </small>
             </div>
           </div>
 
-          <div class="form-group" id="secret-field">
-            <label for="target_secret">Authorization header <span class="text-muted">(optional)</span></label>
-            <input type="password" class="form-control" id="target_secret" name="target_secret"
-                   placeholder="{% if alert %}unchanged{% else %}e.g. Bearer …{% endif %}"
-                   autocomplete="new-password">
-            <small class="form-text text-muted">
-              Sent as the <code>Authorization</code> header. Leave blank to keep the existing value.
-            </small>
+          <div class="card card-body bg-light py-2 mb-2">
+            <div class="custom-control custom-checkbox">
+              <input type="checkbox" class="custom-control-input action-toggle" id="action_email"
+                     name="action_email" data-target-row="row_email" {% if act_email %}checked{% endif %}>
+              <label class="custom-control-label" for="action_email">
+                <i class="fas fa-envelope fa-fw mr-1 text-muted"></i>Email
+              </label>
+            </div>
+            <div id="row_email" class="mt-2">
+              <input type="text" class="form-control" name="target_email"
+                     placeholder="ops@example.com, security@example.com"
+                     value="{{ tgt_email }}">
+              <small class="form-text text-muted">Comma-separate several addresses. Requires SMTP under Settings.</small>
+            </div>
+          </div>
+
+          <div class="card card-body bg-light py-2 mb-2">
+            <div class="custom-control custom-checkbox">
+              <input type="checkbox" class="custom-control-input action-toggle" id="action_webhook"
+                     name="action_webhook" data-target-row="row_webhook" {% if act_webhook %}checked{% endif %}>
+              <label class="custom-control-label" for="action_webhook">
+                <i class="fas fa-link fa-fw mr-1 text-muted"></i>Webhook
+              </label>
+            </div>
+            <div id="row_webhook" class="mt-2">
+              <input type="text" class="form-control mb-2" name="target_webhook"
+                     placeholder="https://hooks.example.com/…" value="{{ tgt_webhook }}">
+              <input type="password" class="form-control" name="secret_webhook"
+                     autocomplete="new-password"
+                     placeholder="{% if sec_webhook %}Authorization header — unchanged{% else %}Authorization header (optional), e.g. Bearer …{% endif %}">
+              <small class="form-text text-muted">
+                A POST with a JSON body. Leave the header blank to keep the stored value.
+              </small>
+            </div>
+          </div>
+
+          <div class="card card-body bg-light py-2 mb-3">
+            <div class="custom-control custom-checkbox">
+              <input type="checkbox" class="custom-control-input action-toggle" id="action_syslog"
+                     name="action_syslog" data-target-row="row_syslog" {% if act_syslog %}checked{% endif %}>
+              <label class="custom-control-label" for="action_syslog">
+                <i class="fas fa-server fa-fw mr-1 text-muted"></i>Syslog
+              </label>
+            </div>
+            <div id="row_syslog" class="mt-2">
+              <input type="text" class="form-control" name="target_syslog"
+                     placeholder="logs.example.com:514" value="{{ tgt_syslog }}">
+              <small class="form-text text-muted">
+                RFC 5424 over UDP, port 514 by default. UDP cannot confirm arrival.
+              </small>
+            </div>
           </div>
 
           <div class="form-group col-md-4 pl-0">
@@ -161,7 +217,6 @@
 (function () {
   var trigger = document.getElementById('trigger_type');
   var unit    = document.getElementById('threshold-unit');
-  var action  = document.getElementById('action');
   var scope   = document.getElementById('scope_type');
 
   // The threshold unit follows the trigger: drops/rises are POINTS of
@@ -171,20 +226,12 @@
     unit.textContent = (t === 'drop' || t === 'gain') ? 'points' : '%';
   }
 
-  var TARGETS = {
-    notify:  { label: 'Destination', help: 'Goes to the bell icon for every administrator. No address needed.', show: false, secret: false },
-    email:   { label: 'Email address', help: 'Comma-separate several addresses. Requires SMTP to be configured.', show: true, secret: false },
-    webhook: { label: 'Webhook URL', help: 'A POST with a JSON body. Reaches Slack, Teams, PagerDuty and anything else that accepts HTTP.', show: true, secret: true },
-    syslog:  { label: 'Syslog server', help: 'host or host:port — RFC 5424 over UDP, port 514 by default. UDP is fire-and-forget: a send cannot confirm arrival.', show: true, secret: false }
-  };
-
-  function syncAction() {
-    var cfg = TARGETS[action.value] || TARGETS.notify;
-    document.getElementById('target-label').textContent = cfg.label;
-    document.getElementById('target-help').textContent  = cfg.help;
-    document.getElementById('target-field').style.display  = cfg.show ? '' : 'none';
-    document.getElementById('secret-field').style.display  = cfg.secret ? '' : 'none';
-    document.getElementById('target').required = cfg.show;
+  // Each action's destination row is only relevant when its box is ticked.
+  function syncActions() {
+    document.querySelectorAll('.action-toggle').forEach(function (box) {
+      var row = document.getElementById(box.dataset.targetRow);
+      if (row) { row.style.display = box.checked ? '' : 'none'; }
+    });
   }
 
   function syncScope() {
@@ -193,9 +240,11 @@
   }
 
   trigger.addEventListener('change', syncUnit);
-  action.addEventListener('change', syncAction);
+  document.querySelectorAll('.action-toggle').forEach(function (b) {
+    b.addEventListener('change', syncActions);
+  });
   scope.addEventListener('change', syncScope);
-  syncUnit(); syncAction(); syncScope();
+  syncUnit(); syncActions(); syncScope();
 })();
 </script>
 {% endblock %}

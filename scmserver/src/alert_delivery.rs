@@ -162,6 +162,7 @@ struct Pending {
     new_score: f64,
     action: String,
     target: Option<String>,
+    action_id: Option<i64>,
     attempts: i64,
 }
 
@@ -172,7 +173,7 @@ struct Pending {
 // ─────────────────────────────────────────────────────────────────────────────
 pub async fn deliver_pending(pool: &SqlitePool) {
     let rows = match sqlx::query(
-        "SELECT id, tenant_id, alert_id, policy_id, alert_name, policy_name,
+        "SELECT id, tenant_id, alert_id, action_id, policy_id, alert_name, policy_name,
                 old_score, new_score, action, target, attempts
          FROM alert_deliveries
          WHERE status = 'pending'
@@ -202,6 +203,7 @@ pub async fn deliver_pending(pool: &SqlitePool) {
             new_score: row.try_get("new_score").unwrap_or(-1.0),
             action: row.try_get("action").unwrap_or_else(|_| "notify".into()),
             target: row.try_get("target").ok().flatten(),
+            action_id: row.try_get("action_id").ok().flatten(),
             attempts: row.try_get("attempts").unwrap_or(0),
         };
 
@@ -338,10 +340,12 @@ async fn dispatch(pool: &SqlitePool, d: &Pending) -> Result<(), String> {
                 .build()
                 .map_err(|e| e.to_string())?;
 
+            // Per ACTION, not per rule: a rule can now have several webhooks,
+            // each with its own credential.
             let secret: Option<String> = sqlx::query_scalar(
-                "SELECT target_secret FROM alerts WHERE id = ?",
+                "SELECT target_secret FROM alert_actions WHERE id = ?",
             )
-            .bind(d.alert_id)
+            .bind(d.action_id)
             .fetch_optional(pool)
             .await
             .ok()

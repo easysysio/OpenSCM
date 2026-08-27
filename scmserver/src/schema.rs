@@ -2597,9 +2597,7 @@ pub async fn run_migrations(pool: &SqlitePool) -> Result<(), sqlx::Error> {
                 -- The tenant's display toggle must not silently change what an
                 -- existing alert means (the 0.6.6 dual-mode lesson).
                 score_axis       TEXT    NOT NULL DEFAULT 'test',
-                action           TEXT    NOT NULL,
-                target           TEXT,
-                target_secret    TEXT,
+                -- Actions live in alert_actions: a rule may have several.
                 cooldown_minutes INTEGER NOT NULL DEFAULT 60,
                 created_at       DATETIME DEFAULT CURRENT_TIMESTAMP,
                 created_by       INTEGER,
@@ -2608,6 +2606,19 @@ pub async fn run_migrations(pool: &SqlitePool) -> Result<(), sqlx::Error> {
             )",
         ).execute(pool).await?;
         sqlx::query("CREATE INDEX IF NOT EXISTS idx_alerts_tenant_enabled ON alerts (tenant_id, enabled)")
+            .execute(pool).await?;
+
+        sqlx::query(
+            "CREATE TABLE IF NOT EXISTS alert_actions (
+                id            INTEGER PRIMARY KEY AUTOINCREMENT,
+                alert_id      INTEGER NOT NULL,
+                action        TEXT    NOT NULL,
+                target        TEXT,
+                target_secret TEXT,
+                FOREIGN KEY (alert_id) REFERENCES alerts (id) ON DELETE CASCADE
+            )",
+        ).execute(pool).await?;
+        sqlx::query("CREATE INDEX IF NOT EXISTS idx_alert_actions_alert ON alert_actions (alert_id)")
             .execute(pool).await?;
 
         // Keyed (alert, policy), not on the alert row: an all_policies rule
@@ -2662,6 +2673,79 @@ pub async fn run_migrations(pool: &SqlitePool) -> Result<(), sqlx::Error> {
 
         sqlx::query("UPDATE schema_info SET version = 40").execute(pool).await?;
         info!("Schema migration v39 → v40 complete.");
+    }
+
+    // v40 → v41: an alert may have several actions (0.9.2).
+    //
+    // Originally one rule carried exactly one action. Wanting both an email and
+    // an in-app notification meant creating two rules watching the same policy
+    // — with independent cooldowns and independent edge state, so the two could
+    // drift apart and describe the same event differently, or one could fire
+    // while the other was muted.
+    //
+    // Actions move to a child table. Cooldown and edge state stay on the RULE,
+    // so one event still mutes all of its actions together; only delivery is
+    // per action, which means a failing webhook does not hold up the email
+    // beside it.
+    //
+    // alerts.action / target / target_secret are dropped after their contents
+    // are copied across. Leaving them looked safer, but `action` is NOT NULL:
+    // every new insert would have to keep populating a column nothing reads,
+    // and the two copies would drift the first time someone forgot. History is
+    // unaffected — alert_deliveries snapshots the action and target when a
+    // delivery is queued.
+    if version < 41 {
+        info!("Running schema migration v40 → v41 (multiple actions per alert)...");
+
+        sqlx::query(
+            "CREATE TABLE IF NOT EXISTS alert_actions (
+                id            INTEGER PRIMARY KEY AUTOINCREMENT,
+                alert_id      INTEGER NOT NULL,
+                action        TEXT    NOT NULL,
+                target        TEXT,
+                target_secret TEXT,
+                FOREIGN KEY (alert_id) REFERENCES alerts (id) ON DELETE CASCADE
+            )",
+        ).execute(pool).await?;
+        sqlx::query("CREATE INDEX IF NOT EXISTS idx_alert_actions_alert ON alert_actions (alert_id)")
+            .execute(pool).await?;
+
+        // Carry every existing rule's single action across, so alerts that were
+        // already configured keep firing without being re-created.
+        // Only when the legacy column is actually present: a fresh install
+        // creates the alerts table without it, so this copy has nothing to read.
+        if table_exists(pool, "alerts").await
+            && column_exists(pool, "alerts", "action").await
+        {
+            sqlx::query(
+                "INSERT INTO alert_actions (alert_id, action, target, target_secret)
+                 SELECT id, action, target, target_secret FROM alerts
+                 WHERE action IS NOT NULL AND action <> ''
+                   AND NOT EXISTS (SELECT 1 FROM alert_actions x WHERE x.alert_id = alerts.id)",
+            ).execute(pool).await?;
+        }
+
+        // Which configured action a delivery came from, so the webhook secret
+        // can be looked up for THAT action rather than for the rule.
+        if table_exists(pool, "alert_deliveries").await
+            && !column_exists(pool, "alert_deliveries", "action_id").await
+        {
+            sqlx::query("ALTER TABLE alert_deliveries ADD COLUMN action_id INTEGER")
+                .execute(pool).await?;
+        }
+
+        // SQLite has supported DROP COLUMN since 3.35. Ignore failures: an
+        // older engine simply keeps the unused columns, and the INSERT path
+        // below tolerates that.
+        for col in ["action", "target", "target_secret"] {
+            if column_exists(pool, "alerts", col).await {
+                let _ = sqlx::query(&format!("ALTER TABLE alerts DROP COLUMN {col}"))
+                    .execute(pool).await;
+            }
+        }
+
+        sqlx::query("UPDATE schema_info SET version = 41").execute(pool).await?;
+        info!("Schema migration v40 → v41 complete.");
     }
 
     Ok(())
