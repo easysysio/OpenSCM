@@ -6,6 +6,10 @@ All notable changes to OpenSCM are documented here.
 
 ## [Unreleased]
 
+---
+
+## [0.9.2] - 2026-08-27
+
 ### Added
 - **An alert can now perform several actions.** One rule can email *and* notify *and* post to a webhook, instead of needing a separate rule per destination — which meant two rules watching the same policy with independent cooldowns that could drift apart, so one might fire while the other stayed muted.
 

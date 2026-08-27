@@ -65,7 +65,7 @@ container on that host:
 
 ```
 ▶ ID  Name              OS              IP            Agent  Last Seen
-▼ 12  web-host-01       Ubuntu 24.04    192.168.1.50  v0.9.1  30s ago
+▼ 12  web-host-01       Ubuntu 24.04    192.168.1.50  v0.9.2  30s ago
    ├─ 🐳 nginx-prod      nginx:1.27-alpine   running  172.17.0.2
    ├─ 🐳 redis           redis:7-alpine      running  172.17.0.3
    └─ 🦭 worker          internal/job:42     running  172.17.0.4
