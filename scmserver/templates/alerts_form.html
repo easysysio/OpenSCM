@@ -56,7 +56,8 @@
               <label for="policy_id">&nbsp;</label>
               <select class="form-control" id="policy_id" name="policy_id">
                 {% for p in policies %}
-                <option value="{{ p.0 }}" {% if alert and alert.policy_id == p.0 %}selected{% endif %}>{{ p.1 }}</option>
+                <option value="{{ p.0 }}" data-test="{{ p.2 }}" data-system="{{ p.3 }}"
+                        {% if alert and alert.policy_id == p.0 %}selected{% endif %}>{{ p.1 }}</option>
                 {% endfor %}
               </select>
             </div>
@@ -98,6 +99,13 @@
               </small>
             </div>
           </div>
+
+          {# Where the watched policy stands now, and a warning when the rule as
+             written cannot fire yet — e.g. "falls below 100%" on a policy that
+             is already at 87%. Edge-triggered rules only fire on a crossing,
+             so such a rule is silently inert until the score recovers. #}
+          <div id="rule-current" class="small text-muted mb-2" hidden></div>
+          <div id="rule-warning" class="alert alert-warning small py-2" role="status" hidden></div>
 
           <h5 class="font-weight-bold mt-3">Then</h5>
           <p class="text-muted small">
@@ -239,12 +247,93 @@
       scope.value === 'all_policies' ? 'none' : '';
   }
 
+  var policySel = document.getElementById('policy_id');
+  var axisSel   = document.getElementById('score_axis');
+  var threshold = document.getElementById('threshold');
+  var current   = document.getElementById('rule-current');
+  var warning   = document.getElementById('rule-warning');
+
+  function scoreOf(opt, axis) {
+    var v = parseFloat(axis === 'system' ? opt.dataset.system : opt.dataset.test);
+    return isNaN(v) ? -1 : v;
+  }
+  function pct(v) { return v.toFixed(2) + '%'; }
+
+  function show(el, text) {
+    el.textContent = text || '';
+    el.hidden = !text;
+  }
+
+  // Says where the policy stands, and warns when a below/above rule is
+  // already past its threshold: such a rule only fires on a crossing, so it
+  // stays silent until the score comes back to the other side first.
+  function syncStatus() {
+    var t = trigger.value;
+    var axis = axisSel.value;
+    var axisLabel = axis === 'system' ? 'system compliance' : 'test compliance';
+    var th = parseFloat(threshold.value);
+    var options = Array.prototype.slice.call(policySel.options);
+    show(current, ''); show(warning, '');
+    if (!options.length) { return; }
+
+    if (scope.value === 'all_policies') {
+      var scanned = options.filter(function (o) { return scoreOf(o, axis) >= 0; });
+      if (!scanned.length) {
+        show(current, 'No policy has been scanned yet.');
+        return;
+      }
+      show(current, 'Watching ' + options.length + ' polic' +
+                    (options.length === 1 ? 'y' : 'ies') + '.');
+      if (isNaN(th) || (t !== 'below' && t !== 'above')) { return; }
+      var past = scanned.filter(function (o) {
+        var v = scoreOf(o, axis);
+        return t === 'below' ? v < th : v > th;
+      });
+      if (past.length) {
+        show(warning, past.length + ' of ' + scanned.length + ' scanned policies ' +
+          (past.length === 1 ? 'is' : 'are') + ' already ' +
+          (t === 'below' ? 'below ' : 'above ') + th + '% ' + axisLabel +
+          '. This rule only fires when a score crosses the threshold, so ' +
+          (past.length === 1 ? 'that policy' : 'those policies') +
+          ' will not alert until ' + (past.length === 1 ? 'it returns' : 'they return') +
+          ' to the other side first.');
+      }
+      return;
+    }
+
+    var opt = policySel.options[policySel.selectedIndex];
+    if (!opt) { return; }
+    var name = opt.textContent.trim();
+    var cur = scoreOf(opt, axis);
+    if (cur < 0) {
+      show(current, name + ' has not been scanned yet. The rule starts comparing after its first scan.');
+      return;
+    }
+    show(current, name + ' is currently at ' + pct(cur) + ' ' + axisLabel + '.');
+    if (isNaN(th)) { return; }
+
+    if (t === 'below' && cur < th) {
+      show(warning, 'It is already below ' + th + '%, so this rule will not fire until the score ' +
+        'reaches ' + th + '% or more and then falls again. To be told whenever it gets worse, ' +
+        'use "drops by" instead.');
+    } else if (t === 'above' && cur > th) {
+      show(warning, 'It is already above ' + th + '%, so this rule will not fire until the score ' +
+        'falls to ' + th + '% or less and then rises again. To be told whenever it improves, ' +
+        'use "rises by" instead.');
+    }
+  }
+
+  [trigger, policySel, axisSel, scope].forEach(function (el) {
+    el.addEventListener('change', syncStatus);
+  });
+  threshold.addEventListener('input', syncStatus);
+
   trigger.addEventListener('change', syncUnit);
   document.querySelectorAll('.action-toggle').forEach(function (b) {
     b.addEventListener('change', syncActions);
   });
   scope.addEventListener('change', syncScope);
-  syncUnit(); syncActions(); syncScope();
+  syncUnit(); syncActions(); syncScope(); syncStatus();
 })();
 </script>
 {% endblock %}

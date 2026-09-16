@@ -7,6 +7,7 @@ All notable changes to OpenSCM are documented here.
 ## [Unreleased]
 
 ### Added
+- **The alert form shows where the policy stands, and warns when a rule cannot fire yet.** Choosing a policy now displays its current score on the compliance measure the rule watches. Because alerts fire when a score *crosses* a threshold, a rule such as *falls below 100%* on a policy already at 87% stays silent until the policy first reaches 100% — the form now says so, and suggests *drops by* for "tell me whenever it gets worse". With **All policies** selected it reports how many are already past the threshold. Policies that have never been scanned are labelled as such.
 - **System groups show how many systems they contain.** The groups list has a new **Systems** column, sortable, so an empty group or an unexpectedly large one is visible without opening each group.
 
 ---

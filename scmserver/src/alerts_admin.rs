@@ -198,8 +198,13 @@ pub async fn alerts_form(
         return redir;
     }
 
-    let policies: Vec<(i64, String)> = sqlx::query_as(
-        "SELECT id, name FROM policies WHERE tenant_id = ? ORDER BY name",
+    // (id, name, test score, system score). The scores let the form say where
+    // each policy stands right now, which is the only way to notice that a
+    // threshold rule has already been crossed and so cannot fire yet.
+    // -1 means never scanned.
+    let policies: Vec<(i64, String, f64, f64)> = sqlx::query_as(
+        "SELECT id, name, COALESCE(score_test, -1.0), COALESCE(score_system, -1.0)
+         FROM policies WHERE tenant_id = ? ORDER BY name",
     )
     .bind(&auth.tenant_id)
     .fetch_all(&*pool)

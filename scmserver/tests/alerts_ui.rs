@@ -61,7 +61,7 @@ fn viewers_get_no_management_controls() {
 #[test]
 fn the_form_renders_for_create_and_edit() {
     let mut c = base_ctx(true);
-    c.insert("policies", &vec![(1i64, "CIS Ubuntu".to_string())]);
+    c.insert("policies", &vec![(1i64, "CIS Ubuntu".to_string(), 87.0f64, 50.0f64)]);
     let create = render("alerts_form.html", c.clone());
     assert!(!create.starts_with("RENDER_ERROR"), "{}", &create[..create.len().min(400)]);
     assert!(create.contains("/alerts/create"));
@@ -85,7 +85,7 @@ fn the_form_renders_for_create_and_edit() {
 #[test]
 fn the_webhook_secret_is_never_echoed() {
     let mut c = base_ctx(true);
-    c.insert("policies", &vec![(1i64, "CIS".to_string())]);
+    c.insert("policies", &vec![(1i64, "CIS".to_string(), 87.0f64, 50.0f64)]);
     c.insert("alert", &serde_json::json!({
         "id": 7, "name": "n", "enabled": true, "scope_type": "policy", "policy_id": 1,
         "policy_name": "CIS", "trigger_type": "drop", "threshold": 10.0, "score_axis": "test",
@@ -160,4 +160,23 @@ fn title_blocks_contain_no_markup() {
         let line = body.lines().find(|l| l.contains("block title")).expect("title block");
         assert!(!line.contains("</"), "{name}: closing tag inside the title block: {line}");
     }
+}
+
+
+// The form must carry each policy's current scores, so it can say where the
+// policy stands and warn when a threshold rule is already past its line — the
+// case where "falls below 100%" on a policy at 87% silently never fires.
+#[test]
+fn the_form_carries_current_scores_and_the_warning_slots() {
+    let mut c = base_ctx(true);
+    c.insert("policies", &vec![
+        (1i64, "Patch Management".to_string(), 87.0f64, 40.0f64),
+        (2i64, "Never Scanned".to_string(), -1.0f64, -1.0f64),
+    ]);
+    let h = render("alerts_form.html", c);
+    assert!(!h.starts_with("RENDER_ERROR"), "{}", &h[..h.len().min(400)]);
+    assert!(h.contains(r#"data-test="87""#), "test-axis score missing from the option");
+    assert!(h.contains(r#"data-system="40""#), "system-axis score missing from the option");
+    assert!(h.contains(r#"data-test="-1""#), "never-scanned policies must be marked");
+    assert!(h.contains(r#"id="rule-current""#) && h.contains(r#"id="rule-warning""#));
 }
