@@ -78,6 +78,7 @@
                     <th style="width: 90px">Type</th>
                     <th>Group Name</th>
                     <th>Description</th>
+                    <th class="text-center" style="width: 90px">Systems</th>
                     <th class="text-center" style="width: 180px">Actions</th>
                   </tr>
                 </thead>
@@ -98,6 +99,14 @@
                     </td>
                     <td><strong>{{ group.name }}</strong></td>
                     <td>{{ group.description | default(value="") | truncate(length=65) }}</td>
+                    {# data-order keeps DataTables sorting this column numerically. #}
+                    <td class="text-center" data-order="{{ group.system_count }}">
+                      {% if group.system_count > 0 %}
+                        <span class="badge badge-info">{{ group.system_count }}</span>
+                      {% else %}
+                        <span class="text-muted">0</span>
+                      {% endif %}
+                    </td>
                     <td class="text-right">
                       
                       {# Primary Action: View Modal #}

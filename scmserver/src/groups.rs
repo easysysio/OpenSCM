@@ -26,6 +26,44 @@ use crate::handlers::{render_template, parse_form_data};
 
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Helper: load_system_groups
+// Every group in a tenant, with its member names and member count.
+// COUNT(DISTINCT s.id) rather than COUNT(*): the LEFT JOIN yields one row for
+// an empty group, and that row must count as zero, not one.
+// ─────────────────────────────────────────────────────────────────────────────
+pub async fn load_system_groups(
+    pool: &SqlitePool,
+    tenant_id: &str,
+) -> Result<Vec<SystemGroup>, sqlx::Error> {
+    let rows = sqlx::query(
+        "SELECT sg.id, sg.name, sg.description, sg.auto_managed,
+            GROUP_CONCAT(s.name) AS systems,
+            COUNT(DISTINCT s.id) AS system_count
+         FROM system_groups AS sg
+         LEFT JOIN systems_in_groups AS sig ON sg.id = sig.group_id
+         LEFT JOIN systems AS s ON sig.system_id = s.id AND s.tenant_id = sg.tenant_id
+         WHERE sg.tenant_id = ?
+         GROUP BY sg.id, sg.name, sg.description, sg.auto_managed",
+    )
+    .bind(tenant_id)
+    .fetch_all(pool)
+    .await?;
+
+    Ok(rows
+        .into_iter()
+        .map(|row| SystemGroup {
+            id: Some(row.get("id")),
+            name: row.get("name"),
+            description: row.try_get("description").ok(),
+            systems: row.try_get("systems").ok(),
+            auto_managed: row.try_get("auto_managed").unwrap_or(0),
+            system_count: row.try_get("system_count").unwrap_or(0),
+        })
+        .collect())
+}
+
+
+// ─────────────────────────────────────────────────────────────────────────────
 // GET /system_groups
 // List all system groups and their member systems for the current tenant.
 // Role: Viewer
@@ -41,32 +79,10 @@ pub async fn system_groups(
         return redir;
     }
 
-    let gc_sql = format!(
-        "SELECT sg.id, sg.name, sg.description, sg.auto_managed,
-            {gc} AS systems
-         FROM system_groups AS sg
-         LEFT JOIN systems_in_groups AS sig ON sg.id = sig.group_id
-         LEFT JOIN systems AS s ON sig.system_id = s.id
-         WHERE sg.tenant_id = ?
-         GROUP BY sg.id, sg.name, sg.description, sg.auto_managed",
-        gc = "GROUP_CONCAT(s.name)",
-    );
-    let rows_result = sqlx::query(&gc_sql)
-        .bind(&auth.tenant_id)
-        .fetch_all(&*pool)
-        .await;
+    let rows_result = load_system_groups(&pool, &auth.tenant_id).await;
 
     let system_groups: Vec<SystemGroup> = match rows_result {
-        Ok(rows) => rows
-            .into_iter()
-            .map(|row| SystemGroup {
-                id: Some(row.get("id")),
-                name: row.get("name"),
-                description: row.try_get("description").ok(),
-                systems: row.try_get("systems").ok(),
-                auto_managed: row.try_get("auto_managed").unwrap_or(0),
-            })
-            .collect(),
+        Ok(groups) => groups,
         Err(e) => {
             error!("Failed to fetch system groups: {}", e);
             let mut context = Context::new();

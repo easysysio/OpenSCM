@@ -97,6 +97,10 @@ pub struct SystemGroup {
     /// docs/design/0.5.2-auto-groups.md.
     #[serde(default)]
     pub auto_managed: i64,
+    /// Number of systems in the group, for the groups list. Only the list page
+    /// computes it; other callers leave it 0 and never display it.
+    #[serde(default)]
+    pub system_count: i64,
 }
 
 

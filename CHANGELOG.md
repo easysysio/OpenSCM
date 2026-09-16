@@ -6,6 +6,9 @@ All notable changes to OpenSCM are documented here.
 
 ## [Unreleased]
 
+### Added
+- **System groups show how many systems they contain.** The groups list has a new **Systems** column, sortable, so an empty group or an unexpectedly large one is visible without opening each group.
+
 ---
 
 ## [0.9.2] - 2026-08-27

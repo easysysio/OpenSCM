@@ -201,6 +201,7 @@ pub async fn policies_add(
                 id: row.get("id"),
                 name: row.get("name"),
                 auto_managed: row.try_get("auto_managed").unwrap_or(0),
+                system_count: 0,
                 ..Default::default()
             })
             .collect(),
@@ -510,6 +511,7 @@ pub async fn policies_edit(
             id: r.get("id"),
             name: r.get("name"),
             auto_managed: r.try_get("auto_managed").unwrap_or(0),
+            system_count: 0,
             ..Default::default()
         }).collect(),
         Err(e) => { error!("Failed to fetch system groups for policy edit {}: {}", id, e); vec![] }
