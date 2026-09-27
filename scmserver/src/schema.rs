@@ -9,7 +9,7 @@
 // =============================================================================
 use sqlx::SqlitePool;
 use sqlx::Row;
-use tracing::info;
+use tracing::{info, warn};
 use ed25519_dalek::SigningKey;
 use rand::rngs::OsRng;
 use base64::{engine::general_purpose, Engine as _};
@@ -983,8 +983,41 @@ pub async fn seed_plan_limits(pool: &SqlitePool) -> Result<(), sqlx::Error> {
 // Single-statement migrations (one `INSERT OR IGNORE`, one `ALTER ADD COLUMN`
 // followed only by an unrelated `UPDATE schema_info`, etc.) are safe via
 // the `pool` reference — no cross-connection schema dependency.
+//
+// ENFORCED SINCE 0.9.4 — the convention above was not followed everywhere,
+// and it broke every fresh install. The v25 → v26 `results` rebuild issues
+// DROP TABLE results and then ALTER TABLE results_new RENAME TO results on
+// whatever connections the pool hands out; on a file database in WAL mode the
+// rename landed on a connection that still saw the old `results`, failed with
+// "there is already another table or index with this name", and left the
+// database at v25 with no `results` table. /install logged the error and
+// carried on; the next start returned it from main() and the server could not
+// start again. In-memory test databases do not behave this way, so no test
+// saw it.
+//
+// run_migrations therefore no longer runs migrations on the caller's pool. It
+// opens a dedicated pool of exactly ONE connection to the same database and
+// runs the whole chain there, so every statement sees the one before it and
+// connection-scoped pragmas (the v26 `foreign_keys = OFF`) actually apply to
+// the statements that follow. The rule above still describes how to write a
+// migration; this makes a slip in it harmless.
 // ─────────────────────────────────────────────────────────────────────────────
 pub async fn run_migrations(pool: &SqlitePool) -> Result<(), sqlx::Error> {
+    let single = sqlx::sqlite::SqlitePoolOptions::new()
+        .max_connections(1)
+        .connect_with((*pool.connect_options()).clone())
+        .await?;
+    let result = run_migrations_on(&single).await;
+    single.close().await;
+    result
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Helper: run_migrations_on
+// The migration chain itself. Only ever called by run_migrations, with a
+// single-connection pool.
+// ─────────────────────────────────────────────────────────────────────────────
+async fn run_migrations_on(pool: &SqlitePool) -> Result<(), sqlx::Error> {
     // schema_info sentinel table (no AUTOINCREMENT)
     sqlx::query(
         "CREATE TABLE IF NOT EXISTS schema_info (
@@ -1890,6 +1923,16 @@ pub async fn run_migrations(pool: &SqlitePool) -> Result<(), sqlx::Error> {
     // agent/server/UI work in later steps will build on.
     if version < 26 {
         info!("Running schema migration v25 → v26 (container groundwork)...");
+
+        // Recovery for databases left half-migrated by 0.9.3 and earlier (see
+        // run_migrations): the copy into results_new had completed and
+        // `results` had been dropped, but the rename failed. The data is in
+        // results_new; put it back under its real name and let the rebuild
+        // below run normally.
+        if !table_exists(pool, "results").await && table_exists(pool, "results_new").await {
+            warn!("Recovering from an interrupted v25 → v26 migration: restoring results from results_new");
+            sqlx::query("ALTER TABLE results_new RENAME TO results").execute(pool).await?;
+        }
 
         sqlx::query(
             "CREATE TABLE IF NOT EXISTS containers (

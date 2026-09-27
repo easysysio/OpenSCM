@@ -21,6 +21,9 @@ All notable changes to OpenSCM are documented here.
 - **A suspended organization could still sign in (SaaS).** Suspension was only checked when the login form named the organization. The browser requires that field, but a request sent without it looked the user up by name alone and skipped the check. Login now reads suspension from the account's own organization, however it is reached, and on SaaS it refuses a login that names no organization.
 - **Email confirmation was never enforced (SaaS).** New registrations are marked unconfirmed and sent a link, but login never looked at the flag, so accounts worked immediately. Login now requires a confirmed address, and so does every request (see the session change above). Both checks run only after the password is verified, so neither reveals anything about an account to someone without the password.
 
+### Fixed
+- **Fresh installs stopped part-way through setup, and the server then would not start.** One database upgrade step rebuilds the results table, and its statements could run on different database connections. On a new install the rebuild failed half-way, leaving the database without its results table. Setup appeared to finish, but compliance data could not be stored and the next restart failed. The whole upgrade sequence now runs on a single connection. A database already stuck in this state is repaired automatically at the next start, and no data is lost. The in-memory databases the tests used cannot reproduce this, so new tests use a real database file configured the way the server configures it.
+
 ---
 
 ## [0.9.3] - 2026-09-16
