@@ -132,18 +132,31 @@ async fn tenant_admins(pool: &SqlitePool, tenant_id: &str) -> Vec<i32> {
 
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Helper: app_url
+// Helper: email_body
+// The HTML of an alert email.
+//
+// The report link is built from the platform App URL, which is a global
+// setting stored under the 'default' tenant — the Mailer already loads it from
+// there. It used to be looked up under the alert's own tenant, which in SaaS
+// never exists, and an empty base still produced a link: a bare relative
+// "/policies/report/5", which goes nowhere from inside a mail client. With no
+// App URL configured the email now simply carries no link.
 // ─────────────────────────────────────────────────────────────────────────────
-async fn app_url(pool: &SqlitePool, tenant_id: &str) -> String {
-    sqlx::query_scalar::<_, String>(
-        "SELECT value FROM settings WHERE skey = 'app_url' AND tenant_id = ?",
+fn email_body(alert_name: &str, summary: &str, app_url: &str, policy_id: Option<i64>) -> String {
+    let base = app_url.trim().trim_end_matches('/');
+    let link = match (base.is_empty(), policy_id) {
+        (false, Some(p)) => format!(
+            "<p><a href=\"{}/policies/report/{}\">View the compliance report</a></p>",
+            html_escape(base), p
+        ),
+        _ => String::new(),
+    };
+    format!(
+        "<p><strong>{}</strong></p><p>{}</p>{}",
+        html_escape(alert_name),
+        html_escape(summary),
+        link
     )
-    .bind(tenant_id)
-    .fetch_optional(pool)
-    .await
-    .ok()
-    .flatten()
-    .unwrap_or_default()
 }
 
 
@@ -291,18 +304,8 @@ async fn dispatch(pool: &SqlitePool, d: &Pending) -> Result<(), String> {
             let mailer = crate::email::Mailer::from_db(pool)
                 .await
                 .ok_or("SMTP is not configured")?;
-            let base = app_url(pool, &d.tenant_id).await;
-            let link = d.policy_id
-                .map(|p| format!("{}/policies/report/{}", base.trim_end_matches('/'), p))
-                .unwrap_or_default();
             let subject = format!("[OpenSCM] {}", summary);
-            let body = format!(
-                "<p><strong>{}</strong></p><p>{}</p>{}",
-                html_escape(&d.alert_name),
-                html_escape(&summary),
-                if link.is_empty() { String::new() }
-                else { format!("<p><a href=\"{link}\">View the compliance report</a></p>") }
-            );
+            let body = email_body(&d.alert_name, &summary, &mailer.app_url, d.policy_id);
             for addr in to.split(',').map(str::trim).filter(|a| !a.is_empty()) {
                 mailer.send(addr, &subject, &body).await?;
             }
@@ -383,7 +386,7 @@ async fn dispatch(pool: &SqlitePool, d: &Pending) -> Result<(), String> {
 // The alert and policy names reach an HTML email body.
 // ─────────────────────────────────────────────────────────────────────────────
 fn html_escape(s: &str) -> String {
-    s.replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;")
+    s.replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;").replace('"', "&quot;")
 }
 
 
@@ -433,4 +436,36 @@ fn escape_sd(s: &str) -> String {
 
 fn gethostname_string() -> String {
     std::env::var("HOSTNAME").ok().filter(|h| !h.is_empty()).unwrap_or_else(|| "openscm".into())
+}
+
+
+#[cfg(test)]
+mod tests {
+    use super::email_body;
+
+    #[test]
+    fn the_report_link_is_absolute_when_an_app_url_is_set() {
+        let b = email_body("prod drop", "fell to 80%", "https://scm.example.com/", Some(5));
+        assert!(b.contains("href=\"https://scm.example.com/policies/report/5\""), "{b}");
+    }
+
+    // A relative link in an email goes nowhere; without an App URL there is
+    // nothing to link to.
+    #[test]
+    fn no_link_without_an_app_url() {
+        let b = email_body("prod drop", "fell to 80%", "  ", Some(5));
+        assert!(!b.contains("href"), "{b}");
+        assert!(b.contains("fell to 80%"));
+    }
+
+    #[test]
+    fn no_link_without_a_policy() {
+        assert!(!email_body("fleet", "x", "https://scm.example.com", None).contains("href"));
+    }
+
+    #[test]
+    fn alert_text_is_escaped() {
+        let b = email_body("<b>x</b>", "a & b", "https://scm.example.com", None);
+        assert!(b.contains("&lt;b&gt;x&lt;/b&gt;") && b.contains("a &amp; b"), "{b}");
+    }
 }

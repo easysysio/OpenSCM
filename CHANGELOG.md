@@ -6,6 +6,9 @@ All notable changes to OpenSCM are documented here.
 
 ## [Unreleased]
 
+### Fixed
+- **Alert emails had a broken "View the compliance report" link.** The link is built from the **App URL** setting, which applies to the whole installation, but was looked up for the alert's own organization. On SaaS that lookup never finds anything, so the email carried a link with no server address, which goes nowhere from a mail client. The same happened on any installation where App URL was never set. Alert emails now use the installation's App URL, and leave the link out when none is set.
+
 ---
 
 ## [0.9.4] - 2026-09-27
