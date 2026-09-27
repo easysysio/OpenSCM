@@ -8,6 +8,7 @@ All notable changes to OpenSCM are documented here.
 
 ### Fixed
 - **Alert emails had a broken "View the compliance report" link.** The link is built from the **App URL** setting, which applies to the whole installation, but was looked up for the alert's own organization. On SaaS that lookup never finds anything, so the email carried a link with no server address, which goes nowhere from a mail client. The same happened on any installation where App URL was never set. Alert emails now use the installation's App URL, and leave the link out when none is set.
+- **On SaaS, the first-run tour's agent install command showed a placeholder server address.** The tour made the same mistake as alert emails, looking up the installation-wide **App URL** for the viewer's own organization. On SaaS it never found it and fell back to `https://your-openscm-server`. The tour now shows the real address.
 
 ---
 

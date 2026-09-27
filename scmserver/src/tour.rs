@@ -97,10 +97,12 @@ pub async fn tour_info(pool: &SqlitePool, auth: &AuthSession, force: bool) -> Op
         }
     }
 
+    // App URL is an installation-wide setting stored under the 'default'
+    // tenant. Looking it up under the viewer's own tenant never matched in
+    // SaaS, so the install command showed a placeholder server address.
     let server_url: String = sqlx::query_scalar(
-        "SELECT value FROM settings WHERE skey = 'app_url' AND tenant_id = ?",
+        "SELECT value FROM settings WHERE skey = 'app_url' AND tenant_id = 'default'",
     )
-    .bind(&auth.tenant_id)
     .fetch_optional(pool)
     .await
     .unwrap_or(None)
