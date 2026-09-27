@@ -35,6 +35,41 @@ use crate::handlers::{render_template, parse_form_data};
 
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Helper: systems_page_context
+// A Context holding everything systems.html reads besides the system list,
+// set to safe defaults. Every handler that renders the page starts from this.
+//
+// The Pending Systems page renders systems.html too, but its handler never
+// supplied `groups` (needed by the bulk "Add to Group" dialog since 0.1.9), so
+// Tera failed on the undefined variable and the page was a 500 — as were the
+// database-error paths of both handlers. Callers overwrite has_upgradable and
+// containers_by_system_json when they have real values.
+//
+// Only manual groups are listed: auto-managed groups derive their membership
+// from a rule, so pushing a system in by hand would be undone on the next
+// heartbeat. (Defence in depth: the bulk POST validator also rejects auto
+// targets in case the form is replayed against a now-auto group.)
+// ─────────────────────────────────────────────────────────────────────────────
+async fn systems_page_context(pool: &SqlitePool, tenant_id: &str) -> Context {
+    let groups: Vec<(i64, String)> = sqlx::query(
+        "SELECT id, name FROM system_groups
+         WHERE tenant_id = ? AND auto_managed = 0
+         ORDER BY name ASC"
+    )
+        .bind(tenant_id)
+        .fetch_all(pool)
+        .await
+        .map(|rows| rows.into_iter().map(|r| (r.get("id"), r.get("name"))).collect())
+        .unwrap_or_default();
+
+    let mut context = Context::new();
+    context.insert("groups", &groups);
+    context.insert("has_upgradable", &false);
+    context.insert("containers_by_system_json", "{}");
+    context
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // GET /systems
 // List all systems (active + pending) for the current tenant, with optional
 // ?filter=active|pending query param.
@@ -146,7 +181,7 @@ pub async fn systems(
         Ok(r) => r,
         Err(e) => {
             error!("Failed to fetch systems: {}", e);
-            let mut context = Context::new();
+            let mut context = systems_page_context(&pool, &auth.tenant_id).await;
             context.insert("error_message", "Failed to load systems.");
             context.insert("systems", &Vec::<System>::new());
             return render_template(&tera, Some(&pool), "systems.html", context, Some(auth))
@@ -231,27 +266,7 @@ pub async fn systems(
         .collect();
 
 
-    // Only manual groups appear in the "Add to Group" picker on the systems
-    // list — auto-managed groups derive their membership from a rule, so
-    // pushing a system in by hand would be undone on the next heartbeat.
-    // (Defence in depth: the bulk POST validator below also rejects auto
-    // targets in case the form is replayed against a now-auto group.)
-    let groups_result = sqlx::query(
-        "SELECT id, name FROM system_groups
-         WHERE tenant_id = ? AND auto_managed = 0
-         ORDER BY name ASC"
-    )
-        .bind(&auth.tenant_id)
-        .fetch_all(&pool)
-        .await;
-
-    let groups: Vec<(i64, String)> = match groups_result {
-        Ok(rows) => rows.into_iter().map(|r| (r.get("id"), r.get("name"))).collect(),
-        Err(_) => vec![],
-    };
-
-    let mut context = Context::new();
-    context.insert("groups", &groups);
+    let mut context = systems_page_context(&pool, &auth.tenant_id).await;
 
     if let Some(error_message) = params.get("error_message") {
         context.insert("error_message", error_message);
@@ -716,7 +731,7 @@ pub async fn systems_pending(
         Ok(r) => r,
         Err(e) => {
             error!("Failed to fetch pending systems: {}", e);
-            let mut context = Context::new();
+            let mut context = systems_page_context(&pool, &auth.tenant_id).await;
             context.insert("error_message", "Failed to load pending systems.");
             context.insert("systems", &Vec::<System>::new());
             return render_template(&tera, Some(&pool), "systems.html", context, Some(auth))
@@ -756,7 +771,7 @@ pub async fn systems_pending(
         })
         .collect();
 
-    let mut context = Context::new();
+    let mut context = systems_page_context(&pool, &auth.tenant_id).await;
     if let Some(msg) = query.error_message {
         context.insert("error_message", &msg);
     }

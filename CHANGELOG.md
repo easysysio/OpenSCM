@@ -23,6 +23,7 @@ All notable changes to OpenSCM are documented here.
 
 ### Fixed
 - **Fresh installs stopped part-way through setup, and the server then would not start.** One database upgrade step rebuilds the results table, and its statements could run on different database connections. On a new install the rebuild failed half-way, leaving the database without its results table. Setup appeared to finish, but compliance data could not be stored and the next restart failed. The whole upgrade sequence now runs on a single connection. A database already stuck in this state is repaired automatically at the next start, and no data is lost. The in-memory databases the tests used cannot reproduce this, so new tests use a real database file configured the way the server configures it.
+- **The Pending Systems page showed an error instead of the list.** It shares its layout with the Systems page, including the **Add to Group** dialog, but never loaded the list of groups the dialog needs, so the page failed to display. It now loads the same data as the Systems page, and so do both pages' fallbacks for a database error, which had the same problem.
 
 ---
 
