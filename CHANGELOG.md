@@ -18,6 +18,8 @@ All notable changes to OpenSCM are documented here.
   On SaaS, session cookies are now marked Secure whenever the platform's **App URL** is `https://`. That setting was being looked up under each organization instead of platform-wide, so no organization's cookie had ever been Secure.
 
   **Everyone is signed out once when upgrading to 0.9.4**, because sessions issued by earlier versions carry no expiry. Database schema v42 adds the per-user session counter.
+- **A suspended organization could still sign in (SaaS).** Suspension was only checked when the login form named the organization. The browser requires that field, but a request sent without it looked the user up by name alone and skipped the check. Login now reads suspension from the account's own organization, however it is reached, and on SaaS it refuses a login that names no organization.
+- **Email confirmation was never enforced (SaaS).** New registrations are marked unconfirmed and sent a link, but login never looked at the flag, so accounts worked immediately. Login now requires a confirmed address, and so does every request (see the session change above). Both checks run only after the password is verified, so neither reveals anything about an account to someone without the password.
 
 ---
 

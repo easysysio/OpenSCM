@@ -322,6 +322,16 @@ pub async fn login_submit(
         return (jar, Redirect::to("/login?error_message=Invalid%20Credentials"));
     }
 
+    // SaaS: the organization is required. Without it the lookup below falls
+    // back to username alone across every tenant, which skipped the suspension
+    // check entirely — the login form marks the field required, but only the
+    // browser enforced that, and a direct POST simply left it out.
+    if crate::handlers::is_saas_mode()
+        && form.organization.as_deref().map(str::trim).unwrap_or("").is_empty()
+    {
+        return (jar, Redirect::to("/login?error_message=Organization+is+required."));
+    }
+
     // If an organization was supplied, derive the tenant_id and verify it exists
     let tenant_id_filter: Option<String> = if let Some(org) = form.organization.as_deref() {
         let org = org.trim();
@@ -370,7 +380,8 @@ pub async fn login_submit(
 
     let row = match &tenant_id_filter {
         Some(tid) => sqlx::query(
-            "SELECT password, username, id, tenant_id, role, directory_id, external_username
+            "SELECT password, username, id, tenant_id, role, directory_id, external_username,
+                    email_verified
              FROM users WHERE username = ? AND tenant_id = ?",
         )
         .bind(&form.username)
@@ -378,7 +389,8 @@ pub async fn login_submit(
         .fetch_optional(&pool)
         .await,
         None => sqlx::query(
-            "SELECT password, username, id, tenant_id, role, directory_id, external_username
+            "SELECT password, username, id, tenant_id, role, directory_id, external_username,
+                    email_verified
              FROM users WHERE username = ?",
         )
         .bind(&form.username)
@@ -443,6 +455,46 @@ pub async fn login_submit(
 
             let tenant_id = row.try_get::<String, _>("tenant_id")
                 .unwrap_or_else(|_| "default".to_string());
+
+            // Account state is checked only AFTER the password has been
+            // verified, so these messages tell nothing to someone who does not
+            // hold the password.
+            //
+            // Suspension is read from the matched user's OWN tenant rather than
+            // from the organization typed into the form, so no way of reaching
+            // this row can skip it.
+            let tenant_status: String = sqlx::query_scalar(
+                "SELECT COALESCE(status, 'active') FROM tenants WHERE id = ?",
+            )
+            .bind(&tenant_id)
+            .fetch_optional(&pool).await.ok().flatten()
+            .unwrap_or_else(|| "active".to_string());
+            if tenant_status == "suspended" {
+                warn!("Login refused for '{}': organization '{}' is suspended", username, tenant_id);
+                crate::audit::record_raw(
+                    &pool, &tenant_id, Some(userid), &username, Some(ip.as_str()),
+                    "auth.login_failure", Some("user"), Some(&userid.to_string()),
+                    Some("tenant_suspended"),
+                ).await;
+                return (jar, Redirect::to(
+                    "/login?error_message=This+organization+is+suspended.+Please+contact+support."));
+            }
+
+            // SaaS self-registration creates the account unverified and sends a
+            // confirmation link; the flag was written but never read, so the
+            // account worked immediately. CE/EE users default to verified.
+            let verified: i64 = row.try_get("email_verified").unwrap_or(1);
+            if verified == 0 {
+                info!("Login refused for '{}': email address not yet confirmed", username);
+                crate::audit::record_raw(
+                    &pool, &tenant_id, Some(userid), &username, Some(ip.as_str()),
+                    "auth.login_failure", Some("user"), Some(&userid.to_string()),
+                    Some("email_unverified"),
+                ).await;
+                return (jar, Redirect::to(
+                    "/login?error_message=Please+confirm+your+email+address+first.+\
+                     Check+your+inbox+for+the+link,+or+request+a+new+one+below."));
+            }
 
             let session_data = json!({
                 "username": username,
