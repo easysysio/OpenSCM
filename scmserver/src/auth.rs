@@ -64,74 +64,212 @@ pub fn dummy_hash() -> &'static str {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Session lifetime
+// A normal login lasts SESSION_TTL; SaaS impersonation passes its own, shorter
+// TTL to issue_session_cookie.
+// ─────────────────────────────────────────────────────────────────────────────
+pub const SESSION_TTL: time::Duration = time::Duration::hours(8);
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Helper: issue_session_cookie
+// The ONE place a session cookie is built — login here, impersonation start
+// and exit in SaaS.
+//
+// Adds, inside the signed value:
+//   • iat / exp — issue and expiry time. The cookie's Max-Age is only an
+//     instruction to the browser; a copied cookie used to be accepted forever,
+//     since nothing in the signed value said when it stopped being valid.
+//   • epoch — the user's session_epoch at issue. validate_session compares it
+//     with the current value, so bumping it ends every session the user holds.
+//
+// `session` must carry userid and tenant_id, and impersonating.real_tenant_id
+// when present; the epoch is looked up in the user's real tenant.
+// ─────────────────────────────────────────────────────────────────────────────
+pub async fn issue_session_cookie(
+    pool: &SqlitePool,
+    mut session: Value,
+    ttl: time::Duration,
+) -> Cookie<'static> {
+    let userid = session.get("userid").and_then(|v| v.as_str())
+        .and_then(|s| s.parse::<i64>().ok()).unwrap_or(0);
+    let real_tenant = session.get("impersonating")
+        .and_then(|i| i.get("real_tenant_id")).and_then(|v| v.as_str())
+        .or_else(|| session.get("tenant_id").and_then(|v| v.as_str()))
+        .unwrap_or("default").to_string();
+
+    let epoch: i64 = sqlx::query_scalar(
+        "SELECT session_epoch FROM users WHERE id = ? AND tenant_id = ?",
+    )
+    .bind(userid).bind(&real_tenant)
+    .fetch_optional(pool).await.ok().flatten().unwrap_or(0);
+
+    let now = chrono::Utc::now().timestamp();
+    if let Some(obj) = session.as_object_mut() {
+        obj.insert("iat".into(), json!(now));
+        obj.insert("exp".into(), json!(now + ttl.whole_seconds()));
+        obj.insert("epoch".into(), json!(epoch));
+    }
+
+    let mut cookie = Cookie::new("session", session.to_string());
+    cookie.set_path("/");
+    cookie.set_http_only(true);
+    cookie.set_same_site(SameSite::Lax);
+    cookie.set_max_age(ttl);
+    cookie.set_secure(cookie_should_be_secure(pool).await);
+    cookie
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Helper: cookie_should_be_secure
+// Secure is derived from the configured public URL rather than hardcoded. A
+// session cookie without it travels in clear text, but forcing it on would
+// silently break plain-HTTP deployments behind a terminating proxy, where the
+// browser never sees HTTPS. app_url is what the operator has told us they are
+// reachable on, so it is the one honest signal available.
+//
+// app_url is a platform setting stored under the 'default' tenant (see
+// email.rs). This used to be looked up under the user's own tenant, which in
+// SaaS never matched — so no tenant's session cookie was ever Secure.
+// ─────────────────────────────────────────────────────────────────────────────
+async fn cookie_should_be_secure(pool: &SqlitePool) -> bool {
+    let secure = sqlx::query_scalar::<_, String>(
+        "SELECT value FROM settings WHERE skey = 'app_url' AND tenant_id = 'default'",
+    )
+    .fetch_optional(pool)
+    .await
+    .ok()
+    .flatten()
+    .map(|u| u.trim().to_lowercase().starts_with("https://"))
+    .unwrap_or(false);
+    if !secure {
+        warn!(
+            "Session cookie issued without the Secure flag — app_url is not https. \
+             Set it under Settings so sessions are not sent in clear text."
+        );
+    }
+    secure
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Helper: revoke_sessions
+// Ends every session the user holds, on every device, by bumping the epoch
+// that validate_session checks. Called on password change and reset. A caller
+// that wants to keep the *current* browser signed in re-issues its cookie
+// afterwards with issue_session_cookie.
+// ─────────────────────────────────────────────────────────────────────────────
+pub async fn revoke_sessions(pool: &SqlitePool, user_id: i64) {
+    if let Err(e) = sqlx::query("UPDATE users SET session_epoch = session_epoch + 1 WHERE id = ?")
+        .bind(user_id)
+        .execute(pool)
+        .await
+    {
+        error!("Failed to revoke sessions for user {}: {}", user_id, e);
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Helper: validate_session
+// Turns a verified cookie value into an AuthSession, or None.
+//
+// The signature only proves the server issued the cookie at some point. What
+// the cookie *says* — the role above all — was trusted for as long as the
+// browser kept it, so deleting, demoting or re-passwording a user, or
+// suspending their organization, changed nothing for a session already open.
+// This checks the present state on every request instead: one primary-key
+// lookup, joined to the tenant.
+//
+// Rejected: no exp/epoch (issued before 0.9.4), expired, user gone, epoch
+// bumped, email unverified, organization suspended, or — while impersonating —
+// the real user no longer a Superuser. The role is taken from the database.
+// ─────────────────────────────────────────────────────────────────────────────
+pub async fn validate_session(pool: &SqlitePool, session: &Value) -> Option<AuthSession> {
+    let userid: i32 = session.get("userid")?.as_str()?.parse().ok()?;
+    let tenant_id = session.get("tenant_id")?.as_str()?.to_string();
+    let exp = session.get("exp")?.as_i64()?;
+    let epoch = session.get("epoch")?.as_i64()?;
+
+    if chrono::Utc::now().timestamp() >= exp {
+        return None;
+    }
+
+    // Impersonation (SaaS support tooling): tenant_id above is already the
+    // TARGET tenant, so every query scopes there with no handler changes.
+    // The user row lives in the real tenant.
+    let real_tenant = session.get("impersonating")
+        .and_then(|i| i.get("real_tenant_id"))
+        .and_then(|v| v.as_str())
+        .map(|s| s.to_string());
+
+    let row = sqlx::query(
+        "SELECT u.username, u.role, u.session_epoch, u.email_verified,
+                COALESCE(t.status, 'active') AS tenant_status
+           FROM users u
+           LEFT JOIN tenants t ON t.id = u.tenant_id
+          WHERE u.id = ? AND u.tenant_id = ?",
+    )
+    .bind(userid)
+    .bind(real_tenant.as_deref().unwrap_or(&tenant_id))
+    .fetch_optional(pool)
+    .await
+    .map_err(|e| error!("Session lookup failed: {}", e))
+    .ok()??;
+
+    let username: String = row.try_get("username").ok()?;
+    let db_role: String = row.try_get("role").ok()?;
+    let db_epoch: i64 = row.try_get("session_epoch").unwrap_or(0);
+    let verified: i64 = row.try_get("email_verified").unwrap_or(1);
+    let tenant_status: String = row.try_get("tenant_status").unwrap_or_default();
+
+    if db_epoch != epoch || verified == 0 || tenant_status == "suspended" {
+        return None;
+    }
+
+    let (role, impersonating) = match real_tenant {
+        Some(real_tenant_id) => {
+            // Impersonation is a Superuser capability; if the operator has
+            // since lost that role, so has the session. Inside the target
+            // tenant the role is always forced to viewer.
+            if UserRole::from(db_role.as_str()) < UserRole::Superuser {
+                return None;
+            }
+            (
+                "viewer".to_string(),
+                Some(crate::models::Impersonation { real_tenant_id, real_role: db_role }),
+            )
+        }
+        None => (db_role, None),
+    };
+
+    Some(AuthSession { username, userid, tenant_id, role, impersonating })
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Helper: AuthSession — FromRequestParts extractor
-// Reads and validates the signed session cookie; rejects with a /login
-// redirect if the cookie is absent, tampered, or missing required fields.
+// Verifies the cookie signature, then validate_session checks it against the
+// database. Anything missing or refused redirects to /login.
 // ─────────────────────────────────────────────────────────────────────────────
 impl<S> FromRequestParts<S> for AuthSession
 where
     S: Send + Sync + 'static,
-    Key: FromRef<S>, 
+    Key: FromRef<S>,
 {
     type Rejection = Redirect;
 
     fn from_request_parts<'a, 'b>(
         parts: &'a mut Parts,
-        state: &'b S, 
+        state: &'b S,
     ) -> impl Future<Output = Result<Self, Self::Rejection>> + Send {
         let key = Key::from_ref(state);
+        let jar = SignedCookieJar::from_headers(&parts.headers, key);
+        let session = jar.get("session")
+            .and_then(|c| serde_json::from_str::<Value>(c.value()).ok());
+        let pool = parts.extensions.get::<SqlitePool>().cloned();
 
         async move {
-            let jar = SignedCookieJar::from_headers(&parts.headers, key);
-
-            if let Some(cookie) = jar.get("session") {
-                if let Ok(session_json) = serde_json::from_str::<Value>(cookie.value()) {
-                    if let (Some(username), Some(userid_str), Some(tenant_id), Some(role)) = (
-                        session_json.get("username").and_then(|v| v.as_str()),
-                        session_json.get("userid").and_then(|v| v.as_str()),
-                        session_json.get("tenant_id").and_then(|v| v.as_str()),
-                        session_json.get("role").and_then(|v| v.as_str()),
-                    ) {
-                        let userid = match userid_str.parse::<i32>() {
-                             Ok(id) => id,
-                            Err(_) => return Err(Redirect::to("/login")),
-                        };
-                       
-
-                        // Impersonation (SaaS support tooling): when present,
-                        // tenant_id above is already the TARGET tenant, so every
-                        // query scopes there with no handler changes. The role is
-                        // forced to "viewer" rather than trusted from the cookie,
-                        // so a stale or tampered cookie cannot retain privileges
-                        // inside someone else's tenant.
-                        let impersonating = session_json
-                            .get("impersonating")
-                            .and_then(|v| {
-                                Some(crate::models::Impersonation {
-                                    real_tenant_id: v.get("real_tenant_id")?.as_str()?.to_string(),
-                                    real_role:      v.get("real_role")?.as_str()?.to_string(),
-                                })
-                            });
-
-                        let effective_role = if impersonating.is_some() {
-                            "viewer".to_string()
-                        } else {
-                            role.to_string()
-                        };
-
-                        return Ok(AuthSession {
-                            username: username.to_string(),
-                            userid, 
-                            tenant_id: tenant_id.to_string(),
-                            role: effective_role,
-                            impersonating,
-                        });
-                    }
-                }
-            }
-
-            // If anything fails (no cookie, bad signature, missing fields), redirect to login
-            Err(Redirect::to("/login"))
+            let (Some(session), Some(pool)) = (session, pool) else {
+                return Err(Redirect::to("/login"));
+            };
+            validate_session(&pool, &session).await.ok_or(Redirect::to("/login"))
         }
     }
 }
@@ -312,37 +450,8 @@ pub async fn login_submit(
                 "tenant_id": tenant_id,
                 "role": role
                 // no "impersonating" key: a fresh login is always the real tenant
-            }).to_string();
-
-            let mut cookie = Cookie::new("session", session_data);
-            cookie.set_path("/");
-            cookie.set_http_only(true);
-            cookie.set_same_site(SameSite::Lax);
-            cookie.set_max_age(time::Duration::hours(8));
-            // Secure is derived from the configured public URL rather than
-            // hardcoded off. A session cookie without it travels in clear text,
-            // which is a poor default for a product whose job is compliance —
-            // but forcing it on would silently break plain-HTTP deployments
-            // behind a terminating proxy, where the browser never sees HTTPS.
-            // app_url is what the operator has told us they are reachable on,
-            // so it is the one honest signal available here.
-            let secure = sqlx::query_scalar::<_, String>(
-                "SELECT value FROM settings WHERE skey = 'app_url' AND tenant_id = ?",
-            )
-            .bind(&tenant_id)
-            .fetch_optional(&pool)
-            .await
-            .ok()
-            .flatten()
-            .map(|u| u.trim().to_lowercase().starts_with("https://"))
-            .unwrap_or(false);
-            if !secure {
-                warn!(
-                    "Session cookie issued without the Secure flag — app_url is not https. \
-                     Set it under Settings so sessions are not sent in clear text."
-                );
-            }
-            cookie.set_secure(secure);
+            });
+            let cookie = issue_session_cookie(&pool, session_data, SESSION_TTL).await;
 
             info!("User '{}' logged in successfully for tenant '{}'", username, tenant_id);
             crate::audit::record_raw(

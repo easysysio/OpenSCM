@@ -2748,6 +2748,25 @@ pub async fn run_migrations(pool: &SqlitePool) -> Result<(), sqlx::Error> {
         info!("Schema migration v40 → v41 complete.");
     }
 
+    // ─────────────────────────────────────────────────────────────────────
+    // v41 → v42: revocable sessions (0.9.4).
+    //
+    // Sessions are signed cookies with no server-side record, so nothing a
+    // server does can end one early. session_epoch is copied into every
+    // cookie at issue and compared on every request; bumping it (password
+    // change, password reset) invalidates every session that user holds
+    // without a sessions table. Default 0 covers existing rows.
+    // ─────────────────────────────────────────────────────────────────────
+    if version < 42 {
+        info!("Running schema migration v41 → v42 (session epoch)...");
+        if table_exists(pool, "users").await && !column_exists(pool, "users", "session_epoch").await {
+            sqlx::query("ALTER TABLE users ADD COLUMN session_epoch INTEGER NOT NULL DEFAULT 0")
+                .execute(pool).await?;
+        }
+        sqlx::query("UPDATE schema_info SET version = 42").execute(pool).await?;
+        info!("Schema migration v41 → v42 complete.");
+    }
+
     Ok(())
 }
 

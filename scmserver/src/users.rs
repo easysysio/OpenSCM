@@ -566,9 +566,11 @@ pub struct ChangePasswordForm {
 pub async fn change_password(
     auth: AuthSession,
     pool: Extension<SqlitePool>,
+    ip: crate::handlers::ClientIp,
+    jar: axum_extra::extract::cookie::SignedCookieJar,
     Path(user_id): Path<i64>,
     Form(payload): Form<ChangePasswordForm>,
-) -> impl IntoResponse {
+) -> axum::response::Response {
 
     let current_role = UserRole::from(auth.role.as_str());
     let is_admin = current_role >= UserRole::Admin;
@@ -621,17 +623,47 @@ pub async fn change_password(
     .execute(&*pool)
     .await
     {
-        Ok(_) => {
+        Ok(res) if res.rows_affected() == 1 => {
             info!(
                 "Password changed for user ID {} by '{}' (Tenant: {}).",
                 user_id, auth.username, auth.tenant_id
             );
+
+            // A password change must end the sessions it is meant to lock out
+            // — a stolen cookie, or a device left signed in. Every session of
+            // this user ends, on every device.
+            auth::revoke_sessions(&pool, user_id).await;
+            crate::audit::record(
+                &pool, &auth.tenant_id,
+                Some(&auth), Some(ip.as_str()),
+                "user.password_change",
+                Some("user"), Some(&user_id.to_string()),
+                Some(if is_owner { "self" } else { "by_admin" }),
+            ).await;
+
             let encoded = urlencoding::encode("Password updated successfully").to_string();
-            Redirect::to(&format!(
+            let to = Redirect::to(&format!(
                 "/users/edit/{}?success_message={}",
                 user_id, encoded
-            ))
-            .into_response()
+            ));
+
+            // Changing your own password should not sign you out of the
+            // browser you did it from: re-issue this one cookie at the new
+            // epoch, so only the *other* sessions end.
+            if is_owner && auth.impersonating.is_none() {
+                let session = serde_json::json!({
+                    "username": auth.username,
+                    "userid": auth.userid.to_string(),
+                    "tenant_id": auth.tenant_id,
+                    "role": auth.role,
+                });
+                let cookie = auth::issue_session_cookie(&pool, session, auth::SESSION_TTL).await;
+                return (jar.add(cookie), to).into_response();
+            }
+            to.into_response()
+        }
+        Ok(_) => {
+            Redirect::to("/users?error_message=User+not+found").into_response()
         }
         Err(e) => {
             error!("Failed to update password for user {}: {}", user_id, e);

@@ -181,12 +181,28 @@ These thresholds affect compliance colors across the dashboard, policies, and re
 
 ## Session Management
 
-OpenSCM sessions expire after **8 hours** of inactivity. Users are
-automatically redirected to the login page when their session expires.
+A sign-in lasts **8 hours** from the moment of login, whether or not the
+user is active. Users are then redirected to the login page.
 
-Sessions are secured with signed cookies derived from the server's
-Ed25519 private key. Restarting the server does not invalidate
-existing sessions.
+Sessions are signed cookies, keyed from the server's private key, and the
+expiry is part of the signed value — a copied cookie stops working when it
+expires, not merely when the browser discards it. Restarting the server does
+not end existing sessions.
+
+Every request is also checked against the current state of the account, so
+these take effect **immediately**, without waiting for the session to expire:
+
+| Change | Effect on open sessions |
+|---|---|
+| User deleted | All of that user's sessions end |
+| Role changed | The new role applies from the next page load |
+| Password changed or reset | All of that user's sessions end — except, when users change their own password, the browser they did it from |
+| Organization suspended (SaaS) | All sessions in that organization end |
+
+!!! note "Secure cookies"
+    The session cookie is marked **Secure** (sent only over HTTPS) when the
+    **App URL** under **Settings → Email** starts with `https://`.
+    Set it if you serve OpenSCM over HTTPS, including behind a proxy.
 
 ---
 

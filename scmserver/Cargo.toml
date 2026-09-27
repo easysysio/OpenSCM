@@ -65,3 +65,8 @@ printpdf = { version = "0.12", default-features = false, features = ["jpeg", "te
 
 [target.'cfg(windows)'.dependencies]
 winreg = "0.52"
+
+[dev-dependencies]
+# Already in the graph through axum; named here so integration tests can drive
+# a Router with tower::ServiceExt::oneshot.
+tower = { version = "0.5", features = ["util"] }
