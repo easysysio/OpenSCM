@@ -43,6 +43,27 @@ pub fn authorize(current_role: &str, required: UserRole) -> Option<Response> {
 
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Helper: dummy_hash
+// A real bcrypt hash to verify against when the username does not exist, so an
+// unknown user costs the same as a wrong password.
+//
+// This used to be a hand-written constant one character short of a valid
+// bcrypt string. bcrypt::verify rejected it while parsing, before hashing
+// anything, so unknown usernames were answered in microseconds and real ones
+// in ~250 ms: a clean username-enumeration oracle behind a comment claiming
+// the opposite. It is generated at the same cost as stored passwords
+// (DEFAULT_COST) and forced when the router is built, so the first unknown
+// login does not pay for it either.
+// ─────────────────────────────────────────────────────────────────────────────
+static DUMMY_HASH: std::sync::LazyLock<String> = std::sync::LazyLock::new(|| {
+    bcrypt::hash("openscm-timing-parity", bcrypt::DEFAULT_COST).unwrap_or_default()
+});
+
+pub fn dummy_hash() -> &'static str {
+    DUMMY_HASH.as_str()
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Helper: AuthSession — FromRequestParts extractor
 // Reads and validates the signed session cookie; rejects with a /login
 // redirect if the cookie is absent, tampered, or missing required fields.
@@ -230,8 +251,6 @@ pub async fn login_submit(
     // Timing attack protection — always run bcrypt regardless of whether user exists.
     // For LDAP-backed users we still run bcrypt against the dummy hash to keep the
     // timing profile similar (the actual auth result comes from the LDAP bind below).
-    const DUMMY_HASH: &str = "$2b$12$invalidhashfortimingprotectionXXXXXXXXXXXXXXXXXXXXXX";
-
     let (hash_to_check, maybe_row) = match row {
         Ok(Some(row)) => {
             let hash = row.get("password");
@@ -239,11 +258,11 @@ pub async fn login_submit(
         },
         Ok(None) => {
             warn!("Login attempt for non-existent user: '{}'", form.username);
-            (DUMMY_HASH.to_string(), None)
+            (dummy_hash().to_string(), None)
         },
         Err(e) => {
             error!("Database error during login: {}", e);
-            (DUMMY_HASH.to_string(), None)
+            (dummy_hash().to_string(), None)
         },
     };
 
@@ -404,3 +423,23 @@ pub async fn logout(
     (jar.remove(Cookie::from("session")), Redirect::to("/login"))
 }
 
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // The dummy must be a hash bcrypt actually computes against, not one it
+    // rejects while parsing — that early rejection is the timing leak.
+    #[test]
+    fn dummy_hash_is_a_real_bcrypt_hash() {
+        let h = dummy_hash();
+        assert_eq!(h.len(), 60, "bcrypt hashes are 60 characters");
+        assert_eq!(verify("not-the-password", h).expect("verify must hash, not error"), false);
+    }
+
+    // And it must cost what a stored password costs, or the timing still differs.
+    #[test]
+    fn dummy_hash_uses_the_stored_password_cost() {
+        assert!(dummy_hash().starts_with(&format!("$2b${:02}$", bcrypt::DEFAULT_COST)));
+    }
+}

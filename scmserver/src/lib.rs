@@ -339,6 +339,10 @@ async fn init_guard(
 // the init_guard middleware. EE/SaaS merge additional routes on top.
 // ─────────────────────────────────────────────────────────────────────────────
 pub fn create_core_router(state: AppState, cookie_key: axum_extra::extract::cookie::Key) -> Router {
+    // Compute the login timing-parity hash now rather than on the first
+    // unknown-user login, which would otherwise be measurably slower once.
+    let _ = auth::dummy_hash();
+
     Router::new()
         // Probes — must come first so they're not shadowed by anything else
         // and are easy to find. The init_guard middleware whitelists them so
