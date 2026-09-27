@@ -6,6 +6,9 @@ All notable changes to OpenSCM are documented here.
 
 ## [Unreleased]
 
+### Security
+- **Stored cross-site scripting through an agent's hostname.** A system's name is the hostname its agent reports at registration, which requires no authentication. The **View** window on the Systems and Pending Systems pages inserted that name as HTML, so anyone able to reach the server's agent endpoint could register a fake agent whose hostname contained a script, and have it run in an administrator's browser the moment they opened it — with that administrator's permissions. The same flaw affected group names and member lists in the System Groups window, and test names and conditions in the Tests window (conditions also arrive through imported policy files). All of these now escape what they display, and a test fails the build if a page inserts a value as HTML without escaping it.
+
 ---
 
 ## [0.9.3] - 2026-09-16

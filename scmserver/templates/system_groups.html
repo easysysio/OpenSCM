@@ -207,7 +207,7 @@
         const systemsArray = systemsStr ? systemsStr.split(',') : [];
 
         // Set Title & Basic Info
-        $('#modalGroupName').html('<i class="fas fa-layer-group mr-2"></i>' + name);
+        $('#modalGroupName').html('<i class="fas fa-layer-group mr-2"></i>' + escapeHtml(name));
         $('#mg-id').text(btn.data('id'));
         $('#mg-description').text(btn.data('description') || "No description provided.");
         
@@ -220,7 +220,7 @@
             systemsArray.forEach(function(sName) {
                 container.append(
                   '<span class="badge badge-info shadow-sm">' +
-                  '<i class="fas fa-server fa-xs mr-1"></i>' + sName.trim() + 
+                  '<i class="fas fa-server fa-xs mr-1"></i>' + escapeHtml(sName.trim()) + 
                   '</span>'
                 );
             });

@@ -426,7 +426,7 @@
     $(document).on('click', '.view-system-btn', function() {
         const btn = $(this);
 
-        $('#modalSystemName').html('<i class="fas fa-server mr-2"></i>' + btn.data('name'));
+        $('#modalSystemName').html('<i class="fas fa-server mr-2"></i>' + escapeHtml(btn.data('name')));
         $('#m-id').text(btn.data('id'));
         $('#m-os').text(btn.data('os'));
         $('#m-arch').text(btn.data('arch'));

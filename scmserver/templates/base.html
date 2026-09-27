@@ -422,6 +422,21 @@
 </script>
 
 <script>
+  // ── HTML escaping for DOM-built markup ─────────────────────────────────────
+  // Any value that is concatenated into a string passed to .html(), .append()
+  // or innerHTML MUST go through this. jQuery's .data() returns the attribute
+  // value already HTML-decoded, so Tera's autoescape does not survive the trip:
+  // a system name (the agent-reported hostname, sent unauthenticated at
+  // registration) or a test condition (carried by imported policy files) would
+  // otherwise be parsed as markup in an admin's browser. Prefer .text() when
+  // the value is the whole content; use this when it has to sit inside markup.
+  window.escapeHtml = function (v) {
+    if (v === null || v === undefined) return "";
+    return String(v)
+      .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;").replace(/'/g, "&#39;");
+  };
+
   // ── Local-timezone rendering ────────────────────────────────────────────────
   // Every timestamp the server emits is UTC. The server uses two shapes:
   //   • ISO with an explicit marker, e.g. "2026-06-15T14:30:00Z"

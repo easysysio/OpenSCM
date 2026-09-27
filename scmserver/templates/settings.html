@@ -807,7 +807,7 @@
         result
           .removeClass('text-success text-danger')
           .addClass(data.ok ? 'text-success' : 'text-danger')
-          .html((data.ok ? '<i class="fas fa-check-circle mr-1"></i>' : '<i class="fas fa-times-circle mr-1"></i>') + data.message)
+          .html((data.ok ? '<i class="fas fa-check-circle mr-1"></i>' : '<i class="fas fa-times-circle mr-1"></i>') + escapeHtml(data.message))
           .show();
       },
       error: function (xhr) {
@@ -816,7 +816,7 @@
         result
           .removeClass('text-success')
           .addClass('text-danger')
-          .html('<i class="fas fa-times-circle mr-1"></i>' + msg)
+          .html('<i class="fas fa-times-circle mr-1"></i>' + escapeHtml(msg))
           .show();
       },
       complete: function () {

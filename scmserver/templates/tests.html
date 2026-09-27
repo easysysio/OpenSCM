@@ -299,7 +299,7 @@ $(function () {
         const filter = (b.data('filter') || 'all').toLowerCase();
         
         // Header and ID
-        $('#m-title-head').html('<i class="fas fa-microscope mr-2"></i>' + b.data('name'));
+        $('#m-title-head').html('<i class="fas fa-microscope mr-2"></i>' + escapeHtml(b.data('name')));
         $('#m-id').text(b.data('id'));
         
         // Description
@@ -320,7 +320,7 @@ $(function () {
 
         // Logic Statement (ALL vs ANY)
         const logicWord = filter === 'any' ? 'ANY' : 'ALL';
-        $('#m-filter-statement').html(`This test matches <strong>${logicWord.toUpperCase()}</strong> of the following conditions:`);
+        $('#m-filter-statement').html(`This test matches <strong>${escapeHtml(logicWord.toUpperCase())}</strong> of the following conditions:`);
 
         // Severity Badge logic
         const sev = (b.data('sev') || "").toLowerCase().trim();
@@ -344,7 +344,7 @@ $(function () {
 
         if (appCount > 0) {
             appSection.show();
-            $('#m-app-filter-statement').html(`Run this test only if <strong>${appFilter}</strong> of the following conditions are met:`);
+            $('#m-app-filter-statement').html(`Run this test only if <strong>${escapeHtml(appFilter)}</strong> of the following conditions are met:`);
 
             for (let i = 1; i <= appCount; i++) {
                 const ae  = b.data('ae'  + i) || '';
@@ -359,19 +359,19 @@ $(function () {
                         <div class="text-center" style="width: 32%">
                             <div class="node-circle bg-warning shadow-sm"><i class="fas fa-filter"></i></div>
                             <small class="d-block mt-1 text-xs text-muted">SUBJECT</small>
-                            <span class="badge badge-light border text-truncate d-block">${ae}</span>
+                            <span class="badge badge-light border text-truncate d-block">${escapeHtml(ae)}</span>
                         </div>
                         <div class="text-muted"><i class="fas fa-chevron-right"></i></div>
                         <div class="text-center" style="width: 32%">
                             <div class="node-circle node-condition bg-secondary shadow-sm"><i class="fas fa-equals"></i></div>
                             <small class="d-block mt-1 text-xs text-muted">LOGIC</small>
-                            <span class="badge badge-light border text-truncate d-block">${ac || asel}</span>
+                            <span class="badge badge-light border text-truncate d-block">${escapeHtml(ac || asel)}</span>
                         </div>
                         <div class="text-muted"><i class="fas fa-chevron-right"></i></div>
                         <div class="text-center" style="width: 32%">
                             <div class="node-circle bg-success shadow-sm"><i class="fas fa-check"></i></div>
                             <small class="d-block mt-1 text-xs text-muted">EXPECTED</small>
-                            <span class="badge badge-light border text-truncate d-block">${as_ || '—'}</span>
+                            <span class="badge badge-light border text-truncate d-block">${escapeHtml(as_ || '—')}</span>
                         </div>
                     </div>
                 `);
@@ -401,19 +401,19 @@ $(function () {
                         <div class="text-center" style="width: 32%">
                             <div class="node-circle bg-info shadow-sm"><i class="fas fa-file-code"></i></div>
                             <small class="d-block mt-1 text-xs text-muted">SUBJECT</small>
-                            <span class="badge badge-light border text-truncate d-block">${el}</span>
+                            <span class="badge badge-light border text-truncate d-block">${escapeHtml(el)}</span>
                         </div>
                         <div class="text-muted"><i class="fas fa-chevron-right"></i></div>
                         <div class="text-center" style="width: 32%">
                             <div class="node-circle node-condition bg-warning shadow-sm"><i class="fas fa-equals"></i></div>
                             <small class="d-block mt-1 text-xs text-muted">LOGIC</small>
-                            <span class="badge badge-light border text-truncate d-block">${co}</span>
+                            <span class="badge badge-light border text-truncate d-block">${escapeHtml(co)}</span>
                         </div>
                         <div class="text-muted"><i class="fas fa-chevron-right"></i></div>
                         <div class="text-center" style="width: 32%">
                             <div class="node-circle bg-success shadow-sm"><i class="fas fa-shield-check"></i></div>
                             <small class="d-block mt-1 text-xs text-muted">EXPECTED</small>
-                            <span class="badge badge-light border text-truncate d-block">${ex}</span>
+                            <span class="badge badge-light border text-truncate d-block">${escapeHtml(ex)}</span>
                         </div>
                     </div>
                 `);
