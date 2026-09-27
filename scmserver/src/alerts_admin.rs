@@ -12,7 +12,7 @@ use serde::Serialize;
 use sqlx::{Row, SqlitePool};
 use std::sync::Arc;
 use tera::{Context, Tera};
-use tracing::{error, info};
+use tracing::{error, info, warn};
 
 use crate::auth;
 use crate::handlers::{parse_form_data, render_template};
@@ -332,12 +332,28 @@ fn read_form(raw: &str) -> Result<FormValues, String> {
 // A blank secret means "leave it alone", not "clear it" — the form never sends
 // the stored value back to the browser, so an edit that does not retype it must
 // not wipe it.
+//
+// alert_actions has no tenant_id of its own, so ownership is checked here
+// against the parent rule rather than trusted from the caller: this function
+// is the one place those rows are written, and it must never touch a rule
+// outside the given tenant.
 // ─────────────────────────────────────────────────────────────────────────────
 async fn save_actions(
     pool: &SqlitePool,
+    tenant_id: &str,
     alert_id: i64,
     actions: &[(String, Option<String>, Option<String>)],
 ) {
+    let owned: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM alerts WHERE id = ? AND tenant_id = ?",
+    )
+    .bind(alert_id).bind(tenant_id)
+    .fetch_one(pool).await.unwrap_or(0);
+    if owned != 1 {
+        error!("Refusing to write actions for alert {} outside tenant '{}'", alert_id, tenant_id);
+        return;
+    }
+
     let existing: Vec<(String, Option<String>)> = sqlx::query_as(
         "SELECT action, target_secret FROM alert_actions WHERE alert_id = ?",
     )
@@ -388,6 +404,21 @@ pub async fn alerts_save(
         }
     };
 
+    // The policy picker only lists this tenant's policies, but the posted id
+    // is not bound by that. A foreign id would never fire (evaluation skips
+    // cross-tenant pairs), so this is about not storing a dangling reference
+    // into another tenant rather than a leak.
+    if let Some(pid) = v.policy_id {
+        let owned: i64 = sqlx::query_scalar(
+            "SELECT COUNT(*) FROM policies WHERE id = ? AND tenant_id = ?",
+        )
+        .bind(pid).bind(&auth.tenant_id)
+        .fetch_one(&*pool).await.unwrap_or(0);
+        if owned != 1 {
+            return Redirect::to("/alerts?error_message=Choose+one+of+your+policies").into_response();
+        }
+    }
+
     let result = match id {
         Some(Path(alert_id)) => {
             let r = sqlx::query(
@@ -399,8 +430,21 @@ pub async fn alerts_save(
             .bind(&v.trigger_type).bind(v.threshold).bind(&v.score_axis)
             .bind(v.cooldown_minutes).bind(alert_id).bind(&auth.tenant_id)
             .execute(&*pool).await;
-            if r.is_ok() {
-                save_actions(&pool, alert_id, &v.actions).await;
+            // is_ok() is not enough: an UPDATE scoped to the caller's tenant
+            // that matches no row still succeeds. Gating on it let an admin in
+            // one tenant post to another tenant's alert id and have
+            // save_actions rewrite that alert's destinations — keeping its
+            // stored webhook secret — while the UPDATE itself did nothing.
+            match r {
+                Ok(ref res) if res.rows_affected() == 1 => {
+                    save_actions(&pool, &auth.tenant_id, alert_id, &v.actions).await;
+                }
+                Ok(_) => {
+                    warn!("Alert update for id {} matched nothing in tenant '{}' (user '{}')",
+                          alert_id, auth.tenant_id, auth.username);
+                    return Redirect::to("/alerts?error_message=Alert+not+found").into_response();
+                }
+                Err(_) => {}
             }
             r
         }
@@ -416,7 +460,7 @@ pub async fn alerts_save(
             .bind(v.cooldown_minutes).bind(auth.userid)
             .execute(&*pool).await;
             if let Ok(ref res) = r {
-                save_actions(&pool, res.last_insert_rowid(), &v.actions).await;
+                save_actions(&pool, &auth.tenant_id, res.last_insert_rowid(), &v.actions).await;
             }
             r
         }
