@@ -1,7 +1,6 @@
 use tracing::{debug, error, warn};
 use std::path::Path;
 use std::fs;
-use semver::Version;
 use sysinfo::System;
 use std::process::Command;
 use std::net::TcpStream;
@@ -22,10 +21,6 @@ pub enum EvalResult {
 }
 
 // Tiny sugar — `boolean(check())` reads better than the same if/else everywhere.
-// Unix-only: its three callers (path owner / group / permission) are all
-// #[cfg(unix)], and the Windows stubs return Na directly, so without this gate
-// the Windows build warns that the function is unused.
-#[cfg(unix)]
 #[inline]
 fn boolean(passed: bool) -> EvalResult {
     if passed { EvalResult::Pass } else { EvalResult::Fail }
@@ -36,22 +31,73 @@ fn boolean(passed: bool) -> EvalResult {
 // and `directory/owner|group|permission` route through these helpers.
 // ─────────────────────────────────────────────────────────────────────────────
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Helper: split_negation
+// (is_negative, positive form) of a string operator. NOT CONTAINS and
+// NOT EQUALS are the negations of CONTAINS and EQUALS; everything else is
+// returned unchanged.
+// ─────────────────────────────────────────────────────────────────────────────
+fn split_negation(condition: &str) -> (bool, String) {
+    let c = condition.trim().to_lowercase();
+    match c.as_str() {
+        "not contains"             => (true, "contains".to_string()),
+        "not equals" | "not equal" => (true, "equals".to_string()),
+        _                          => (false, c),
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Helper: matches_across
+// Applies a string operator to a check that looks at SEVERAL values — the
+// lines of a file, a group's name and numeric id, a host's addresses.
+//
+// A positive operator passes when ANY value matches. A negative one passes
+// only when NONE does. Before 0.9.5 negatives were applied value by value and
+// OR-ed, so "NOT CONTAINS x" passed as soon as one line lacked x — true of
+// almost any file, including one that contains x. A file with
+// `PermitRootLogin yes` passed "NOT CONTAINS PermitRootLogin yes".
+// ─────────────────────────────────────────────────────────────────────────────
+fn matches_across<I, S>(values: I, condition: &str, expected: &str) -> bool
+where
+    I: IntoIterator<Item = S>,
+    S: AsRef<str>,
+{
+    let (negative, positive) = split_negation(condition);
+    let any = values
+        .into_iter()
+        .any(|v| apply_string_condition(v.as_ref(), &positive, expected));
+    any != negative
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Helper: check_path_owner
+// EQUALS (the default for any operator but NOT EQUALS) passes when the owner's
+// name or numeric uid is `sinput`. The operator used to be ignored, so
+// NOT EQUALS was evaluated as EQUALS — exactly backwards.
+// ─────────────────────────────────────────────────────────────────────────────
 #[cfg(unix)]
-fn check_path_owner(path: &str, sinput: &str) -> EvalResult {
+fn check_path_owner(path: &str, condition: &str, sinput: &str) -> EvalResult {
     use std::os::unix::fs::MetadataExt;
     let uid = match fs::metadata(path) {
         Ok(m)  => m.uid(),
         Err(_) => return EvalResult::Fail,
     };
-    let name_matches = get_user_name_from_uid(uid)
+    let is_owner = get_user_name_from_uid(uid)
         .map(|n| n == sinput)
-        .unwrap_or(false);
-    boolean(name_matches || uid.to_string() == sinput)
+        .unwrap_or(false)
+        || uid.to_string() == sinput;
+    let (negative, _) = split_negation(condition);
+    boolean(is_owner != negative)
 }
 
 #[cfg(not(unix))]
-fn check_path_owner(_path: &str, _sinput: &str) -> EvalResult { EvalResult::Na }
+fn check_path_owner(_path: &str, _condition: &str, _sinput: &str) -> EvalResult { EvalResult::Na }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Helper: check_path_group
+// Matches against the group's name and its numeric gid (see matches_across:
+// NOT EQUALS means neither is `sinput`).
+// ─────────────────────────────────────────────────────────────────────────────
 #[cfg(unix)]
 fn check_path_group(path: &str, condition: &str, sinput: &str) -> EvalResult {
     use std::os::unix::fs::MetadataExt;
@@ -60,29 +106,77 @@ fn check_path_group(path: &str, condition: &str, sinput: &str) -> EvalResult {
         Err(_) => return EvalResult::Fail,
     };
     let name = get_group_name_from_gid(gid).unwrap_or_default();
-    boolean(
-        apply_string_condition(&name, condition, sinput) ||
-        apply_string_condition(&gid.to_string(), condition, sinput)
-    )
+    boolean(matches_across([name, gid.to_string()], condition, sinput))
 }
 
 #[cfg(not(unix))]
 fn check_path_group(_p: &str, _c: &str, _s: &str) -> EvalResult { EvalResult::Na }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Helper: parse_octal_mode
+// "644", "0644", "0o644", "1777" → the mode. None for anything that is not an
+// octal permission value. Unix-only (and tests): its one caller is the unix
+// check_path_permission, and an unused function is a warning on Windows.
+// ─────────────────────────────────────────────────────────────────────────────
+#[cfg(any(unix, test))]
+fn parse_octal_mode(s: &str) -> Option<u32> {
+    let t = s.trim();
+    let t = t.strip_prefix("0o").unwrap_or(t);
+    if t.is_empty() || t.len() > 5 {
+        return None;
+    }
+    u32::from_str_radix(t, 8).ok().filter(|m| *m <= 0o7777)
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Helper: permission_matches
+// Permissions are sets of bits, so "more restrictive" is a subset test, not a
+// numeric one. Compared as numbers, 0477 (group and other: rwx) is "less than"
+// 0644 — which is how a world-writable file passed "644 or more restrictive".
+//
+//   EQUALS      exactly this mode
+//   NOT EQUALS  any other mode
+//   LESS THAN   grants nothing beyond `expected` (so `expected` itself passes)
+//   MORE THAN   grants at least everything in `expected`
+//
+// None for an operator that has no meaning here.
+// ─────────────────────────────────────────────────────────────────────────────
+#[cfg(any(unix, test))]
+fn permission_matches(mode: u32, condition: &str, expected: u32) -> Option<bool> {
+    match condition.trim().to_lowercase().as_str() {
+        "equal" | "equals"          => Some(mode == expected),
+        "not equal" | "not equals"  => Some(mode != expected),
+        "less than"                 => Some(mode & !expected == 0),
+        "more than" | "greater than" => Some(expected & !mode == 0),
+        _                           => None,
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Helper: check_path_permission
+// A path that cannot be read fails (it used to be treated as mode 000, which
+// passed every "LESS THAN" check). An expected value that is not octal is NA
+// with an error in the log rather than being read as 000. The setuid, setgid
+// and sticky bits are part of the mode, so `EQUALS 1777` works on /tmp.
+// ─────────────────────────────────────────────────────────────────────────────
 #[cfg(unix)]
 fn check_path_permission(path: &str, condition: &str, sinput: &str) -> EvalResult {
     use std::os::unix::fs::PermissionsExt;
-    let mode = fs::metadata(path)
-        .map(|m| m.permissions().mode() & 0o777)
-        .unwrap_or(0);
-    let expected = u32::from_str_radix(sinput, 8).unwrap_or(0);
-    let passed = match condition.trim().to_lowercase().as_str() {
-        "equal" | "equals" => mode == expected,
-        "more than"        => mode >= expected,
-        "less than"        => mode <= expected,
-        _                  => false,
+    let mode = match fs::metadata(path) {
+        Ok(m)  => m.permissions().mode() & 0o7777,
+        Err(_) => return EvalResult::Fail,
     };
-    boolean(passed)
+    let Some(expected) = parse_octal_mode(sinput) else {
+        error!("Permission check on '{}': '{}' is not an octal mode such as 644", path, sinput);
+        return EvalResult::Na;
+    };
+    match permission_matches(mode, condition, expected) {
+        Some(passed) => boolean(passed),
+        None => {
+            error!("Unsupported permission operator: '{}'", condition);
+            EvalResult::Fail
+        }
+    }
 }
 
 #[cfg(not(unix))]
@@ -409,14 +503,122 @@ fn dpkg_lookup(package: &str) -> Option<DpkgEntry> {
     guard.as_ref().and_then(|(_, m)| m.get(package).cloned())
 }
 
-fn parse_to_semver(v: &str) -> Option<Version> {
-    let parts: Vec<_> = v.split('.').collect();
-    let normalized = match parts.len() {
-        1 => format!("{}.0.0", parts[0]),
-        2 => format!("{}.{}.0", parts[0], parts[1]),
-        _ => v.to_string(),
+// ─────────────────────────────────────────────────────────────────────────────
+// Version comparison
+//
+// Package versions are not semver. The previous comparison parsed both sides as
+// strict X.Y.Z and, when that failed, answered "false" to every ordering
+// question — so `openssh-server MORE THAN 8.0` failed on a host running
+// 8.9p1-3ubuntu0.6, and 3.0.2-0ubuntu1.15 was not EQUAL to 3.0.2.
+//
+// A version here is  [epoch:]upstream[-revision] :
+//   • The upstream part is split on '.', and parts are compared pairwise;
+//     a missing part counts as 0, so 1.2 == 1.2.0.
+//   • Within a part, runs of digits compare as numbers and runs of other
+//     characters as text ('~' sorts before everything, as in dpkg), so
+//     9p1 > 9 > 9~rc1 and 10 > 9.
+//   • The epoch and the revision of the installed version are only taken into
+//     account when the EXPECTED value has them too. Someone who writes "8.0"
+//     means the upstream version.
+// ─────────────────────────────────────────────────────────────────────────────
+struct VersionParts<'a> {
+    epoch:    Option<&'a str>,
+    upstream: &'a str,
+    revision: Option<&'a str>,
+}
+
+fn split_version(v: &str) -> VersionParts<'_> {
+    let v = v.trim();
+    let v = match v.strip_prefix(['v', 'V']) {
+        Some(rest) if rest.starts_with(|c: char| c.is_ascii_digit()) => rest,
+        _ => v,
     };
-    Version::parse(&normalized).ok()
+    let (epoch, rest) = match v.split_once(':') {
+        Some((e, rest)) if !e.is_empty() && e.bytes().all(|b| b.is_ascii_digit()) => (Some(e), rest),
+        _ => (None, v),
+    };
+    let (upstream, revision) = match rest.rsplit_once('-') {
+        Some((u, r)) if !u.is_empty() => (u, Some(r)),
+        _ => (rest, None),
+    };
+    VersionParts { epoch, upstream, revision }
+}
+
+// Orders two runs of digits as numbers without parsing them (no overflow).
+fn cmp_digits(a: &str, b: &str) -> std::cmp::Ordering {
+    let a = a.trim_start_matches('0');
+    let b = b.trim_start_matches('0');
+    a.len().cmp(&b.len()).then_with(|| a.cmp(b))
+}
+
+// dpkg's character order for the non-digit runs: '~' first, then end of
+// string, then letters, then everything else.
+fn char_rank(c: Option<char>) -> i32 {
+    match c {
+        Some('~')                          => -1,
+        None                               => 0,
+        Some(c) if c.is_ascii_alphabetic() => c as i32,
+        Some(c)                            => c as i32 + 256,
+    }
+}
+
+// Compares one dot-separated part: alternating non-digit and digit runs.
+fn cmp_version_part(a: &str, b: &str) -> std::cmp::Ordering {
+    use std::cmp::Ordering::Equal;
+    let (mut a, mut b) = (a, b);
+    while !a.is_empty() || !b.is_empty() {
+        let an = a.find(|c: char| c.is_ascii_digit()).unwrap_or(a.len());
+        let bn = b.find(|c: char| c.is_ascii_digit()).unwrap_or(b.len());
+        let (mut ac, mut bc) = (a[..an].chars(), b[..bn].chars());
+        loop {
+            let (x, y) = (ac.next(), bc.next());
+            if x.is_none() && y.is_none() { break; }
+            let o = char_rank(x).cmp(&char_rank(y));
+            if o != Equal { return o; }
+        }
+        a = &a[an..];
+        b = &b[bn..];
+        let ad = a.find(|c: char| !c.is_ascii_digit()).unwrap_or(a.len());
+        let bd = b.find(|c: char| !c.is_ascii_digit()).unwrap_or(b.len());
+        let o = cmp_digits(&a[..ad], &b[..bd]);
+        if o != Equal { return o; }
+        a = &a[ad..];
+        b = &b[bd..];
+    }
+    Equal
+}
+
+// Compares two dotted strings part by part; a missing part counts as 0.
+fn cmp_dotted(a: &str, b: &str) -> std::cmp::Ordering {
+    let (mut ai, mut bi) = (a.split('.'), b.split('.'));
+    loop {
+        match (ai.next(), bi.next()) {
+            (None, None) => return std::cmp::Ordering::Equal,
+            (x, y) => {
+                let o = cmp_version_part(x.unwrap_or("0"), y.unwrap_or("0"));
+                if o != std::cmp::Ordering::Equal { return o; }
+            }
+        }
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Helper: compare_versions
+// Orders an installed version against an expected one (see the block above).
+// ─────────────────────────────────────────────────────────────────────────────
+fn compare_versions(actual: &str, expected: &str) -> std::cmp::Ordering {
+    use std::cmp::Ordering::Equal;
+    let (a, e) = (split_version(actual), split_version(expected));
+    if let Some(ee) = e.epoch {
+        let o = cmp_digits(a.epoch.unwrap_or("0"), ee);
+        if o != Equal { return o; }
+    }
+    let o = cmp_dotted(a.upstream, e.upstream);
+    if o != Equal { return o; }
+    match e.revision {
+        Some(er) => cmp_dotted(a.revision.unwrap_or("0"), er),
+        None     => Equal,
+    }
 }
 
 
@@ -719,59 +921,72 @@ fn get_system_domain() -> Option<String> {
 }
 
 
-fn check_file_content(path: &str, condition: &str, expected: &str) -> bool {
-    // Guard: file does not exist — not an error, just no match
-    if !Path::new(path).exists() {
-        debug!("File '{}' does not exist — content check returns false.", path);
-        return false;
-    }
-
-    // Guard: reject directories
+// ─────────────────────────────────────────────────────────────────────────────
+// Helper: any_line_matches
+// Whether any line of the file — or of any file directly inside a directory —
+// satisfies a POSITIVE operator. Err when something could not be read, so the
+// caller can tell "no match" from "could not look".
+// ─────────────────────────────────────────────────────────────────────────────
+fn any_line_matches(path: &str, positive: &str, expected: &str) -> Result<bool, ()> {
     if Path::new(path).is_dir() {
-        // Search all files in directory for the content
-        let dir = match fs::read_dir(path) {
-            Ok(d) => d,
-            Err(e) => {
-                error!("Could not read directory {}: {}", path, e);
-                return false;
-            }
-        };
+        let dir = fs::read_dir(path).map_err(|e| {
+            error!("Could not read directory {}: {}", path, e);
+        })?;
+        let mut unreadable = false;
         for entry in dir.filter_map(|e| e.ok()) {
-            let path = entry.path();
-            if path.is_file() {
-                // Skip entries whose paths are not valid UTF-8; passing an
-                // empty string to check_file_content would silently open ""
-                // (which fails) rather than skipping the entry cleanly.
-                if let Some(path_str) = path.to_str() {
-                    if check_file_content(path_str, condition, expected) {
-                        return true;
-                    }
-                }
+            let entry_path = entry.path();
+            if !entry_path.is_file() {
+                continue;
+            }
+            // Entries whose paths are not valid UTF-8 are skipped.
+            let Some(p) = entry_path.to_str() else { continue };
+            match any_line_matches(p, positive, expected) {
+                Ok(true)  => return Ok(true),
+                Ok(false) => {}
+                Err(())   => unreadable = true,
             }
         }
-        return false;
+        return if unreadable { Err(()) } else { Ok(false) };
     }
 
-    let file = match fs::File::open(path) {
-        Ok(f) => f,
-        Err(e) => {
-            error!("Could not open file {}: {}", path, e);
-            return false;
-        }
-    };
-
-    let reader = BufReader::new(file);
-    for line in reader.lines() {
-        if let Ok(content) = line {
-            if apply_string_condition(&content, condition, expected) {
-                return true;
-            }
+    let file = fs::File::open(path).map_err(|e| {
+        error!("Could not open file {}: {}", path, e);
+    })?;
+    // Lines are read as bytes and decoded leniently, so a stray non-UTF-8 byte
+    // neither hides the line it is on nor stops the scan. A read error part-way
+    // through means the rest was not examined.
+    for chunk in BufReader::new(file).split(b'\n') {
+        let bytes = chunk.map_err(|e| {
+            error!("Could not read file {}: {}", path, e);
+        })?;
+        let line = String::from_utf8_lossy(&bytes);
+        let line = line.strip_suffix('\r').unwrap_or(&line);
+        if apply_string_condition(line, positive, expected) {
+            return Ok(true);
         }
     }
-    false
+    Ok(false)
 }
 
-
+// ─────────────────────────────────────────────────────────────────────────────
+// Helper: check_file_content
+// CONTAINS / EQUALS / REGEX pass when some line matches. NOT CONTAINS and
+// NOT EQUALS pass when NO line does — see matches_across for why that
+// distinction matters. A path that does not exist has no lines: it fails a
+// positive check and passes a negative one. A path that exists but cannot be
+// read fails either way, because nothing was verified.
+// ─────────────────────────────────────────────────────────────────────────────
+fn check_file_content(path: &str, condition: &str, expected: &str) -> bool {
+    let (negative, positive) = split_negation(condition);
+    if !Path::new(path).exists() {
+        debug!("'{}' does not exist — content check is {}.", path, negative);
+        return negative;
+    }
+    match any_line_matches(path, &positive, expected) {
+        Ok(found) => found != negative,
+        Err(())   => false,
+    }
+}
 
 // Generic streaming file hash. Used for both SHA1 and SHA256 by binding the
 // type parameter at the call site (`calculate_hash::<Sha1>(...)` etc.).
@@ -816,6 +1031,19 @@ fn apply_string_condition(actual: &str, condition: &str, expected: &str) -> bool
                 }
             }
         }
+        // Numeric comparison, for values that are numbers: a process COUNT, a
+        // command's output or exit code. These operators are offered for every
+        // sub-element but were never handled here, so "COUNT MORE THAN 0"
+        // always failed. Strict, as documented; not a number → fails.
+        op @ ("more than" | "greater than" | ">" | "less than" | "<") => {
+            match (actual.trim().parse::<f64>(), expected.trim().parse::<f64>()) {
+                (Ok(a), Ok(e)) => if op.starts_with("less") || op == "<" { a < e } else { a > e },
+                _ => {
+                    error!("Numeric comparison needs two numbers (got '{}' and '{}')", actual, expected);
+                    false
+                }
+            }
+        }
         _ => {
             error!("Unknown string condition: '{}'", condition);
             false
@@ -825,25 +1053,25 @@ fn apply_string_condition(actual: &str, condition: &str, expected: &str) -> bool
 
 
 fn apply_version_condition(actual_str: &str, condition: &str, target_str: &str) -> bool {
-    let actual = parse_to_semver(actual_str);
-    let target = parse_to_semver(target_str);
-
-    if let (Some(a), Some(t)) = (actual, target) {
-        match condition.trim().to_lowercase().as_str() {
-            "equal" | "equals" | "==" => a == t,
-            "not equal" | "not equals" | "!=" => a != t,
-            "more than" | "greater than" | ">" => a > t,
-            "less than" | "<" => a < t,
-            _ => {
-                error!("Unknown version condition: '{}'", condition);
-                false
-            }
-        }
-    } else {
-        match condition.trim().to_lowercase().as_str() {
-            "equal" | "equals" => actual_str == target_str,
-            "contains"         => actual_str.contains(target_str),
-            _ => false,
+    use std::cmp::Ordering::{Equal, Greater, Less};
+    let cond = condition.trim().to_lowercase();
+    // Text operators look at the version as a string.
+    if matches!(cond.as_str(), "contains" | "not contains" | "regex" | "regular expression") {
+        return apply_string_condition(actual_str, condition, target_str);
+    }
+    if actual_str.trim().is_empty() || target_str.trim().is_empty() {
+        error!("Version comparison needs two versions (got '{}' and '{}')", actual_str, target_str);
+        return false;
+    }
+    let ord = compare_versions(actual_str, target_str);
+    match cond.as_str() {
+        "equal" | "equals" | "=="               => ord == Equal,
+        "not equal" | "not equals" | "!="       => ord != Equal,
+        "more than" | "greater than" | ">"      => ord == Greater,
+        "less than" | "<"                       => ord == Less,
+        _ => {
+            error!("Unknown version condition: '{}'", condition);
+            false
         }
     }
 }
@@ -1106,16 +1334,26 @@ pub fn evaluate(
             "exists"     => if Path::new(input).is_dir() { EvalResult::Pass } else { EvalResult::Fail },
             "not exists" => if !Path::new(input).is_dir() { EvalResult::Pass } else { EvalResult::Fail },
             "content"    => {
-                let result = fs::read_dir(input)
-                    .map(|entries| {
-                        entries
-                            .filter_map(|e| e.ok())
-                            .any(|e| e.file_name() == sinput_trim)
-                    })
-                    .unwrap_or(false);
-                if result { EvalResult::Pass } else { EvalResult::Fail }
+                // "Does this directory hold an entry with this name?" The
+                // operator used to be ignored; NOT CONTAINS / NOT EQUALS now
+                // mean it must not. A directory that does not exist holds
+                // nothing; one that cannot be listed fails either way.
+                let (negative, _) = split_negation(condition);
+                if !Path::new(input).exists() {
+                    boolean(negative)
+                } else {
+                    match fs::read_dir(input) {
+                        Ok(entries) => {
+                            let found = entries
+                                .filter_map(|e| e.ok())
+                                .any(|e| e.file_name() == sinput_trim);
+                            boolean(found != negative)
+                        }
+                        Err(_) => EvalResult::Fail,
+                    }
+                }
             }
-            "owner"                       => check_path_owner(input, sinput_trim),
+            "owner"                       => check_path_owner(input, condition, sinput_trim),
             "group"                       => check_path_group(input, condition, sinput_trim),
             "permission" | "permissions"  => check_path_permission(input, condition, sinput_trim),
             _ => {
@@ -1155,7 +1393,7 @@ pub fn evaluate(
                     EvalResult::Fail
                 }
             }
-            "owner"                       => check_path_owner(input, sinput_trim),
+            "owner"                       => check_path_owner(input, condition, sinput_trim),
             "group"                       => check_path_group(input, condition, sinput_trim),
             "permission" | "permissions"  => check_path_permission(input, condition, sinput_trim),
             "sha1" => {
@@ -1264,11 +1502,12 @@ pub fn evaluate(
             "content" => {
                 match local_ip_address::list_afinet_netifas() {
                     Ok(interfaces) => {
-                        if interfaces.iter().any(|(_, ip)| apply_string_condition(&ip.to_string(), condition, sinput_trim)) {
-                            EvalResult::Pass
-                        } else {
-                            EvalResult::Fail
-                        }
+                        // NOT EQUALS means no interface has the address.
+                        boolean(matches_across(
+                            interfaces.iter().map(|(_, ip)| ip.to_string()),
+                            condition,
+                            sinput_trim,
+                        ))
                     }
                     Err(e) => {
                         warn!("Failed to list network interfaces: {}", e);
@@ -1952,5 +2191,331 @@ pub fn evaluate(
             error!("Unknown element type: '{}'", element);
             EvalResult::Na
         }
+    }
+}
+
+
+// ============================================================
+// TESTS
+//
+// What these pin is the meaning of a verdict. A wrong answer here is a host
+// reported compliant when it is not (or the reverse), on every system, with
+// nothing else in the product able to notice.
+// ============================================================
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::cmp::Ordering::{Equal, Greater, Less};
+
+    // ── fixtures ────────────────────────────────────────────────────────────
+    struct Tmp(std::path::PathBuf);
+    impl Tmp {
+        fn file(name: &str, content: &[u8]) -> Tmp {
+            static N: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+            let p = std::env::temp_dir().join(format!(
+                "oscm-test-{}-{}-{}",
+                std::process::id(),
+                N.fetch_add(1, std::sync::atomic::Ordering::SeqCst),
+                name
+            ));
+            fs::write(&p, content).unwrap();
+            Tmp(p)
+        }
+        fn path(&self) -> &str { self.0.to_str().unwrap() }
+        #[cfg(unix)]
+        fn mode(self, mode: u32) -> Tmp {
+            use std::os::unix::fs::PermissionsExt;
+            fs::set_permissions(&self.0, fs::Permissions::from_mode(mode)).unwrap();
+            self
+        }
+    }
+    impl Drop for Tmp {
+        fn drop(&mut self) { let _ = fs::remove_file(&self.0); }
+    }
+
+    const MISSING: &str = "/nonexistent/openscm/test/path";
+
+    fn ev(element: &str, input: &str, selement: &str, condition: &str, sinput: &str) -> EvalResult {
+        evaluate(element, input, selement, condition, sinput, false, false, None)
+    }
+
+    // ── file content ────────────────────────────────────────────────────────
+    #[test]
+    fn not_contains_fails_when_any_line_contains_the_text() {
+        // The original bug: this passed, because the other lines lack the text.
+        let f = Tmp::file("sshd", b"Port 22\nPermitRootLogin yes\nX11Forwarding no\n");
+        assert_eq!(ev("FILE", f.path(), "CONTENT", "NOT CONTAINS", "PermitRootLogin yes"), EvalResult::Fail);
+        assert_eq!(ev("FILE", f.path(), "CONTENT", "NOT CONTAINS", "PermitEmptyPasswords yes"), EvalResult::Pass);
+    }
+
+    #[test]
+    fn not_equals_fails_when_any_line_equals_the_text() {
+        let f = Tmp::file("lines", b"Port 22\nPermitRootLogin yes\n");
+        assert_eq!(ev("FILE", f.path(), "CONTENT", "NOT EQUALS", "Port 22"), EvalResult::Fail);
+        assert_eq!(ev("FILE", f.path(), "CONTENT", "NOT EQUALS", "Port 2222"), EvalResult::Pass);
+    }
+
+    #[test]
+    fn an_empty_or_missing_file_contains_nothing() {
+        let empty = Tmp::file("empty", b"");
+        assert_eq!(ev("FILE", empty.path(), "CONTENT", "NOT CONTAINS", "x"), EvalResult::Pass);
+        assert_eq!(ev("FILE", empty.path(), "CONTENT", "CONTAINS", "x"), EvalResult::Fail);
+        assert_eq!(ev("FILE", MISSING, "CONTENT", "NOT CONTAINS", "x"), EvalResult::Pass);
+        assert_eq!(ev("FILE", MISSING, "CONTENT", "CONTAINS", "x"), EvalResult::Fail);
+    }
+
+    // Unchanged behaviour of the positive operators.
+    #[test]
+    fn positive_content_operators_match_any_line() {
+        let f = Tmp::file("pos", b"Port 22\r\nPermitRootLogin no\n");
+        assert_eq!(ev("FILE", f.path(), "CONTENT", "CONTAINS", "permitrootlogin NO"), EvalResult::Pass, "case-insensitive");
+        assert_eq!(ev("FILE", f.path(), "CONTENT", "EQUALS", "Port 22"), EvalResult::Pass, "CRLF is not part of the line");
+        assert_eq!(ev("FILE", f.path(), "CONTENT", "REGEX", r"^PermitRootLogin\s+no$"), EvalResult::Pass);
+        assert_eq!(ev("FILE", f.path(), "CONTENT", "REGEX", r"^PermitRootLogin\s+yes$"), EvalResult::Fail);
+        assert_eq!(ev("FILE", f.path(), "CONTENT", "REGEX", "(unclosed"), EvalResult::Fail, "invalid regex");
+    }
+
+    // A non-UTF-8 byte must not hide its own line or stop the scan.
+    #[test]
+    fn invalid_utf8_does_not_hide_later_lines() {
+        let f = Tmp::file("latin1", b"caf\xe9 owner\nPermitRootLogin yes\n");
+        assert_eq!(ev("FILE", f.path(), "CONTENT", "CONTAINS", "PermitRootLogin yes"), EvalResult::Pass);
+        assert_eq!(ev("FILE", f.path(), "CONTENT", "NOT CONTAINS", "PermitRootLogin yes"), EvalResult::Fail);
+        assert_eq!(ev("FILE", f.path(), "CONTENT", "CONTAINS", "owner"), EvalResult::Pass);
+    }
+
+    #[test]
+    fn directory_content_looks_across_its_files() {
+        let dir = std::env::temp_dir().join(format!("oscm-test-dir-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        fs::write(dir.join("a.conf"), "alpha\n").unwrap();
+        fs::write(dir.join("b.conf"), "nullok here\n").unwrap();
+        let d = dir.to_str().unwrap();
+        // FILE CONTENT pointed at a directory scans every file in it.
+        assert_eq!(ev("FILE", d, "CONTENT", "CONTAINS", "nullok"), EvalResult::Pass);
+        assert_eq!(ev("FILE", d, "CONTENT", "NOT CONTAINS", "nullok"), EvalResult::Fail);
+        assert_eq!(ev("FILE", d, "CONTENT", "NOT CONTAINS", "absent"), EvalResult::Pass);
+        // DIRECTORY CONTENT asks about entry names.
+        assert_eq!(ev("DIRECTORY", d, "CONTENT", "CONTAINS", "a.conf"), EvalResult::Pass);
+        assert_eq!(ev("DIRECTORY", d, "CONTENT", "", "a.conf"), EvalResult::Pass, "operator defaults to 'has'");
+        assert_eq!(ev("DIRECTORY", d, "CONTENT", "NOT CONTAINS", "a.conf"), EvalResult::Fail);
+        assert_eq!(ev("DIRECTORY", d, "CONTENT", "NOT CONTAINS", "z.conf"), EvalResult::Pass);
+        assert_eq!(ev("DIRECTORY", MISSING, "CONTENT", "NOT CONTAINS", "z.conf"), EvalResult::Pass);
+        assert_eq!(ev("DIRECTORY", MISSING, "CONTENT", "CONTAINS", "z.conf"), EvalResult::Fail);
+        fs::remove_dir_all(&dir).unwrap();
+    }
+
+    // ── matches_across ──────────────────────────────────────────────────────
+    #[test]
+    fn negative_operators_require_no_value_to_match() {
+        let v = ["staff", "20"];
+        assert!(matches_across(v, "EQUALS", "staff"));
+        assert!(matches_across(v, "EQUALS", "20"));
+        assert!(!matches_across(v, "NOT EQUALS", "staff"), "the name matches");
+        assert!(!matches_across(v, "NOT EQUALS", "20"), "the id matches");
+        assert!(matches_across(v, "NOT EQUALS", "wheel"));
+        assert!(matches_across(["10.0.0.5", "127.0.0.1"], "CONTAINS", "10.0."));
+        assert!(!matches_across(["10.0.0.5", "127.0.0.1"], "NOT CONTAINS", "127."));
+        assert!(!matches_across(Vec::<String>::new(), "EQUALS", "x"));
+        assert!(matches_across(Vec::<String>::new(), "NOT EQUALS", "x"));
+    }
+
+    // ── permissions ─────────────────────────────────────────────────────────
+    #[test]
+    fn less_than_means_no_bit_beyond_the_expected_mode() {
+        // 0477 is numerically below 0644 but grants group and other rwx.
+        assert_eq!(permission_matches(0o477, "LESS THAN", 0o644), Some(false));
+        assert_eq!(permission_matches(0o600, "LESS THAN", 0o644), Some(true));
+        assert_eq!(permission_matches(0o644, "LESS THAN", 0o644), Some(true), "inclusive");
+        assert_eq!(permission_matches(0o640, "LESS THAN", 0o644), Some(true));
+        assert_eq!(permission_matches(0o664, "LESS THAN", 0o644), Some(false), "group write");
+        assert_eq!(permission_matches(0o000, "LESS THAN", 0o644), Some(true));
+        assert_eq!(permission_matches(0o4755, "LESS THAN", 0o755), Some(false), "setuid is extra");
+    }
+
+    #[test]
+    fn more_than_means_at_least_the_expected_bits() {
+        assert_eq!(permission_matches(0o755, "MORE THAN", 0o644), Some(true));
+        assert_eq!(permission_matches(0o644, "MORE THAN", 0o644), Some(true));
+        assert_eq!(permission_matches(0o600, "MORE THAN", 0o644), Some(false));
+    }
+
+    #[test]
+    fn permission_equality_and_unknown_operators() {
+        assert_eq!(permission_matches(0o644, "EQUALS", 0o644), Some(true));
+        assert_eq!(permission_matches(0o644, "equal", 0o640), Some(false));
+        assert_eq!(permission_matches(0o644, "NOT EQUALS", 0o777), Some(true));
+        assert_eq!(permission_matches(0o644, "NOT EQUALS", 0o644), Some(false));
+        assert_eq!(permission_matches(0o1777, "EQUALS", 0o1777), Some(true));
+        assert_eq!(permission_matches(0o644, "CONTAINS", 0o644), None);
+    }
+
+    #[test]
+    fn octal_modes_parse_and_junk_does_not() {
+        assert_eq!(parse_octal_mode("644"), Some(0o644));
+        assert_eq!(parse_octal_mode(" 0644 "), Some(0o644));
+        assert_eq!(parse_octal_mode("0o640"), Some(0o640));
+        assert_eq!(parse_octal_mode("1777"), Some(0o1777));
+        assert_eq!(parse_octal_mode("0"), Some(0));
+        for junk in ["", "rw-r--r--", "888", "64 4", "77777", "-644"] {
+            assert_eq!(parse_octal_mode(junk), None, "{junk:?}");
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn permission_checks_on_real_files() {
+        let loose = Tmp::file("loose", b"x").mode(0o477);
+        let tight = Tmp::file("tight", b"x").mode(0o600);
+        let exact = Tmp::file("exact", b"x").mode(0o644);
+        assert_eq!(ev("FILE", loose.path(), "PERMISSION", "LESS THAN", "644"), EvalResult::Fail);
+        assert_eq!(ev("FILE", tight.path(), "PERMISSION", "LESS THAN", "644"), EvalResult::Pass);
+        assert_eq!(ev("FILE", exact.path(), "PERMISSIONS", "EQUALS", "0644"), EvalResult::Pass);
+        assert_eq!(ev("FILE", exact.path(), "PERMISSION", "NOT EQUALS", "777"), EvalResult::Pass);
+        // A file that is not there has no acceptable permissions.
+        assert_eq!(ev("FILE", MISSING, "PERMISSION", "LESS THAN", "644"), EvalResult::Fail);
+        assert_eq!(ev("FILE", MISSING, "PERMISSION", "EQUALS", "000"), EvalResult::Fail);
+        // An expected value that is not a mode is a broken test, not a result.
+        assert_eq!(ev("FILE", exact.path(), "PERMISSION", "MORE THAN", "rw-r--r--"), EvalResult::Na);
+    }
+
+    // ── owner / group ───────────────────────────────────────────────────────
+    #[cfg(unix)]
+    #[test]
+    fn owner_and_group_honour_not_equals() {
+        use std::os::unix::fs::MetadataExt;
+        let f = Tmp::file("owned", b"x");
+        let meta = fs::metadata(f.path()).unwrap();
+        let (uid, gid) = (meta.uid().to_string(), meta.gid().to_string());
+
+        assert_eq!(ev("FILE", f.path(), "OWNER", "EQUALS", &uid), EvalResult::Pass);
+        assert_eq!(ev("FILE", f.path(), "OWNER", "", &uid), EvalResult::Pass, "no operator still means equals");
+        assert_eq!(ev("FILE", f.path(), "OWNER", "NOT EQUALS", &uid), EvalResult::Fail);
+        assert_eq!(ev("FILE", f.path(), "OWNER", "NOT EQUALS", "no-such-user-xyz"), EvalResult::Pass);
+        assert_eq!(ev("FILE", f.path(), "OWNER", "EQUALS", "no-such-user-xyz"), EvalResult::Fail);
+        if let Some(name) = get_user_name_from_uid(meta.uid()) {
+            assert_eq!(ev("FILE", f.path(), "OWNER", "EQUALS", &name), EvalResult::Pass);
+            assert_eq!(ev("FILE", f.path(), "OWNER", "NOT EQUALS", &name), EvalResult::Fail);
+        }
+
+        assert_eq!(ev("FILE", f.path(), "GROUP", "EQUALS", &gid), EvalResult::Pass);
+        assert_eq!(ev("FILE", f.path(), "GROUP", "NOT EQUALS", &gid), EvalResult::Fail);
+        assert_eq!(ev("FILE", f.path(), "GROUP", "NOT EQUALS", "no-such-group-xyz"), EvalResult::Pass);
+        if let Some(name) = get_group_name_from_gid(meta.gid()) {
+            assert_eq!(ev("FILE", f.path(), "GROUP", "NOT EQUALS", &name), EvalResult::Fail);
+        }
+
+        assert_eq!(ev("FILE", MISSING, "OWNER", "NOT EQUALS", "root"), EvalResult::Fail);
+        assert_eq!(ev("FILE", MISSING, "GROUP", "NOT EQUALS", "root"), EvalResult::Fail);
+    }
+
+    // ── string + numeric operators ──────────────────────────────────────────
+    #[test]
+    fn string_operators() {
+        assert!(apply_string_condition("OpenSSH_8.9", "contains", "openssh"));
+        assert!(apply_string_condition("abc", "NOT CONTAINS", "x"));
+        assert!(apply_string_condition("Abc", "Equals", "aBC"));
+        assert!(apply_string_condition("abc", "not equal", "abd"));
+        assert!(!apply_string_condition("abc", "", "abc"), "an empty operator matches nothing");
+        assert!(!apply_string_condition("abc", "bogus", "abc"));
+    }
+
+    #[test]
+    fn numeric_operators_compare_numbers() {
+        assert!(apply_string_condition("3", "MORE THAN", "2"));
+        assert!(!apply_string_condition("2", "MORE THAN", "2"), "strict");
+        assert!(apply_string_condition("3", "LESS THAN", "5"));
+        assert!(apply_string_condition("10", "MORE THAN", "9"), "numbers, not text");
+        assert!(apply_string_condition(" 0 \n", "LESS THAN", "1"), "command output has whitespace");
+        assert!(apply_string_condition("1.5", "greater than", "1.25"));
+        assert!(!apply_string_condition("many", "MORE THAN", "2"));
+        assert!(!apply_string_condition("3", "MORE THAN", ""));
+    }
+
+    // ── versions ────────────────────────────────────────────────────────────
+    #[test]
+    fn clean_versions_compare_as_before() {
+        assert_eq!(compare_versions("1.2.3", "1.2.3"), Equal);
+        assert_eq!(compare_versions("1.2", "1.2.0"), Equal);
+        assert_eq!(compare_versions("1", "1.0.0"), Equal);
+        assert_eq!(compare_versions("10.0", "9.5"), Greater);
+        assert_eq!(compare_versions("1.10.0", "1.9.0"), Greater);
+        assert_eq!(compare_versions("0.9.4", "0.10.0"), Less);
+        assert_eq!(compare_versions("v1.2.3", "1.2.3"), Equal);
+        assert_eq!(compare_versions("22.04", "20.04"), Greater);
+    }
+
+    #[test]
+    fn distribution_versions_compare_on_their_upstream_part() {
+        assert_eq!(compare_versions("8.9p1-3ubuntu0.6", "8.0"), Greater);
+        assert_eq!(compare_versions("8.9p1-3ubuntu0.6", "8.9"), Greater, "p1 is after 8.9");
+        assert_eq!(compare_versions("8.9p1-3ubuntu0.6", "8.9p1"), Equal, "revision ignored");
+        assert_eq!(compare_versions("8.9p1-3ubuntu0.6", "9.0"), Less);
+        assert_eq!(compare_versions("3.0.2-0ubuntu1.15", "3.0.2"), Equal);
+        assert_eq!(compare_versions("3.0.2-0ubuntu1.15", "3.0.1"), Greater);
+        assert_eq!(compare_versions("1:2.3.4-1", "2.0"), Greater, "epoch ignored unless asked for");
+        assert_eq!(compare_versions("2.36-9+deb12u4", "2.30"), Greater);
+        assert_eq!(compare_versions("5.14.0-362.el9", "6.0"), Less);
+        assert_eq!(compare_versions("1.1.1.1", "1.0"), Greater);
+        assert_eq!(compare_versions("1.1.1w-0+deb11u1", "1.1.1k"), Greater);
+        assert_eq!(compare_versions("2.4.57", "2.4.6"), Greater, "57 > 6");
+    }
+
+    #[test]
+    fn epoch_and_revision_count_when_the_expected_value_has_them() {
+        assert_eq!(compare_versions("1:2.3.4-1", "1:2.3.4"), Equal);
+        assert_eq!(compare_versions("2.3.4-1", "1:1.0"), Less, "no epoch is epoch 0");
+        assert_eq!(compare_versions("2:1.0-1", "1:9.0"), Greater);
+        assert_eq!(compare_versions("3.0.2-0ubuntu1.15", "3.0.2-0ubuntu1.15"), Equal);
+        assert_eq!(compare_versions("3.0.2-0ubuntu1.15", "3.0.2-0ubuntu1.9"), Greater);
+        assert_eq!(compare_versions("3.0.2-0ubuntu1.2", "3.0.2-0ubuntu1.15"), Less);
+        assert_eq!(compare_versions("1.0~rc1", "1.0"), Less, "~ sorts before the release");
+    }
+
+    #[test]
+    fn version_conditions() {
+        assert!(apply_version_condition("8.9p1-3ubuntu0.6", "MORE THAN", "8.0"));
+        assert!(!apply_version_condition("8.9p1-3ubuntu0.6", "LESS THAN", "8.0"));
+        assert!(apply_version_condition("3.0.2-0ubuntu1.15", "EQUALS", "3.0.2"));
+        assert!(apply_version_condition("3.0.2", "NOT EQUALS", "3.0.3"));
+        assert!(!apply_version_condition("2.0", "MORE THAN", "2.0"), "strict");
+        assert!(apply_version_condition("8.9p1-3ubuntu0.6", "CONTAINS", "ubuntu"), "text operators see the string");
+        assert!(!apply_version_condition("", "MORE THAN", "1.0"));
+        assert!(!apply_version_condition("1.0", "bogus", "1.0"));
+    }
+
+    // ── verdict + dispatch (unchanged behaviour) ────────────────────────────
+    #[test]
+    fn verdicts_combine_by_filter() {
+        use EvalResult::{Fail, Na, Pass};
+        assert_eq!(combine_verdict(&[Pass, Pass], "all"), "PASS");
+        assert_eq!(combine_verdict(&[Pass, Fail], "all"), "FAIL");
+        assert_eq!(combine_verdict(&[Pass, Na], "all"), "PASS");
+        assert_eq!(combine_verdict(&[Na, Na], "all"), "NA");
+        assert_eq!(combine_verdict(&[Fail, Pass], "any"), "PASS");
+        assert_eq!(combine_verdict(&[Fail, Na], "any"), "FAIL");
+        assert_eq!(combine_verdict(&[Na], "any"), "NA");
+        assert_eq!(combine_verdict(&[], "all"), "NA");
+    }
+
+    #[test]
+    fn unknown_and_disabled_checks_are_not_applicable() {
+        assert_eq!(ev("BOGUS", "x", "EXISTS", "", ""), EvalResult::Na);
+        assert_eq!(ev("FILE", "/etc/hosts", "BOGUS", "", ""), EvalResult::Na);
+        // CMD is off unless the operator enables it on the agent.
+        assert_eq!(ev("CMD", "echo hi", "OUTPUT", "CONTAINS", "hi"), EvalResult::Na);
+        assert_eq!(ev("AGENT", "", "VERSION", "MORE THAN", "0.0.1"), EvalResult::Pass);
+    }
+
+    #[test]
+    fn file_and_directory_existence() {
+        let f = Tmp::file("exists", b"x");
+        assert_eq!(ev("FILE", f.path(), "EXISTS", "", ""), EvalResult::Pass);
+        assert_eq!(ev("FILE", MISSING, "EXISTS", "", ""), EvalResult::Fail);
+        assert_eq!(ev("FILE", MISSING, "NOT EXISTS", "", ""), EvalResult::Pass);
+        let tmp = std::env::temp_dir();
+        assert_eq!(ev("DIRECTORY", tmp.to_str().unwrap(), "EXISTS", "", ""), EvalResult::Pass);
+        assert_eq!(ev("DIRECTORY", MISSING, "NOT EXISTS", "", ""), EvalResult::Pass);
     }
 }

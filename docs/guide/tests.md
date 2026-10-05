@@ -54,12 +54,41 @@ Checks properties of files on the filesystem.
 | :--- | :--- | :--- |
 | `Exists` | File exists | `/etc/shadow` |
 | `Not Exists` | File does not exist | `/etc/telnet.conf` |
-| `Content` | File contains a string | `/etc/ssh/sshd_config` |
-| `Permissions` | Octal permission string | `/etc/shadow` → `0640` |
-| `Owner` | File owner username | `/etc/shadow` → `root` |
-| `Group` | File group name — supports `equals`, `contains`, `regex` | `/etc/shadow` → `shadow` |
+| `Content` | The file's lines, checked one at a time — see [Checking file content](#checking-file-content) | `/etc/ssh/sshd_config` |
+| `Permissions` | Octal permissions — see [Comparing permissions](#comparing-permissions) | `/etc/shadow` → `0640` |
+| `Owner` | File owner, by name or numeric id — `equals` or `not equals` | `/etc/shadow` → `root` |
+| `Group` | File group, by name or numeric id — supports `equals`, `not equals`, `contains`, `regex` | `/etc/shadow` → `shadow` |
 | `SHA1` | SHA1 hash of file | `/bin/su` |
 | `SHA256` | SHA256 hash of file | `/bin/su` |
+
+#### Checking file content
+
+A content check looks at the file **line by line**. If the path is a directory, every file directly inside it is checked.
+
+| Condition | Passes when |
+| :--- | :--- |
+| `Contains`, `Equals`, `Regular Expression` | **at least one** line matches |
+| `Not Contains`, `Not Equals` | **no** line matches |
+
+So `Not Contains` `PermitRootLogin yes` passes only if that text appears nowhere in the file. A file that does not exist has no lines: it fails `Contains` and passes `Not Contains`. Pair the check with `Exists` if the file must also be present. A file the agent cannot read fails either way.
+
+`Contains` is a plain substring match, so it also matches a commented-out line such as `#PermitRootLogin no`. Use `Regular Expression` with `^` when that matters: `^PermitRootLogin\s+no`.
+
+#### Comparing permissions
+
+Permissions are compared as sets of permission bits, not as numbers.
+
+| Condition | Passes when | Example with expected `644` |
+| :--- | :--- | :--- |
+| `Equals` | the mode is exactly the expected one | `644` only |
+| `Not Equals` | the mode is anything else | `600`, `664`, … |
+| `Less Than` | the file grants **nothing beyond** the expected mode ("this or more restrictive") | `644`, `640`, `600`, `400` pass; `664`, `755`, `477` fail |
+| `More Than` | the file grants **at least** the expected mode | `644`, `664`, `755` pass; `600` fails |
+
+Write the expected value in octal: `644`, `0644` or, with the setuid / setgid / sticky bits, `4755` or `1777`. Those special bits are part of the comparison, so a setuid `4755` file is not `Equals 755`. A path that does not exist fails every permission check. An expected value that is not octal makes the test **N/A**, with an error in the agent log.
+
+!!! note "Changed in 0.9.5"
+    Before agent 0.9.5, `Less Than` and `More Than` compared modes as plain numbers, so `477` (full access for group and other) counted as "less than `644`", and a missing file passed. `Not Contains` and `Not Equals` on file content passed whenever *any* line lacked the text. Both gave false passes. After agents are upgraded to 0.9.5, tests that were passing for these reasons will correctly fail.
 
 ### Directory
 
@@ -69,10 +98,10 @@ Checks properties of directories.
 | :--- | :--- |
 | `Exists` | Directory exists |
 | `Not Exists` | Directory does not exist |
-| `Content` | Directory contains a file with the given name |
-| `Permissions` | Octal permission string |
-| `Owner` | Directory owner |
-| `Group` | Directory group — supports `equals`, `contains`, `regex` |
+| `Content` | Directory contains an entry with the given name — `not contains` / `not equals` require that it does not |
+| `Permissions` | Octal permissions — see [Comparing permissions](#comparing-permissions) |
+| `Owner` | Directory owner, by name or numeric id — `equals` or `not equals` |
+| `Group` | Directory group, by name or numeric id — supports `equals`, `not equals`, `contains`, `regex` |
 
 ### Package
 
@@ -82,7 +111,25 @@ Checks installed software packages.
 | :--- | :--- | :--- |
 | `Exists` | Package is installed | Linux, Windows |
 | `Not Exists` | Package is not installed | Linux, Windows |
-| `Version` | Installed version comparison | Linux, Windows |
+| `Version` | Installed version comparison — see [Comparing versions](#comparing-versions) | Linux, Windows |
+
+#### Comparing versions
+
+Version checks (`Package`, `OS` and `Agent`) understand real package versions, not only `1.2.3`.
+
+- Versions are compared part by part, split on `.`; numbers compare as numbers (`2.10` is more than `2.9`) and a missing part counts as `0` (`1.2` equals `1.2.0`).
+- Write the expected value the way the software's own documentation does. A distribution's packaging suffix and epoch are ignored unless your expected value includes them: with expected `8.0`, an installed `1:8.9p1-3ubuntu0.6` is compared as `8.9p1`.
+- To pin an exact package build, include the suffix: `Equals` `3.0.2-0ubuntu1.15`.
+
+| Installed | Condition | Expected | Result |
+| :--- | :--- | :--- | :--- |
+| `8.9p1-3ubuntu0.6` | `More Than` | `8.0` | Pass |
+| `3.0.2-0ubuntu1.15` | `Equals` | `3.0.2` | Pass |
+| `3.0.2-0ubuntu1.15` | `Equals` | `3.0.2-0ubuntu1.9` | Fail |
+| `2.36-9+deb12u4` | `More Than` | `2.30` | Pass |
+| `5.14.0-362.el9` | `Less Than` | `6.0` | Pass |
+
+`Contains` and `Regular Expression` treat the version as plain text.
 
 ### Process
 
@@ -276,11 +323,15 @@ Checks the installed agent version.
 | :--- | :--- | :--- |
 | `Contains` | Value contains the expected string | File content contains `PermitRootLogin no` |
 | `Not Contains` | Value does not contain the string | Config does not contain `PermitRootLogin yes` |
-| `Equals` | Exact match | Hostname equals `web-server-01` |
+| `Equals` | Exact match, ignoring letter case | Hostname equals `web-server-01` |
 | `Not Equals` | Does not match | OS is not `Windows XP` |
-| `More Than` | Numeric greater than | Agent version > `0.1.0` |
-| `Less Than` | Numeric less than | Open ports < `10` |
-| `Regular Expression` | PCRE regex pattern match | Content matches `^Protocol\s+2$` |
+| `More Than` | Greater than (strictly) | Process count > `0`, agent version > `0.1.0` |
+| `Less Than` | Less than (strictly) | Command output < `10` |
+| `Regular Expression` | Regular expression match ([Rust `regex` syntax](https://docs.rs/regex/latest/regex/#syntax); look-around and back-references are not supported) | Content matches `^Protocol\s+2$` |
+
+`More Than` and `Less Than` compare **numbers** for counts, command output and exit codes; a value that is not a number fails. For versions they follow [Comparing versions](#comparing-versions), and for permissions [Comparing permissions](#comparing-permissions).
+
+When a check looks at several values at once — the lines of a file, a file's group name and numeric id, a host's IP addresses — `Contains` and `Equals` pass if **any** of them matches, and `Not Contains` and `Not Equals` pass only if **none** does.
 
 ---
 
