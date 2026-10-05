@@ -132,7 +132,7 @@
                   <div class="col-md-4">
                     <div class="form-group">
                       <label for="frequency">Interval</label>
-                      <select name="frequency" id="frequency" class="form-control">
+                      <select name="frequency" id="frequency" class="form-control schedule-frequency" data-picker="#next-run-group">
                         <option value="daily">Daily</option>
                         <option value="weekly">Weekly</option>
                         <option value="monthly">Monthly</option>
@@ -144,13 +144,15 @@
                     <div class="form-group">
                       <label>Cron Expression</label>
                       <input type="text" name="cron_val" class="form-control" placeholder="0 0 * * *">
-                      <small class="text-muted text-xs">min hour day month day-of-week</small>
+                      <small class="text-muted text-xs d-block">min hour day month day-of-week — evaluated in <strong>UTC</strong> (it is now <span class="schedule-utc-now">UTC</span>)</small>
                     </div>
                   </div>
-                  <div class="col-md-4">
+                  <div class="col-md-4" id="next-run-group">
                     <div class="form-group">
                       <label>First Execution Time</label>
-                      <input type="datetime-local" name="next_run" class="form-control">
+                      <input type="datetime-local" name="next_run" class="form-control schedule-time">
+                      <input type="hidden" name="next_run_tz_offset">
+                      <small class="text-muted text-xs schedule-tz-name">UTC</small>
                     </div>
                   </div>
                 </div>
@@ -182,7 +184,7 @@
                   <div class="col-md-4">
                     <div class="form-group">
                       <label for="report_frequency">Interval</label>
-                      <select name="report_frequency" id="report_frequency" class="form-control">
+                      <select name="report_frequency" id="report_frequency" class="form-control schedule-frequency" data-picker="#report-next-run-group">
                         <option value="daily">Daily</option>
                         <option value="weekly">Weekly</option>
                         <option value="monthly">Monthly</option>
@@ -194,13 +196,15 @@
                     <div class="form-group">
                       <label>Cron Expression</label>
                       <input type="text" name="report_cron_val" class="form-control" placeholder="0 0 * * *">
-                      <small class="text-muted text-xs">min hour day month day-of-week</small>
+                      <small class="text-muted text-xs d-block">min hour day month day-of-week — evaluated in <strong>UTC</strong> (it is now <span class="schedule-utc-now">UTC</span>)</small>
                     </div>
                   </div>
-                  <div class="col-md-4">
+                  <div class="col-md-4" id="report-next-run-group">
                     <div class="form-group">
                       <label>First Execution Time</label>
-                      <input type="datetime-local" name="report_next_run" class="form-control">
+                      <input type="datetime-local" name="report_next_run" class="form-control schedule-time">
+                      <input type="hidden" name="report_next_run_tz_offset">
+                      <small class="text-muted text-xs schedule-tz-name">UTC</small>
                     </div>
                   </div>
                 </div>
@@ -283,4 +287,5 @@
     });
   });
 </script>
+{% include "partials/schedule_time.html" %}
 {% endblock %}

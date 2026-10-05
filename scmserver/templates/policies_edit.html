@@ -147,7 +147,7 @@
                   <div class="col-md-4">
                     <div class="form-group">
                       <label for="frequency">Interval</label>
-                      <select name="frequency" id="frequency" class="form-control">
+                      <select name="frequency" id="frequency" class="form-control schedule-frequency" data-picker="#next-run-group">
                         <option value="daily" {% if schedule and schedule.frequency == 'daily' %}selected{% endif %}>Daily</option>
                         <option value="weekly" {% if schedule and schedule.frequency == 'weekly' %}selected{% endif %}>Weekly</option>
                         <option value="monthly" {% if schedule and schedule.frequency == 'monthly' %}selected{% endif %}>Monthly</option>
@@ -158,15 +158,22 @@
                   <div class="col-md-4" id="cron-input-group" {% if not schedule or schedule.frequency != 'custom' %}style="display: none;"{% endif %}>
                     <div class="form-group">
                       <label>Cron Expression</label>
-                      <input type="text" name="cron_val" class="form-control" 
+                      <input type="text" name="cron_val" class="form-control"
                              value="{{ schedule.cron_expression | default(value='') }}" placeholder="0 0 * * *">
+                      <small class="text-muted text-xs d-block">min hour day month day-of-week — evaluated in <strong>UTC</strong> (it is now <span class="schedule-utc-now">UTC</span>)</small>
+                      {% if schedule and schedule.frequency == 'custom' and schedule.enabled %}
+                      <small class="text-muted text-xs d-block">Next run: <span class="schedule-next-run" data-utc="{{ schedule.next_run }}">{{ schedule.next_run }} UTC</span></small>
+                      {% endif %}
                     </div>
                   </div>
-                  <div class="col-md-4">
+                  <div class="col-md-4" id="next-run-group">
                     <div class="form-group">
                       <label>Next Execution Time</label>
-                      <input type="datetime-local" name="next_run" 
-                             value="{{ schedule.next_run | default(value='') }}" class="form-control">
+                      {# The stored time is UTC; the script shows it in local time. #}
+                      <input type="datetime-local" name="next_run" value=""
+                             data-utc="{{ schedule.next_run | default(value='') }}" class="form-control schedule-time">
+                      <input type="hidden" name="next_run_tz_offset">
+                      <small class="text-muted text-xs schedule-tz-name">UTC</small>
                     </div>
                   </div>
                 </div>
@@ -205,7 +212,7 @@
                   <div class="col-md-4">
                     <div class="form-group">
                       <label for="report_frequency">Interval</label>
-                      <select name="report_frequency" id="report_frequency" class="form-control">
+                      <select name="report_frequency" id="report_frequency" class="form-control schedule-frequency" data-picker="#report-next-run-group">
                         <option value="daily" {% if report_schedule and report_schedule.frequency == 'daily' %}selected{% endif %}>Daily</option>
                         <option value="weekly" {% if report_schedule and report_schedule.frequency == 'weekly' %}selected{% endif %}>Weekly</option>
                         <option value="monthly" {% if report_schedule and report_schedule.frequency == 'monthly' %}selected{% endif %}>Monthly</option>
@@ -218,13 +225,19 @@
                       <label>Cron Expression</label>
                       <input type="text" name="report_cron_val" class="form-control"
                              value="{{ report_schedule.cron_expression | default(value='') }}" placeholder="0 0 * * *">
+                      <small class="text-muted text-xs d-block">min hour day month day-of-week — evaluated in <strong>UTC</strong> (it is now <span class="schedule-utc-now">UTC</span>)</small>
+                      {% if report_schedule and report_schedule.frequency == 'custom' and report_schedule.enabled %}
+                      <small class="text-muted text-xs d-block">Next run: <span class="schedule-next-run" data-utc="{{ report_schedule.next_run }}">{{ report_schedule.next_run }} UTC</span></small>
+                      {% endif %}
                     </div>
                   </div>
-                  <div class="col-md-4">
+                  <div class="col-md-4" id="report-next-run-group">
                     <div class="form-group">
                       <label>Next Execution Time</label>
-                      <input type="datetime-local" name="report_next_run"
-                             value="{{ report_schedule.next_run | default(value='') }}" class="form-control">
+                      <input type="datetime-local" name="report_next_run" value=""
+                             data-utc="{{ report_schedule.next_run | default(value='') }}" class="form-control schedule-time">
+                      <input type="hidden" name="report_next_run_tz_offset">
+                      <small class="text-muted text-xs schedule-tz-name">UTC</small>
                     </div>
                   </div>
                 </div>
@@ -312,4 +325,5 @@
     });
   });
 </script>
+{% include "partials/schedule_time.html" %}
 {% endblock %}

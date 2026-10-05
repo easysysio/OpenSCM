@@ -1,0 +1,78 @@
+{# Shared by policies_add.html and policies_edit.html.
+
+   Schedule times are stored and compared in UTC. A datetime-local input works
+   in the viewer's own time and sends no zone, and the server used to store
+   what it received as if it were UTC — so every schedule ran early or late by
+   the viewer's UTC offset, and the edit page showed the stored UTC time as if
+   it were local.
+
+   This script: (1) shows a stored UTC time (data-utc) in local time, (2) on
+   submit, fills <picker name>_tz_offset with the offset for the CHOSEN moment
+   so the server can convert it (schedule::local_to_utc), and (3) for
+   Custom (Cron) hides the picker — the expression decides the next run — and
+   explains that cron is evaluated in UTC.
+
+   Without JavaScript the picker stays empty on the edit page, which the server
+   reads as "keep the current time". #}
+<script>
+(function () {
+  function pad(n) { return String(n).padStart(2, '0'); }
+
+  // "2026-10-06T06:00" (UTC) → the same instant as a datetime-local value.
+  function utcToLocalInput(utc) {
+    var d = new Date(utc + ':00Z');
+    if (isNaN(d)) return '';
+    return d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate())
+         + 'T' + pad(d.getHours()) + ':' + pad(d.getMinutes());
+  }
+
+  var pickers = document.querySelectorAll('input.schedule-time');
+  pickers.forEach(function (inp) {
+    var utc = inp.getAttribute('data-utc');
+    if (utc) inp.value = utcToLocalInput(utc);
+  });
+
+  var zone = '';
+  try { zone = Intl.DateTimeFormat().resolvedOptions().timeZone || ''; } catch (e) {}
+  document.querySelectorAll('.schedule-tz-name').forEach(function (el) {
+    el.textContent = zone ? 'Your local time (' + zone + ')' : 'Your local time';
+  });
+
+  var now = new Date();
+  document.querySelectorAll('.schedule-utc-now').forEach(function (el) {
+    el.textContent = pad(now.getUTCHours()) + ':' + pad(now.getUTCMinutes()) + ' UTC';
+  });
+
+  // The next run of an existing cron schedule, shown in local time.
+  document.querySelectorAll('.schedule-next-run').forEach(function (el) {
+    var utc = el.getAttribute('data-utc');
+    if (utc && window.formatLocalTime) el.textContent = window.formatLocalTime(utc);
+  });
+
+  // Custom (Cron): the expression decides the next run, so the picker is hidden.
+  document.querySelectorAll('select.schedule-frequency').forEach(function (sel) {
+    var picker = document.querySelector(sel.getAttribute('data-picker'));
+    function sync() { if (picker) picker.style.display = sel.value === 'custom' ? 'none' : ''; }
+    sel.addEventListener('change', sync);
+    // jQuery's own change handlers on these selects fire through jQuery only.
+    if (window.jQuery) window.jQuery(sel).on('change', sync);
+    sync();
+  });
+
+  // On submit, send the offset that applies at the chosen moment. new Date()
+  // of a datetime-local value is local time, so getTimezoneOffset() already
+  // accounts for daylight saving on that date.
+  pickers.forEach(function (inp) {
+    if (!inp.form || inp.form.dataset.scheduleTzBound) return;
+    inp.form.dataset.scheduleTzBound = '1';
+    inp.form.addEventListener('submit', function () {
+      inp.form.querySelectorAll('input.schedule-time').forEach(function (p) {
+        var off = inp.form.querySelector('input[name="' + p.name + '_tz_offset"]');
+        if (!off) return;
+        var d = p.value ? new Date(p.value) : null;
+        off.value = (d && !isNaN(d)) ? d.getTimezoneOffset() : '';
+      });
+    });
+  });
+})();
+</script>

@@ -19,26 +19,6 @@ use crate::handlers::add_notification;
 use crate::reports::save_policy_report_logic;
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Helper: calculate_next_run
-// Adds the schedule frequency interval to a planned run time string.
-// ─────────────────────────────────────────────────────────────────────────────
-fn calculate_next_run(frequency: &str, last_planned_run: &str) -> String {
-    let current = chrono::NaiveDateTime::parse_from_str(last_planned_run, "%Y-%m-%dT%H:%M")
-        .unwrap_or_else(|_| Utc::now().naive_utc());
-
-    let next = match frequency {
-        "daily"    => current + chrono::Duration::days(1),
-        "weekly"   => current + chrono::Duration::weeks(1),
-        "biweekly" => current + chrono::Duration::days(14),
-        "monthly"  => current + chrono::Duration::days(30),
-        _          => current + chrono::Duration::days(1),
-    };
-
-    next.format("%Y-%m-%dT%H:%M").to_string()
-}
-
-
-// ─────────────────────────────────────────────────────────────────────────────
 // Helper: get_policy_owners
 // Returns all Admin-or-higher user IDs for a tenant (used to send schedule
 // notifications). Matches both `admin` and `superuser` — without superuser
@@ -743,7 +723,17 @@ pub async fn start_background_scheduler(pool: SqlitePool) {
 
                 match result {
                     Ok(_) => {
-                        let next_run_time = calculate_next_run(&schedule.frequency, &schedule.next_run);
+                        // Cron expressions, the fixed intervals and catch-up
+                        // after an outage all live in schedule::next_run.
+                        let (next_run_time, problem) = crate::schedule::next_run(
+                            &schedule.frequency,
+                            schedule.cron_expression.as_deref(),
+                            &schedule.next_run,
+                            now.naive_utc(),
+                        );
+                        if let Some(problem) = problem {
+                            error!("Schedule for policy {}: {}", schedule.policy_id, problem);
+                        }
                         if let Err(e) = sqlx::query(
                             "UPDATE policy_schedules SET next_run = ?, last_run = ? WHERE id = ?",
                         )

@@ -221,6 +221,37 @@ pub async fn policies_add(
 
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Helper: read_schedule
+// Reads one schedule section of the policy form — `prefix` is "" for the
+// auto-scan section and "report_" for auto-report — and resolves it with
+// schedule::resolve_submission, which validates a cron expression and converts
+// the picked time from the browser's local time to UTC. Err is a message for
+// the user.
+// ─────────────────────────────────────────────────────────────────────────────
+fn read_schedule(
+    form_data: &std::collections::HashMap<String, Vec<String>>,
+    prefix: &str,
+    label: &str,
+) -> Result<crate::schedule::Submitted, String> {
+    let get = |name: &str| {
+        form_data
+            .get(&format!("{prefix}{name}"))
+            .and_then(|v| v.first())
+            .map(|s| s.as_str())
+    };
+    crate::schedule::resolve_submission(
+        label,
+        get("schedule_enabled") == Some("on"),
+        get("frequency").unwrap_or("daily"),
+        // The cron field is named cron_val / report_cron_val.
+        get("cron_val"),
+        get("next_run"),
+        get("next_run_tz_offset").and_then(|o| o.trim().parse::<i64>().ok()),
+        Utc::now().naive_utc(),
+    )
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // POST /policies/add
 // Save a new policy with tests, system groups, and optional schedules.
 // Role: Editor
@@ -279,17 +310,19 @@ pub async fn policies_add_save(
     let tests = form_data.get("tests").cloned().unwrap_or_default();
     let system_groups = form_data.get("system_groups").cloned().unwrap_or_default();
 
-    // Auto-Scan schedule
-    let schedule_enabled = form_data.get("schedule_enabled").and_then(|v| v.first()).map(|v| v == "on").unwrap_or(false);
-    let frequency = form_data.get("frequency").and_then(|v| v.first()).cloned().unwrap_or_else(|| "daily".to_string());
-    let cron_val = form_data.get("cron_val").and_then(|v| v.first()).cloned();
-    let next_run = form_data.get("next_run").and_then(|v| v.first()).cloned();
-
-    // Auto-Report schedule
-    let report_schedule_enabled = form_data.get("report_schedule_enabled").and_then(|v| v.first()).map(|v| v == "on").unwrap_or(false);
-    let report_frequency = form_data.get("report_frequency").and_then(|v| v.first()).cloned().unwrap_or_else(|| "daily".to_string());
-    let report_cron_val = form_data.get("report_cron_val").and_then(|v| v.first()).cloned();
-    let report_next_run = form_data.get("report_next_run").and_then(|v| v.first()).cloned();
+    // Auto-Scan and Auto-Report schedules — validated before anything is
+    // written, so a bad cron expression cannot leave a half-created policy.
+    let schedules = read_schedule(&form_data, "", "Auto-scan schedule")
+        .and_then(|scan| read_schedule(&form_data, "report_", "Auto-report schedule").map(|report| (scan, report)));
+    let (scan_schedule, report_schedule) = match schedules {
+        Ok(pair) => pair,
+        Err(msg) => {
+            tx.rollback().await.ok();
+            let encoded = urlencoding::encode(&msg).to_string();
+            return Redirect::to(&format!("/policies?error_message={}", encoded)).into_response();
+        }
+    };
+    let now_utc = Utc::now().format(crate::schedule::FMT).to_string();
 
     // Insert policy (with auto-generated external_id for stable cross-system identity)
     let external_id = crate::schema::generate_external_id();
@@ -323,9 +356,10 @@ pub async fn policies_add_save(
     };
 
     // Insert auto-scan schedule if enabled
-    if schedule_enabled {
-        // M6: Use UTC so the scheduler (which also uses UTC) compares apples to apples.
-        let start_time = next_run.filter(|s| !s.is_empty()).unwrap_or_else(|| Utc::now().format("%Y-%m-%dT%H:%M").to_string());
+    if scan_schedule.enabled {
+        // Stored in UTC, which is what the scheduler compares against. With no
+        // time picked the schedule starts now.
+        let start_time = scan_schedule.next_run.clone().unwrap_or_else(|| now_utc.clone());
         if let Err(e) = sqlx::query(
             "INSERT INTO policy_schedules (tenant_id, policy_id, schedule_type, enabled, frequency, cron_expression, next_run)
              VALUES (?, ?, 'scan', ?, ?, ?, ?)",
@@ -333,8 +367,8 @@ pub async fn policies_add_save(
         .bind(&auth.tenant_id)
         .bind(policy_id)
         .bind(1)
-        .bind(&frequency)
-        .bind(&cron_val)
+        .bind(&scan_schedule.frequency)
+        .bind(&scan_schedule.cron)
         .bind(&start_time)
         .execute(&mut *tx)
         .await
@@ -346,8 +380,8 @@ pub async fn policies_add_save(
     }
 
     // Insert auto-report schedule if enabled
-    if report_schedule_enabled {
-        let start_time = report_next_run.filter(|s| !s.is_empty()).unwrap_or_else(|| Utc::now().format("%Y-%m-%dT%H:%M").to_string());
+    if report_schedule.enabled {
+        let start_time = report_schedule.next_run.clone().unwrap_or_else(|| now_utc.clone());
         if let Err(e) = sqlx::query(
             "INSERT INTO policy_schedules (tenant_id, policy_id, schedule_type, enabled, frequency, cron_expression, next_run)
              VALUES (?, ?, 'report', ?, ?, ?, ?)",
@@ -355,8 +389,8 @@ pub async fn policies_add_save(
         .bind(&auth.tenant_id)
         .bind(policy_id)
         .bind(1)
-        .bind(&report_frequency)
-        .bind(&report_cron_val)
+        .bind(&report_schedule.frequency)
+        .bind(&report_schedule.cron)
         .bind(&start_time)
         .execute(&mut *tx)
         .await
@@ -598,17 +632,19 @@ pub async fn policies_edit_save(
     let description = form_data.get("description").and_then(|v| v.first()).map(|s| s.trim().to_string()).filter(|s| !s.is_empty());
     let author      = form_data.get("author").and_then(|v| v.first()).map(|s| s.trim().to_string()).filter(|s| !s.is_empty());
 
-    // Auto-Scan schedule
-    let schedule_enabled = form_data.get("schedule_enabled").and_then(|v| v.first()).map(|v| v == "on").unwrap_or(false);
-    let frequency = form_data.get("frequency").and_then(|v| v.first()).cloned().unwrap_or_else(|| "daily".to_string());
-    let cron_val = form_data.get("cron_val").and_then(|v| v.first()).cloned();
-    let next_run = form_data.get("next_run").and_then(|v| v.first()).cloned();
-
-    // Auto-Report schedule
-    let report_schedule_enabled = form_data.get("report_schedule_enabled").and_then(|v| v.first()).map(|v| v == "on").unwrap_or(false);
-    let report_frequency = form_data.get("report_frequency").and_then(|v| v.first()).cloned().unwrap_or_else(|| "daily".to_string());
-    let report_cron_val = form_data.get("report_cron_val").and_then(|v| v.first()).cloned();
-    let report_next_run = form_data.get("report_next_run").and_then(|v| v.first()).cloned();
+    // Auto-Scan and Auto-Report schedules — validated before anything is
+    // written.
+    let schedules = read_schedule(&form_data, "", "Auto-scan schedule")
+        .and_then(|scan| read_schedule(&form_data, "report_", "Auto-report schedule").map(|report| (scan, report)));
+    let (scan_schedule, report_schedule) = match schedules {
+        Ok(pair) => pair,
+        Err(msg) => {
+            tx.rollback().await.ok();
+            let encoded = urlencoding::encode(&msg).to_string();
+            return Redirect::to(&format!("/policies?error_message={}", encoded)).into_response();
+        }
+    };
+    let now_utc = Utc::now().format(crate::schedule::FMT).to_string();
 
     // Update policy metadata
     if let Err(e) = sqlx::query(
@@ -622,12 +658,15 @@ pub async fn policies_edit_save(
         return Redirect::to(&format!("/policies?error_message={}", encoded)).into_response();
     }
 
-    // Upsert auto-scan schedule (M6: UTC for scheduler consistency).
-    // Only override next_run when the user explicitly provides a new value; otherwise
-    // preserve what the scheduler last wrote so we don't reset a future firing time.
-    let scan_explicit_next_run = next_run.filter(|s| !s.is_empty());
-    let scan_default_next_run = Utc::now().format("%Y-%m-%dT%H:%M").to_string();
-    if let Err(e) = sqlx::query(&format!(
+    // Upsert the auto-scan and auto-report schedules. Times are UTC.
+    //
+    // next_run is replaced only when the form determines it (a time was picked,
+    // or the schedule is a cron expression). Otherwise an existing schedule
+    // keeps the time the scheduler last wrote, and a new one starts now. The
+    // "keep" case used to be decided by `excluded.next_run != ''`, but the
+    // bound value was never empty — it defaulted to now — so saving the form
+    // with the time cleared reset the schedule and ran the policy at once.
+    if let Err(e) = sqlx::query(
         r#"INSERT INTO policy_schedules
                (tenant_id, policy_id, schedule_type, enabled, frequency, cron_expression, next_run)
            VALUES (?, ?, 'scan', ?, ?, ?, ?)
@@ -635,17 +674,15 @@ pub async fn policies_edit_save(
                enabled          = excluded.enabled,
                frequency        = excluded.frequency,
                cron_expression  = excluded.cron_expression,
-               next_run         = CASE
-                                    WHEN excluded.next_run != '' THEN excluded.next_run
-                                    ELSE next_run
-                                  END"#
-    ))
+               next_run         = CASE WHEN ? THEN excluded.next_run ELSE next_run END"#,
+    )
     .bind(&auth.tenant_id)
     .bind(id)
-    .bind(schedule_enabled)
-    .bind(&frequency)
-    .bind(&cron_val)
-    .bind(scan_explicit_next_run.as_deref().unwrap_or(&scan_default_next_run))
+    .bind(scan_schedule.enabled)
+    .bind(&scan_schedule.frequency)
+    .bind(&scan_schedule.cron)
+    .bind(scan_schedule.next_run.as_deref().unwrap_or(&now_utc))
+    .bind(scan_schedule.next_run.is_some())
     .execute(&mut *tx).await
     {
         let encoded = urlencoding::encode(&format!("Schedule update error: {}", e)).to_string();
@@ -653,11 +690,7 @@ pub async fn policies_edit_save(
         return Redirect::to(&format!("/policies?error_message={}", encoded)).into_response();
     }
 
-    // Upsert auto-report schedule (M6: UTC for scheduler consistency).
-    // Same next_run preservation logic as scan schedule above.
-    let report_explicit_next_run = report_next_run.filter(|s| !s.is_empty());
-    let report_default_next_run = Utc::now().format("%Y-%m-%dT%H:%M").to_string();
-    if let Err(e) = sqlx::query(&format!(
+    if let Err(e) = sqlx::query(
         r#"INSERT INTO policy_schedules
                (tenant_id, policy_id, schedule_type, enabled, frequency, cron_expression, next_run)
            VALUES (?, ?, 'report', ?, ?, ?, ?)
@@ -665,17 +698,15 @@ pub async fn policies_edit_save(
                enabled          = excluded.enabled,
                frequency        = excluded.frequency,
                cron_expression  = excluded.cron_expression,
-               next_run         = CASE
-                                    WHEN excluded.next_run != '' THEN excluded.next_run
-                                    ELSE next_run
-                                  END"#
-    ))
+               next_run         = CASE WHEN ? THEN excluded.next_run ELSE next_run END"#,
+    )
     .bind(&auth.tenant_id)
     .bind(id)
-    .bind(report_schedule_enabled)
-    .bind(&report_frequency)
-    .bind(&report_cron_val)
-    .bind(report_explicit_next_run.as_deref().unwrap_or(&report_default_next_run))
+    .bind(report_schedule.enabled)
+    .bind(&report_schedule.frequency)
+    .bind(&report_schedule.cron)
+    .bind(report_schedule.next_run.as_deref().unwrap_or(&now_utc))
+    .bind(report_schedule.next_run.is_some())
     .execute(&mut *tx).await
     {
         let encoded = urlencoding::encode(&format!("Report schedule update error: {}", e)).to_string();

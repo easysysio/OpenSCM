@@ -31,6 +31,7 @@ pub mod policies;
 pub mod reports;
 pub mod users;
 pub mod settings;
+pub mod schedule;
 pub mod scheduler;
 pub mod install;
 pub mod email;
