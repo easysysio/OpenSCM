@@ -591,6 +591,7 @@ pub async fn send(
                     "SELECT t.* FROM commands c
                      JOIN tests t ON c.test_id = t.id
                      WHERE c.system_id = ? AND c.tenant_id = ? AND c.command_type = 'TEST'
+                     ORDER BY c.test_id
                      LIMIT 500",
                 )
                 .bind(id)
@@ -657,17 +658,40 @@ pub async fn send(
                 //   • Otherwise        → wipe TEST rows as before. Any queued UPGRADE
                 //     row stays put for a future heartbeat once a matching package
                 //     becomes available.
-                let clear_sql = if upgrade_pkg.is_some() {
-                    "DELETE FROM commands WHERE system_id = ? AND tenant_id = ? AND command_type = 'UPGRADE'"
-                } else {
-                    "DELETE FROM commands WHERE system_id = ? AND tenant_id = ? AND command_type = 'TEST'"
-                };
-                if let Err(e) = sqlx::query(clear_sql)
+                //
+                // "The TEST rows" means the ones in THIS response, not every TEST
+                // row the system has. The SELECT above is capped at 500, but the
+                // DELETE used to clear the whole queue, so a system with more
+                // than 500 queued tests had the rest discarded unsent — they
+                // never ran, and nothing was logged. Only what is dispatched is
+                // removed; the remainder goes out on the following heartbeats.
+                let dispatched: Vec<i64> = tests_with_conditions
+                    .iter()
+                    .map(|t| t.test.id.unwrap_or(0) as i64)
+                    .collect();
+                let clear_result = if upgrade_pkg.is_some() {
+                    sqlx::query(
+                        "DELETE FROM commands WHERE system_id = ? AND tenant_id = ? AND command_type = 'UPGRADE'",
+                    )
                     .bind(id)
                     .bind(tenant_id)
                     .execute(&mut *tx)
                     .await
-                {
+                    .map(|_| ())
+                } else if dispatched.is_empty() {
+                    Ok(())
+                } else {
+                    let mut qb = QueryBuilder::new("DELETE FROM commands WHERE system_id = ");
+                    qb.push_bind(id);
+                    qb.push(" AND tenant_id = ");
+                    qb.push_bind(tenant_id);
+                    qb.push(" AND command_type = 'TEST' AND test_id IN (");
+                    let mut sep = qb.separated(", ");
+                    for tid in &dispatched { sep.push_bind(*tid); }
+                    qb.push(")");
+                    qb.build().execute(&mut *tx).await.map(|_| ())
+                };
+                if let Err(e) = clear_result {
                     error!("Failed to clear commands for agent {}: {}", id, e);
                     tx.rollback().await.ok();
                     return (
@@ -676,6 +700,18 @@ pub async fn send(
                     )
                         .into_response();
                 }
+
+                // How many tests are still waiting (0 in the usual case). On
+                // an UPGRADE dispatch nothing was sent, so all of them are.
+                let remaining: i64 = sqlx::query_scalar(
+                    "SELECT COUNT(*) FROM commands
+                     WHERE system_id = ? AND tenant_id = ? AND command_type = 'TEST'",
+                )
+                .bind(id)
+                .bind(tenant_id)
+                .fetch_one(&mut *tx)
+                .await
+                .unwrap_or(0);
 
                 if let Err(e) = tx.commit().await {
                     error!("Failed to commit heartbeat transaction for agent {}: {}", id, e);
@@ -686,11 +722,23 @@ pub async fn send(
                         .into_response();
                 }
 
-                info!(
-                    "Heartbeat from Agent ID {} — {} test(s) dispatched.",
-                    id,
-                    tests_with_conditions.len()
-                );
+                if upgrade_pkg.is_some() {
+                    info!(
+                        "Heartbeat from Agent ID {} — upgrade dispatched, {} test(s) held for after it.",
+                        id, remaining
+                    );
+                } else if remaining > 0 {
+                    info!(
+                        "Heartbeat from Agent ID {} — {} test(s) dispatched, {} more queued for the next heartbeat.",
+                        id, tests_with_conditions.len(), remaining
+                    );
+                } else {
+                    info!(
+                        "Heartbeat from Agent ID {} — {} test(s) dispatched.",
+                        id,
+                        tests_with_conditions.len()
+                    );
+                }
 
                 // Convert to flat TestPayload (mirrors client struct) — eliminates
                 // #[serde(flatten)] and ensures deterministic JSON for Ed25519 signing.
