@@ -6,16 +6,6 @@ All notable changes to OpenSCM are documented here.
 
 ## [Unreleased]
 
-### Fixed
-- **A result for a test deleted during a scan was reported as a server error.** Deleting a test while agents were still running it left their results with nowhere to go, and the server answered with an internal error and logged one for each. It now replies that the test is unknown and logs a single informational line. The same check stops an agent recording a result against a test that belongs to another organization.
-- **The report comparison pages showed a bare "400 Bad Request" when opened without two reports selected.** Opening `/reports/diff` or `/reports/system/diff` directly, or through a mangled link, now returns to the Reports list with the message "Pick two snapshots to compare".
-- **Plan limits could be passed in three ways (SaaS).** A plan's limits on systems, policies and saved reports were enforced on the ordinary "create" pages, but not everywhere those things are created:
-    - **Scheduled reports** kept being saved past the plan's report limit. At the limit a scheduled report is now skipped, and the organization's administrators get a notification saying which policy's report was not saved and why. The schedule continues on its usual timetable.
-    - **Importing a policy, or installing one from the policy store,** created policies past the policy limit. A new policy arriving this way is now refused with the same "plan limit reached" message as the New Policy page. Re-importing or updating a policy you already have is unaffected.
-    - **Enrollment tokens** approved systems past the system limit. At the limit, a system enrolling with a valid token is now left **pending approval**, the token's use is not spent, the administrators are notified, and the attempt is recorded in the audit log.
-
-  These notifications are sent once and not repeated while the earlier one is still unread, so a daily schedule or a batch of enrolling agents does not fill the notification list. Community Edition has no plan limits and is unaffected.
-
 ---
 
 ## [0.9.5] - 2026-10-06
@@ -36,6 +26,14 @@ All notable changes to OpenSCM are documented here.
 - **Scheduled scans and reports ran earlier or later than the time you picked.** The form's time picker works in your local time, but the server stored the value as if it were UTC, so every schedule was off by your UTC offset: three hours late in a UTC+3 zone. The picked time is now converted to UTC, and the edit page shows the next run in your local time and names the zone. Existing schedules keep running at the same moments as before; the edit page now shows that moment truthfully, so a schedule you set for 18:20 may display as 21:20, which is when it has actually been running.
 - **Saving a policy with the schedule time cleared ran it immediately.** The edit page was meant to keep the existing time when none was given, but reset it to "now". It now keeps it. Switching a schedule off also keeps its time.
 - **After the server had been down, missed scheduled runs were replayed a minute apart.** A daily schedule on a server that was stopped for five days ran five times in five minutes. A schedule now runs once and continues from its next future time.
+- **A result for a test deleted during a scan was reported as a server error.** Deleting a test while agents were still running it left their results with nowhere to go, and the server answered with an internal error and logged one for each. It now replies that the test is unknown and logs a single informational line. The same check stops an agent recording a result against a test that belongs to another organization.
+- **The report comparison pages showed a bare "400 Bad Request" when opened without two reports selected.** Opening `/reports/diff` or `/reports/system/diff` directly, or through a mangled link, now returns to the Reports list with the message "Pick two snapshots to compare".
+- **Plan limits could be passed in three ways (SaaS).** A plan's limits on systems, policies and saved reports were enforced on the ordinary "create" pages, but not everywhere those things are created:
+    - **Scheduled reports** kept being saved past the plan's report limit. At the limit a scheduled report is now skipped, and the organization's administrators get a notification saying which policy's report was not saved and why. The schedule continues on its usual timetable.
+    - **Importing a policy, or installing one from the policy store,** created policies past the policy limit. A new policy arriving this way is now refused with the same "plan limit reached" message as the New Policy page. Re-importing or updating a policy you already have is unaffected.
+    - **Enrollment tokens** approved systems past the system limit. At the limit, a system enrolling with a valid token is now left **pending approval**, the token's use is not spent, the administrators are notified, and the attempt is recorded in the audit log.
+
+  These notifications are sent once and not repeated while the earlier one is still unread, so a daily schedule or a batch of enrolling agents does not fill the notification list. Community Edition has no plan limits and is unaffected.
 
 ---
 
