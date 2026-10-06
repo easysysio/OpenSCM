@@ -968,6 +968,30 @@ pub async fn receive_result(
 
     let now = chrono::Utc::now().format("%Y-%m-%dT%H:%M:%S").to_string();
 
+    // A test can be deleted while a scan that includes it is still running.
+    // Its result then has nowhere to go: the INSERT below fails on the foreign
+    // key, which used to surface as a 500 "Storage Error" and an ERROR in the
+    // log for what is an ordinary race. Answer it as what it is.
+    let test_exists: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM tests WHERE id = ? AND tenant_id = ?",
+    )
+    .bind(payload.test_id)
+    .bind(tenant_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap_or(0);
+    if test_exists == 0 {
+        info!(
+            "Result from Agent ID {} for test {} discarded — no such test (Tenant: '{}').",
+            payload.client_id, payload.test_id, tenant_id
+        );
+        return (
+            StatusCode::NOT_FOUND,
+            Json(serde_json::json!({"error": "Unknown test"})),
+        )
+            .into_response();
+    }
+
     // Resolve container scope. The agent ships `container_runtime_id` when
     // the result is per-container; the server looks up the matching row in
     // `containers` to get its surrogate id. If the lookup misses (rare —

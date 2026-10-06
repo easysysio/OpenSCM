@@ -6,6 +6,9 @@ All notable changes to OpenSCM are documented here.
 
 ## [Unreleased]
 
+### Fixed
+- **A result for a test deleted during a scan was reported as a server error.** Deleting a test while agents were still running it left their results with nowhere to go, and the server answered with an internal error and logged one for each. It now replies that the test is unknown and logs a single informational line. The same check stops an agent recording a result against a test that belongs to another organization.
+
 ---
 
 ## [0.9.5] - 2026-10-06
