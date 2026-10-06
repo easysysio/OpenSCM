@@ -6,6 +6,10 @@ All notable changes to OpenSCM are documented here.
 
 ## [Unreleased]
 
+---
+
+## [0.9.6] - 2026-10-06
+
 ### Security
 - **Alert webhooks could be pointed at internal addresses in two ways (SaaS).** On SaaS a webhook may only go to a public https address, so that an organization cannot make the server contact its host's internal network. Two ways around that are closed:
     - A hostname answering with an IPv6 address that embeds an internal IPv4 one (such as `::ffff:169.254.169.254`) was accepted as public, although a connection to it reaches the internal address.
