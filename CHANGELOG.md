@@ -9,6 +9,12 @@ All notable changes to OpenSCM are documented here.
 ### Fixed
 - **A result for a test deleted during a scan was reported as a server error.** Deleting a test while agents were still running it left their results with nowhere to go, and the server answered with an internal error and logged one for each. It now replies that the test is unknown and logs a single informational line. The same check stops an agent recording a result against a test that belongs to another organization.
 - **The report comparison pages showed a bare "400 Bad Request" when opened without two reports selected.** Opening `/reports/diff` or `/reports/system/diff` directly, or through a mangled link, now returns to the Reports list with the message "Pick two snapshots to compare".
+- **Plan limits could be passed in three ways (SaaS).** A plan's limits on systems, policies and saved reports were enforced on the ordinary "create" pages, but not everywhere those things are created:
+    - **Scheduled reports** kept being saved past the plan's report limit. At the limit a scheduled report is now skipped, and the organization's administrators get a notification saying which policy's report was not saved and why. The schedule continues on its usual timetable.
+    - **Importing a policy, or installing one from the policy store,** created policies past the policy limit. A new policy arriving this way is now refused with the same "plan limit reached" message as the New Policy page. Re-importing or updating a policy you already have is unaffected.
+    - **Enrollment tokens** approved systems past the system limit. At the limit, a system enrolling with a valid token is now left **pending approval**, the token's use is not spent, the administrators are notified, and the attempt is recorded in the audit log.
+
+  These notifications are sent once and not repeated while the earlier one is still unread, so a daily schedule or a batch of enrolling agents does not fill the notification list. Community Edition has no plan limits and is unaffected.
 
 ---
 

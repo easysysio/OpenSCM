@@ -638,6 +638,158 @@ pub async fn record_entity_history(pool: &SqlitePool) -> Result<(), sqlx::Error>
 // Helper: start_background_scheduler
 // Spawns startup compliance sync and the 60-second main heartbeat loop.
 // ─────────────────────────────────────────────────────────────────────────────
+// Public: run_due_schedules
+// Task A of the scheduler loop: runs every policy scan / report schedule whose
+// next_run has arrived, then moves each to its next run. `now` is passed in so
+// the loop and the tests share one clock per tick.
+// ─────────────────────────────────────────────────────────────────────────────
+pub async fn run_due_schedules(pool: &SqlitePool, now: chrono::DateTime<Utc>) {
+    let loop_pool = pool.clone();
+    let now_str = now.format("%Y-%m-%dT%H:%M").to_string();
+
+    let due_schedules = match sqlx::query_as::<_, PolicySchedule>(
+        "SELECT id, tenant_id, policy_id, schedule_type,
+                CAST(enabled AS INTEGER) AS enabled,
+                frequency, cron_expression,
+                CAST(next_run AS TEXT) AS next_run, CAST(last_run AS TEXT) AS last_run
+         FROM policy_schedules WHERE enabled = 1 AND next_run <= ?",
+    )
+    .bind(&now_str)
+    .fetch_all(&loop_pool)
+    .await
+    {
+        Ok(s) => s,
+        Err(e) => {
+            error!("Failed to fetch due schedules: {}", e);
+            vec![]
+        }
+    };
+
+    for schedule in due_schedules {
+        info!(
+            "Scheduler: Triggering Policy ID {} type='{}' at '{}'",
+            schedule.policy_id, schedule.schedule_type, now_str
+        );
+
+        // A scheduled report counts against the plan's report limit like one
+        // saved by hand. The limit is enforced on the web route by SaaS
+        // middleware, which the scheduler does not pass through, so an
+        // auto-report schedule used to keep saving past it indefinitely. At
+        // the limit the report is skipped, the administrators are told why,
+        // and the schedule moves on to its next run (it must not retry every
+        // minute).
+        if schedule.schedule_type == "report" {
+            if let Some(limit) = crate::plan::limit_reached_pool(&loop_pool, &schedule.tenant_id, "reports").await {
+                let (next_run_time, _) = crate::schedule::next_run(
+                    &schedule.frequency,
+                    schedule.cron_expression.as_deref(),
+                    &schedule.next_run,
+                    now.naive_utc(),
+                );
+                if let Err(e) = sqlx::query("UPDATE policy_schedules SET next_run = ? WHERE id = ?")
+                    .bind(&next_run_time)
+                    .bind(schedule.id)
+                    .execute(&loop_pool)
+                    .await
+                {
+                    error!("Failed to update schedule for policy {}: {}", schedule.policy_id, e);
+                }
+                let policy_name: String = sqlx::query_scalar(
+                    "SELECT name FROM policies WHERE id = ? AND tenant_id = ?",
+                )
+                .bind(schedule.policy_id)
+                .bind(&schedule.tenant_id)
+                .fetch_optional(&loop_pool)
+                .await
+                .ok()
+                .flatten()
+                .unwrap_or_else(|| format!("ID {}", schedule.policy_id));
+                crate::plan::notify_admins_once(
+                    &loop_pool,
+                    &schedule.tenant_id,
+                    "warning",
+                    &format!(
+                        "The scheduled report for policy '{}' was not saved. {} \
+                         Deleting older reports also makes room.",
+                        policy_name,
+                        limit.message()
+                    ),
+                )
+                .await;
+                continue;
+            }
+        }
+
+        let result = match schedule.schedule_type.as_str() {
+            "report" => {
+                save_policy_report_logic(
+                    schedule.policy_id as i64,
+                    &loop_pool,
+                    &schedule.tenant_id,
+                    "Scheduler",
+                )
+                .await
+            }
+            _ => {
+                execute_policy_run_logic(
+                    schedule.policy_id,
+                    &loop_pool,
+                    &schedule.tenant_id,
+                )
+                .await
+            }
+        };
+
+        match result {
+            Ok(_) => {
+                // Cron expressions, the fixed intervals and catch-up
+                // after an outage all live in schedule::next_run.
+                let (next_run_time, problem) = crate::schedule::next_run(
+                    &schedule.frequency,
+                    schedule.cron_expression.as_deref(),
+                    &schedule.next_run,
+                    now.naive_utc(),
+                );
+                if let Some(problem) = problem {
+                    error!("Schedule for policy {}: {}", schedule.policy_id, problem);
+                }
+                if let Err(e) = sqlx::query(
+                    "UPDATE policy_schedules SET next_run = ?, last_run = ? WHERE id = ?",
+                )
+                .bind(&next_run_time)
+                .bind(&now_str)
+                .bind(schedule.id)
+                .execute(&loop_pool)
+                .await
+                {
+                    error!("Failed to update schedule for policy {}: {}", schedule.policy_id, e);
+                } else {
+                    let msg = match schedule.schedule_type.as_str() {
+                        "report" => format!("Scheduled report saved for Policy ID {}.", schedule.policy_id),
+                        _ => format!("Scheduled scan completed for Policy ID {}.", schedule.policy_id),
+                    };
+                    info!("{}", msg);
+                    for owner_id in get_policy_owners(&loop_pool, &schedule.tenant_id).await {
+                        add_notification(&loop_pool, &schedule.tenant_id, "info", owner_id, &msg).await;
+                    }
+                }
+            }
+            Err(e) => {
+                error!("Scheduled {} failed for policy {}: {}", schedule.schedule_type, schedule.policy_id, e);
+                let msg = format!(
+                    "Scheduled {} FAILED for Policy ID {}. Error: {}",
+                    schedule.schedule_type, schedule.policy_id, e
+                );
+                for owner_id in get_policy_owners(&loop_pool, &schedule.tenant_id).await {
+                    add_notification(&loop_pool, &schedule.tenant_id, "warning", owner_id, &msg).await;
+                }
+            }
+        }
+    }
+}
+
+
+// ─────────────────────────────────────────────────────────────────────────────
 pub async fn start_background_scheduler(pool: SqlitePool) {
     // Startup compliance sync
     let startup_pool = pool.clone();
@@ -669,7 +821,6 @@ pub async fn start_background_scheduler(pool: SqlitePool) {
             interval.tick().await;
 
             let now = Utc::now();
-            let now_str = now.format("%Y-%m-%dT%H:%M").to_string();
             let current_hour = now.hour() as i32;
             // ordinal0() = 0-based day-of-year. Wraparound (year change) is
             // handled fine because last_audit_prune_day starts at -1 and any
@@ -677,96 +828,7 @@ pub async fn start_background_scheduler(pool: SqlitePool) {
             let current_day  = now.ordinal0() as i32;
 
             // --- TASK A: POLICY SCHEDULER (scan + report) ---
-            let due_schedules = match sqlx::query_as::<_, PolicySchedule>(
-                "SELECT id, tenant_id, policy_id, schedule_type,
-                        CAST(enabled AS INTEGER) AS enabled,
-                        frequency, cron_expression,
-                        CAST(next_run AS TEXT) AS next_run, CAST(last_run AS TEXT) AS last_run
-                 FROM policy_schedules WHERE enabled = 1 AND next_run <= ?",
-            )
-            .bind(&now_str)
-            .fetch_all(&loop_pool)
-            .await
-            {
-                Ok(s) => s,
-                Err(e) => {
-                    error!("Failed to fetch due schedules: {}", e);
-                    vec![]
-                }
-            };
-
-            for schedule in due_schedules {
-                info!(
-                    "Scheduler: Triggering Policy ID {} type='{}' at '{}'",
-                    schedule.policy_id, schedule.schedule_type, now_str
-                );
-
-                let result = match schedule.schedule_type.as_str() {
-                    "report" => {
-                        save_policy_report_logic(
-                            schedule.policy_id as i64,
-                            &loop_pool,
-                            &schedule.tenant_id,
-                            "Scheduler",
-                        )
-                        .await
-                    }
-                    _ => {
-                        execute_policy_run_logic(
-                            schedule.policy_id,
-                            &loop_pool,
-                            &schedule.tenant_id,
-                        )
-                        .await
-                    }
-                };
-
-                match result {
-                    Ok(_) => {
-                        // Cron expressions, the fixed intervals and catch-up
-                        // after an outage all live in schedule::next_run.
-                        let (next_run_time, problem) = crate::schedule::next_run(
-                            &schedule.frequency,
-                            schedule.cron_expression.as_deref(),
-                            &schedule.next_run,
-                            now.naive_utc(),
-                        );
-                        if let Some(problem) = problem {
-                            error!("Schedule for policy {}: {}", schedule.policy_id, problem);
-                        }
-                        if let Err(e) = sqlx::query(
-                            "UPDATE policy_schedules SET next_run = ?, last_run = ? WHERE id = ?",
-                        )
-                        .bind(&next_run_time)
-                        .bind(&now_str)
-                        .bind(schedule.id)
-                        .execute(&loop_pool)
-                        .await
-                        {
-                            error!("Failed to update schedule for policy {}: {}", schedule.policy_id, e);
-                        } else {
-                            let msg = match schedule.schedule_type.as_str() {
-                                "report" => format!("Scheduled report saved for Policy ID {}.", schedule.policy_id),
-                                _ => format!("Scheduled scan completed for Policy ID {}.", schedule.policy_id),
-                            };
-                            info!("{}", msg);
-                            for owner_id in get_policy_owners(&loop_pool, &schedule.tenant_id).await {
-                                add_notification(&loop_pool, &schedule.tenant_id, "info", owner_id, &msg).await;
-                            }
-                        }
-                    }
-                    Err(e) => {
-                        error!("Scheduled {} failed for policy {}: {}", schedule.schedule_type, schedule.policy_id, e);
-                        let msg = format!(
-                            "Scheduled {} FAILED for Policy ID {}. Error: {}",
-                            schedule.schedule_type, schedule.policy_id, e
-                        );
-                        for owner_id in get_policy_owners(&loop_pool, &schedule.tenant_id).await {
-                            add_notification(&loop_pool, &schedule.tenant_id, "warning", owner_id, &msg).await;
-                        }
-                    }
-                }
-            }
+            run_due_schedules(&loop_pool, now).await;
 
             // --- TASK G: DRAIN THE ALERT OUTBOX ---
             // Deliveries are queued by the evaluator and sent here, so a slow

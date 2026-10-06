@@ -19,6 +19,7 @@ use crate::models::{SignedRequest, SignedResult, UnsignedPayload, ComplianceResu
 
 
 use crate::agents::derive_platform;
+use crate::enrollment::TokenOutcome;
 
 
 #[derive(sqlx::FromRow)]
@@ -133,6 +134,41 @@ fn verify_signature(
 // POST /send  [Agent API — no session auth, Ed25519 signed]
 // Handles agent registration (id=0) and heartbeat (id>0).
 // Returns pending test commands for approved agents.
+// ─────────────────────────────────────────────────────────────────────────────
+// Helper: token_blocked_by_plan
+// A system presented a VALID enrollment token but the plan has no room for
+// another active system, so it was left pending and the token was not used.
+// Audited, and the administrators are told once (a fleet enrolling at the
+// limit must not fill the bell).
+// ─────────────────────────────────────────────────────────────────────────────
+async fn token_blocked_by_plan(
+    pool: &SqlitePool,
+    tenant_id: &str,
+    payload: &UnsignedPayload,
+    system_id: i64,
+    limit: &crate::plan::LimitReached,
+) {
+    warn!(
+        "Agent '{}' (ID {}) presented a valid enrollment token but tenant '{}' is at its {} plan's limit of {} systems — left pending.",
+        payload.hostname, system_id, tenant_id, limit.plan, limit.limit
+    );
+    crate::audit::record(
+        pool, tenant_id, None, Some(payload.ip.as_str()),
+        "enrollment.token_plan_limit",
+        Some("system"), Some(&system_id.to_string()),
+        Some(&format!("host={:?} valid token, plan limit {} reached", payload.hostname, limit.limit)),
+    ).await;
+    crate::plan::notify_admins_once(
+        pool,
+        tenant_id,
+        "warning",
+        &format!(
+            "Systems enrolling with a token are being left pending approval. {}",
+            limit.message()
+        ),
+    ).await;
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 pub async fn send(
     Extension(pool): Extension<SqlitePool>,
@@ -249,8 +285,8 @@ pub async fn send(
                     if existing_status == "pending" {
                         if let Some(tok) = token_opt {
                             if let Ok(mut tx) = pool.begin().await {
-                                match crate::enrollment::validate_and_consume_token(&mut tx, tenant_id, tok).await {
-                                    Ok(true) => {
+                                match crate::enrollment::approve_with_token(&mut tx, tenant_id, tok).await {
+                                    Ok(TokenOutcome::Approved) => {
                                         if sqlx::query("UPDATE systems SET status = 'active' WHERE id = ? AND tenant_id = ?")
                                             .bind(existing_id).bind(tenant_id)
                                             .execute(&mut *tx).await.is_ok()
@@ -266,6 +302,10 @@ pub async fn send(
                                                 Some(&format!("host={:?} auto-approved on re-registration", payload.hostname)),
                                             ).await;
                                         }
+                                    }
+                                    Ok(TokenOutcome::PlanLimit(limit)) => {
+                                        let _ = tx.rollback().await;
+                                        token_blocked_by_plan(&pool, tenant_id, &payload, existing_id, &limit).await;
                                     }
                                     _ => { let _ = tx.rollback().await; }
                                 }
@@ -322,13 +362,13 @@ pub async fn send(
 
         // Use a transaction so token-consume, INSERT, and last_insert_rowid()
         // run atomically on the same connection.
-        let reg_result: Result<(i64, bool), sqlx::Error> = async {
+        let reg_result: Result<(i64, Option<TokenOutcome>), sqlx::Error> = async {
             let mut tx = pool.begin().await?;
-            let auto_approved = match token_opt {
-                Some(tok) => crate::enrollment::validate_and_consume_token(&mut tx, tenant_id, tok).await?,
-                None      => false,
+            let outcome = match token_opt {
+                Some(tok) => Some(crate::enrollment::approve_with_token(&mut tx, tenant_id, tok).await?),
+                None      => None,
             };
-            let status = if auto_approved { "active" } else { "pending" };
+            let status = if outcome == Some(TokenOutcome::Approved) { "active" } else { "pending" };
             sqlx::query(
                 "INSERT INTO systems (tenant_id, key, name, ver, os, ip, arch, status)
                  VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
@@ -347,11 +387,12 @@ pub async fn send(
                 .fetch_one(&mut *tx)
                 .await?;
             tx.commit().await?;
-            Ok((id, auto_approved))
+            Ok((id, outcome))
         }.await;
 
         match reg_result {
-            Ok((new_id, auto_approved)) => {
+            Ok((new_id, outcome)) => {
+                let auto_approved = outcome == Some(TokenOutcome::Approved);
                 let status_str = if auto_approved { "active" } else { "pending" };
                 info!(
                     "Agent '{}' registered with ID {} ({}).",
@@ -369,6 +410,8 @@ pub async fn send(
                         Some("system"), Some(&new_id.to_string()),
                         Some(&format!("host={:?} auto-approved at enrollment", payload.hostname)),
                     ).await;
+                } else if let Some(TokenOutcome::PlanLimit(ref limit)) = outcome {
+                    token_blocked_by_plan(&pool, tenant_id, &payload, new_id, limit).await;
                 } else if token_opt.is_some() {
                     warn!("Agent '{}' presented an invalid/expired enrollment token — enrolled as pending.",
                           payload.hostname);

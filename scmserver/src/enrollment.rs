@@ -72,10 +72,27 @@ pub async fn validate_and_consume_token(
     tenant_id: &str,
     raw_token: &str,
 ) -> Result<bool, sqlx::Error> {
+    match find_valid_token(tx, tenant_id, raw_token).await? {
+        Some(token_id) => {
+            consume_token(tx, tenant_id, token_id).await?;
+            Ok(true)
+        }
+        None => Ok(false),
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Helper: find_valid_token
+// The id of the enabled, unexpired, not-used-up token matching `raw_token`.
+// ─────────────────────────────────────────────────────────────────────────────
+async fn find_valid_token(
+    tx: &mut Transaction<'_, Sqlite>,
+    tenant_id: &str,
+    raw_token: &str,
+) -> Result<Option<i64>, sqlx::Error> {
     let hash = hash_token(raw_token);
     let now = chrono::Utc::now().format("%Y-%m-%d %H:%M:%S").to_string();
 
-    // Find a matching, currently-valid token.
     let row = sqlx::query(
         "SELECT id FROM enrollment_tokens
          WHERE tenant_id = ?
@@ -91,9 +108,19 @@ pub async fn validate_and_consume_token(
     .fetch_optional(&mut **tx)
     .await?;
 
-    let Some(row) = row else { return Ok(false); };
-    let token_id: i64 = row.try_get("id").unwrap_or(0);
+    Ok(row.map(|r| r.try_get("id").unwrap_or(0)))
+}
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Helper: consume_token
+// Records one use of a token.
+// ─────────────────────────────────────────────────────────────────────────────
+async fn consume_token(
+    tx: &mut Transaction<'_, Sqlite>,
+    tenant_id: &str,
+    token_id: i64,
+) -> Result<(), sqlx::Error> {
+    let now = chrono::Utc::now().format("%Y-%m-%d %H:%M:%S").to_string();
     sqlx::query(
         "UPDATE enrollment_tokens
          SET use_count = use_count + 1, last_used_at = ?
@@ -104,8 +131,46 @@ pub async fn validate_and_consume_token(
     .bind(tenant_id)
     .execute(&mut **tx)
     .await?;
+    Ok(())
+}
 
-    Ok(true)
+/// What presenting an enrollment token at registration led to.
+#[derive(Debug, PartialEq)]
+pub enum TokenOutcome {
+    /// Valid token, a use consumed: the system comes up active.
+    Approved,
+    /// No such token, or disabled, expired or used up.
+    Invalid,
+    /// Valid token, but the plan has no room for another active system. The
+    /// token is NOT consumed and the system stays pending.
+    PlanLimit(crate::plan::LimitReached),
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Public — approve_with_token
+// The registration path's entry point: validates the token and, if the tenant's
+// plan has room for another active system, consumes one use.
+//
+// A token auto-approves a system, and approving a system is what the plan's
+// system limit counts. The limit is enforced by SaaS middleware on the approve
+// buttons, which agent registration does not pass through, so tokens used to
+// activate systems past it. The token is validated FIRST: only a genuine token
+// can reach the plan check, so a stranger posting junk tokens cannot make the
+// server announce that a plan is full.
+// ─────────────────────────────────────────────────────────────────────────────
+pub async fn approve_with_token(
+    tx: &mut Transaction<'_, Sqlite>,
+    tenant_id: &str,
+    raw_token: &str,
+) -> Result<TokenOutcome, sqlx::Error> {
+    let Some(token_id) = find_valid_token(tx, tenant_id, raw_token).await? else {
+        return Ok(TokenOutcome::Invalid);
+    };
+    if let Some(limit) = crate::plan::limit_reached(tx, tenant_id, "systems").await {
+        return Ok(TokenOutcome::PlanLimit(limit));
+    }
+    consume_token(tx, tenant_id, token_id).await?;
+    Ok(TokenOutcome::Approved)
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

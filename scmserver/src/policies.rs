@@ -2070,6 +2070,15 @@ pub async fn apply_policy_import(
         pid
     } else {
         // ── Insert path: new policy ─────────────────────────────────────────
+        // A new policy counts against the plan's policy limit however it
+        // arrives. The SaaS middleware only watches the "New Policy" form, so
+        // an import or a policy-store install (both come through here) used to
+        // create policies past the limit. Updating an existing policy, above,
+        // adds nothing and is never limited.
+        if let Some(limit) = crate::plan::limit_reached(&mut tx, tenant_id, "policies").await {
+            return Err(limit.message());
+        }
+
         // Resolve name collision within the tenant.
         let mut final_name = export.policy.name.clone();
         let mut suffix = 0;

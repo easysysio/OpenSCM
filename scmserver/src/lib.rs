@@ -27,6 +27,7 @@ pub mod enrollment;
 pub mod tests;
 pub mod pdf;
 pub mod tour;
+pub mod plan;
 pub mod policies;
 pub mod reports;
 pub mod users;
