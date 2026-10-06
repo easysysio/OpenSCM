@@ -13,6 +13,9 @@ All notable changes to OpenSCM are documented here.
 
   Self-hosted installations, which may post webhooks to internal addresses, are unaffected.
 
+### Fixed
+- **The Alerts pages still showed no confirmation or error messages.** 0.9.2 was meant to fix this and did not: it added the message banner to the pages, but the pages were never given the message to show. Saving, deleting or testing an alert, and input that was refused, now report back as they do everywhere else. The earlier test checked the page layout and not the real request, which is how it passed; the new one saves an alert, follows the redirect and reads the message.
+
 ---
 
 ## [0.9.5] - 2026-10-06

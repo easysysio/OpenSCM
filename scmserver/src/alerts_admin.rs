@@ -5,7 +5,7 @@
 // an address of the operator's choosing. Reading is Viewer, so anyone who can
 // see compliance can see what would be alerted on.
 
-use axum::extract::{Extension, Path, RawForm};
+use axum::extract::{Extension, Path, Query, RawForm};
 use axum::response::{IntoResponse, Redirect};
 use bytes::Bytes;
 use serde::Serialize;
@@ -16,7 +16,7 @@ use tracing::{error, info, warn};
 
 use crate::auth;
 use crate::handlers::{parse_form_data, render_template};
-use crate::models::{AuthSession, UserRole};
+use crate::models::{AuthSession, ErrorQuery, UserRole};
 
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -167,8 +167,30 @@ async fn load_action_rows(pool: &SqlitePool, alert_id: i64) -> Vec<ActionRow> {
 // GET /alerts
 // Role: Viewer.
 // ─────────────────────────────────────────────────────────────────────────────
+// Helper: page_context
+// A Context carrying the one-shot success / error message from the URL.
+//
+// Every action here redirects back with ?success_message= or ?error_message=.
+// The templates have had a banner for those since 0.9.2, but these handlers
+// never read the query string, so the banner was never given anything to show:
+// a saved alert and a refused one looked identical. (The 0.9.2 test rendered
+// the template with the message inserted by hand, so it passed regardless.)
+// ─────────────────────────────────────────────────────────────────────────────
+fn page_context(query: ErrorQuery) -> Context {
+    let mut ctx = Context::new();
+    if let Some(m) = query.error_message {
+        ctx.insert("error_message", &m);
+    }
+    if let Some(m) = query.success_message {
+        ctx.insert("success_message", &m);
+    }
+    ctx
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 pub async fn alerts_page(
     auth: AuthSession,
+    Query(query): Query<ErrorQuery>,
     pool: Extension<SqlitePool>,
     tera: Extension<Arc<Tera>>,
 ) -> impl IntoResponse {
@@ -176,7 +198,7 @@ pub async fn alerts_page(
         return redir;
     }
     let alerts = load_alerts(&pool, &auth.tenant_id).await;
-    let mut ctx = Context::new();
+    let mut ctx = page_context(query);
     ctx.insert("alerts", &alerts);
     render_template(&tera, Some(&pool), "alerts.html", ctx, Some(auth))
         .await
@@ -190,6 +212,7 @@ pub async fn alerts_page(
 // ─────────────────────────────────────────────────────────────────────────────
 pub async fn alerts_form(
     auth: AuthSession,
+    Query(query): Query<ErrorQuery>,
     pool: Extension<SqlitePool>,
     tera: Extension<Arc<Tera>>,
     id: Option<Path<i64>>,
@@ -211,7 +234,7 @@ pub async fn alerts_form(
     .await
     .unwrap_or_default();
 
-    let mut ctx = Context::new();
+    let mut ctx = page_context(query);
     ctx.insert("policies", &policies);
     if let Some(Path(alert_id)) = id {
         let existing = load_alerts(&pool, &auth.tenant_id)
@@ -567,7 +590,9 @@ pub async fn alerts_test(
     }
 
     info!("Test delivery queued for alert {} by '{}'", id, auth.username);
-    Redirect::to("/alerts/history?success_message=Test+queued+—+it+is+sent+within+a+minute")
+    // The dash is percent-encoded: a raw non-ASCII character is not valid in
+    // a Location header.
+    Redirect::to("/alerts/history?success_message=Test+queued+%E2%80%94+it+is+sent+within+a+minute")
         .into_response()
 }
 
@@ -578,6 +603,7 @@ pub async fn alerts_test(
 // ─────────────────────────────────────────────────────────────────────────────
 pub async fn alerts_history(
     auth: AuthSession,
+    Query(query): Query<ErrorQuery>,
     pool: Extension<SqlitePool>,
     tera: Extension<Arc<Tera>>,
 ) -> impl IntoResponse {
@@ -615,7 +641,7 @@ pub async fn alerts_history(
         })
         .collect();
 
-    let mut ctx = Context::new();
+    let mut ctx = page_context(query);
     ctx.insert("deliveries", &deliveries);
     render_template(&tera, Some(&pool), "alerts_history.html", ctx, Some(auth))
         .await
