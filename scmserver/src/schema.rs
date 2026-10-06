@@ -2810,6 +2810,63 @@ async fn run_migrations_on(pool: &SqlitePool) -> Result<(), sqlx::Error> {
         info!("Schema migration v41 → v42 complete.");
     }
 
+    // ─────────────────────────────────────────────────────────────────────
+    // v42 → v43: single sign-on (0.10.0). See docs/design/0.10.0-sso.md.
+    //
+    //   sso_providers    one OpenID Connect provider per tenant. Not the
+    //                    `directories` table: that is LDAP-shaped (host, port,
+    //                    base_dn, bind_dn … all NOT NULL) and an OIDC provider
+    //                    has none of those.
+    //   users.sso_subject the provider's `sub` claim for a user — the only
+    //                    identifier a provider guarantees stable. Unique per
+    //                    tenant, so one identity is one account.
+    //   sso_login_state  the state / nonce / PKCE verifier of a sign-in in
+    //                    progress. Server-side and single-use.
+    // ─────────────────────────────────────────────────────────────────────
+    if version < 43 {
+        info!("Running schema migration v42 → v43 (single sign-on)...");
+
+        sqlx::query(
+            "CREATE TABLE IF NOT EXISTS sso_providers (
+                id             INTEGER PRIMARY KEY AUTOINCREMENT,
+                tenant_id      VARCHAR(191) NOT NULL,
+                enabled        INTEGER NOT NULL DEFAULT 0,
+                name           TEXT NOT NULL,
+                issuer_url     TEXT NOT NULL,
+                client_id      TEXT NOT NULL,
+                client_secret  TEXT NOT NULL,
+                created_at     DATETIME DEFAULT CURRENT_TIMESTAMP,
+                updated_at     DATETIME DEFAULT CURRENT_TIMESTAMP,
+                UNIQUE (tenant_id),
+                FOREIGN KEY (tenant_id) REFERENCES tenants (id) ON DELETE CASCADE
+            )"
+        ).execute(pool).await?;
+
+        if table_exists(pool, "users").await && !column_exists(pool, "users", "sso_subject").await {
+            sqlx::query("ALTER TABLE users ADD COLUMN sso_subject TEXT").execute(pool).await?;
+        }
+        if table_exists(pool, "users").await {
+            sqlx::query(
+                "CREATE UNIQUE INDEX IF NOT EXISTS idx_users_sso
+                 ON users (tenant_id, sso_subject) WHERE sso_subject IS NOT NULL"
+            ).execute(pool).await?;
+        }
+
+        sqlx::query(
+            "CREATE TABLE IF NOT EXISTS sso_login_state (
+                state         TEXT PRIMARY KEY,
+                tenant_id     VARCHAR(191) NOT NULL,
+                nonce         TEXT NOT NULL,
+                pkce_verifier TEXT NOT NULL,
+                created_at    DATETIME DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (tenant_id) REFERENCES tenants (id) ON DELETE CASCADE
+            )"
+        ).execute(pool).await?;
+
+        sqlx::query("UPDATE schema_info SET version = 43").execute(pool).await?;
+        info!("Schema migration v42 → v43 complete.");
+    }
+
     Ok(())
 }
 

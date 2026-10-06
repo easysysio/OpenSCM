@@ -33,6 +33,7 @@ pub mod policies;
 pub mod reports;
 pub mod users;
 pub mod settings;
+pub mod sso;
 pub mod schedule;
 pub mod scheduler;
 pub mod install;
@@ -451,6 +452,12 @@ pub fn create_core_router(state: AppState, cookie_key: axum_extra::extract::cook
         .route("/admin/directories/edit/{id}",    get(directories::edit_form).post(directories::edit_submit))
         .route("/admin/directories/delete/{id}",  post(directories::delete))
         .route("/admin/directories/test/{id}",    post(directories::test))
+        // Single sign-on: the tenant's OpenID Connect provider. Admin only —
+        // it holds a client secret and names a URL the server will fetch.
+        .route("/admin/sso",          get(sso::sso_page))
+        .route("/admin/sso/save",     post(sso::sso_save))
+        .route("/admin/sso/test",     post(sso::sso_test))
+        .route("/admin/sso/disable",  post(sso::sso_disable))
         .route("/systems/upgrade/{id}", post(systems::systems_upgrade))
         .route("/systems/bulk/upgrade", post(systems::systems_bulk_upgrade))
         .route("/systems/upgrade_all",  post(systems::systems_upgrade_all))

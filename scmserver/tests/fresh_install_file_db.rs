@@ -16,6 +16,9 @@ use sqlx::sqlite::SqlitePoolOptions;
 use sqlx::SqlitePool;
 use std::path::PathBuf;
 
+// Bump with every migration (also in tests/schema_migration.rs).
+const CURRENT_SCHEMA_VERSION: i64 = 43;
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Helper: file_pool
 // A fresh database file, with the pool settings main.rs uses.
@@ -69,15 +72,16 @@ async fn a_fresh_install_on_a_file_database_reaches_the_current_version() {
         .execute(&pool).await.unwrap();
     scmserver::schema::run_migrations(&pool).await.expect("fresh-install migrations must succeed");
 
-    assert_eq!(version(&pool).await, 42);
-    for t in ["results", "alerts", "alert_actions", "alert_deliveries", "containers"] {
+    assert_eq!(version(&pool).await, CURRENT_SCHEMA_VERSION);
+    for t in ["results", "alerts", "alert_actions", "alert_deliveries", "containers",
+              "sso_providers", "sso_login_state"] {
         assert!(has_table(&pool, t).await, "table {t} missing after a fresh install");
     }
     assert!(!has_table(&pool, "results_new").await, "the rebuild's temporary table must be gone");
 
     // A second start (main.rs runs migrations every time) is a no-op.
     scmserver::schema::run_migrations(&pool).await.expect("re-running migrations must succeed");
-    assert_eq!(version(&pool).await, 42);
+    assert_eq!(version(&pool).await, CURRENT_SCHEMA_VERSION);
 
     cleanup(pool, path).await;
 }
@@ -108,7 +112,7 @@ async fn a_database_stuck_at_v25_recovers_on_the_next_start() {
 
     scmserver::schema::run_migrations(&pool).await.expect("a stuck database must recover");
 
-    assert_eq!(version(&pool).await, 42);
+    assert_eq!(version(&pool).await, CURRENT_SCHEMA_VERSION);
     assert!(has_table(&pool, "results").await);
     assert!(!has_table(&pool, "results_new").await);
     let kept: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM results WHERE system_id = 1 AND test_id = 1")
