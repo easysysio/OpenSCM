@@ -10,7 +10,6 @@
 // makes it usable as the fallback when another transport gives up.
 
 use sqlx::{Row, SqlitePool};
-use std::net::IpAddr;
 use tracing::{error, info, warn};
 
 use crate::alerts::{summary_line, Observation};
@@ -24,98 +23,16 @@ const HTTP_TIMEOUT_SECS: u64 = 10;
 
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Helper: is_public_ip
-// Rejects addresses that a tenant should never be able to make the server talk
-// to.
-//
-// In SaaS the webhook target is attacker-controlled: a tenant can point it at
-// http://169.254.169.254/ and read cloud instance metadata out of the response,
-// or map the operator's internal network by timing replies. Loopback,
-// link-local, private and unspecified ranges are refused.
-// ─────────────────────────────────────────────────────────────────────────────
-fn is_public_ip(ip: IpAddr) -> bool {
-    match ip {
-        IpAddr::V4(v4) => {
-            !(v4.is_loopback()
-                || v4.is_private()
-                || v4.is_link_local()
-                || v4.is_broadcast()
-                || v4.is_documentation()
-                || v4.is_unspecified()
-                // 100.64.0.0/10, carrier-grade NAT — reaches other tenants on
-                // some hosting providers.
-                || (v4.octets()[0] == 100 && (v4.octets()[1] & 0xc0) == 64)
-                // 0.0.0.0/8
-                || v4.octets()[0] == 0)
-        }
-        IpAddr::V6(v6) => {
-            !(v6.is_loopback()
-                || v6.is_unspecified()
-                // fc00::/7 unique-local, fe80::/10 link-local
-                || (v6.segments()[0] & 0xfe00) == 0xfc00
-                || (v6.segments()[0] & 0xffc0) == 0xfe80)
-        }
-    }
-}
-
-
-// ─────────────────────────────────────────────────────────────────────────────
 // Public: validate_webhook_target
 // Checks a webhook URL. `strict` is on in SaaS, where the target is supplied
 // by a tenant; a self-hosted operator legitimately posts to http://10.0.0.5.
 //
-// Called at SAVE time and again at DELIVERY time. Checking only once would be
-// bypassable: a hostname that resolves publicly when the rule is saved can be
-// re-pointed at 169.254.169.254 afterwards.
+// The rules themselves live in net_guard, shared with SSO provider URLs. This
+// is called at SAVE time; DELIVERY calls net_guard::check_url again and sends
+// through a client pinned to the addresses that passed.
 // ─────────────────────────────────────────────────────────────────────────────
 pub fn validate_webhook_target(url: &str, strict: bool) -> Result<(), String> {
-    let parsed = url.trim();
-    if !strict {
-        return if parsed.starts_with("http://") || parsed.starts_with("https://") {
-            Ok(())
-        } else {
-            Err("Webhook URL must start with http:// or https://".into())
-        };
-    }
-
-    if !parsed.starts_with("https://") {
-        return Err("Webhook URL must use https://".into());
-    }
-
-    let host = parsed
-        .trim_start_matches("https://")
-        .split(['/', '?', '#'])
-        .next()
-        .unwrap_or("")
-        .split('@')
-        .next_back()
-        .unwrap_or("");
-    let host = host.split(':').next().unwrap_or(host);
-    if host.is_empty() {
-        return Err("Webhook URL has no host".into());
-    }
-
-    // A literal address is checked directly; a name is resolved, and every
-    // address it answers with must be acceptable — one public and one private
-    // answer is a rebinding attempt.
-    let addrs: Vec<IpAddr> = match host.parse::<IpAddr>() {
-        Ok(ip) => vec![ip],
-        Err(_) => std::net::ToSocketAddrs::to_socket_addrs(&(host, 443u16))
-            .map_err(|e| format!("Could not resolve {host}: {e}"))?
-            .map(|s| s.ip())
-            .collect(),
-    };
-    if addrs.is_empty() {
-        return Err(format!("Could not resolve {host}"));
-    }
-    for ip in addrs {
-        if !is_public_ip(ip) {
-            return Err(format!(
-                "{host} resolves to {ip}, which is not a public address"
-            ));
-        }
-    }
-    Ok(())
+    crate::net_guard::check_url(url, strict, "Webhook URL").map(|_| ())
 }
 
 
@@ -319,8 +236,11 @@ async fn dispatch(pool: &SqlitePool, d: &Pending) -> Result<(), String> {
             }
             // Re-validated here, not just at save time: a hostname that
             // resolved publicly when the rule was created can be re-pointed
-            // at an internal address afterwards.
-            validate_webhook_target(&url, crate::handlers::is_saas_mode())?;
+            // at an internal address afterwards. The request below goes
+            // through a client pinned to the addresses that pass THIS check,
+            // so it cannot be re-pointed between the check and the request
+            // either.
+            let target = crate::net_guard::check_url(&url, crate::handlers::is_saas_mode(), "Webhook URL")?;
 
             let payload = serde_json::json!({
                 "version": 1,
@@ -335,13 +255,11 @@ async fn dispatch(pool: &SqlitePool, d: &Pending) -> Result<(), String> {
                 },
             });
 
-            let client = reqwest::Client::builder()
-                .timeout(std::time::Duration::from_secs(HTTP_TIMEOUT_SECS))
-                // A redirect is a second request to an address that was never
-                // validated, which is the whole SSRF trick.
-                .redirect(reqwest::redirect::Policy::none())
-                .build()
-                .map_err(|e| e.to_string())?;
+            // Redirects are off and the host is pinned — see net_guard::client_for.
+            let client = crate::net_guard::client_for(
+                &target,
+                std::time::Duration::from_secs(HTTP_TIMEOUT_SECS),
+            )?;
 
             // Per ACTION, not per rule: a rule can now have several webhooks,
             // each with its own credential.

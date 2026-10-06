@@ -8,6 +8,7 @@
 
 // Module Declarations (public so the SaaS crate can access them)
 pub mod models;
+pub mod net_guard;
 pub mod handlers;
 pub mod config;
 pub mod schema;
