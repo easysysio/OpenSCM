@@ -470,13 +470,19 @@ fn classify(old: Option<&str>, new: Option<&str>) -> &'static str {
 
 pub async fn reports_diff(
     auth: AuthSession,
-    Query(q): Query<DiffQuery>,
+    q: Result<Query<DiffQuery>, axum::extract::rejection::QueryRejection>,
     Extension(pool): Extension<SqlitePool>,
     Extension(tera): Extension<Arc<Tera>>,
 ) -> impl IntoResponse {
     if let Some(redir) = auth::authorize(&auth.role, UserRole::Viewer) {
         return redir;
     }
+
+    // `a` and `b` missing or not numbers (the page opened directly, a mangled
+    // link) used to be rejected by the extractor with a bare 400 page.
+    let Ok(Query(q)) = q else {
+        return Redirect::to("/reports?error_message=Pick+two+snapshots+to+compare").into_response();
+    };
 
     if q.a == q.b {
         return Redirect::to("/reports?error_message=Pick+two+different+snapshots+to+compare").into_response();
@@ -1279,13 +1285,19 @@ struct PolicyDiff {
 
 pub async fn system_reports_diff(
     auth: AuthSession,
-    Query(q): Query<DiffQuery>,
+    q: Result<Query<DiffQuery>, axum::extract::rejection::QueryRejection>,
     Extension(pool): Extension<SqlitePool>,
     Extension(tera): Extension<Arc<Tera>>,
 ) -> impl IntoResponse {
     if let Some(redir) = auth::authorize(&auth.role, UserRole::Viewer) {
         return redir;
     }
+
+    // `a` and `b` missing or not numbers (the page opened directly, a mangled
+    // link) used to be rejected by the extractor with a bare 400 page.
+    let Ok(Query(q)) = q else {
+        return Redirect::to("/reports?error_message=Pick+two+snapshots+to+compare").into_response();
+    };
 
     if q.a == q.b {
         return Redirect::to("/reports?error_message=Pick+two+different+snapshots+to+compare").into_response();

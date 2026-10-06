@@ -8,6 +8,7 @@ All notable changes to OpenSCM are documented here.
 
 ### Fixed
 - **A result for a test deleted during a scan was reported as a server error.** Deleting a test while agents were still running it left their results with nowhere to go, and the server answered with an internal error and logged one for each. It now replies that the test is unknown and logs a single informational line. The same check stops an agent recording a result against a test that belongs to another organization.
+- **The report comparison pages showed a bare "400 Bad Request" when opened without two reports selected.** Opening `/reports/diff` or `/reports/system/diff` directly, or through a mangled link, now returns to the Reports list with the message "Pick two snapshots to compare".
 
 ---
 
