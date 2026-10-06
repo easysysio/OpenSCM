@@ -6,6 +6,10 @@ All notable changes to OpenSCM are documented here.
 
 ## [Unreleased]
 
+---
+
+## [0.9.5] - 2026-10-06
+
 ### Fixed
 - **Several kinds of check gave the wrong result — some reported PASS on systems that should fail.** The fix is in the agent: **results change only once agents are upgraded to 0.9.5**, and after that some tests that were passing will correctly fail, so compliance scores may drop. The affected checks:
     - **File content with *Not Contains* / *Not Equals*** passed if *any* line lacked the text, which is true of almost every file — so a file containing `PermitRootLogin yes` passed "*Not Contains* `PermitRootLogin yes`". They now pass only when *no* line matches. (36 checks in the policy store use this, for example CIS "Ensure pam_unix does not include nullok".) An empty or missing file, which used to fail, now passes a *Not* check.
