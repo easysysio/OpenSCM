@@ -54,6 +54,9 @@ pub struct Provider {
     pub name:       String,
     pub issuer_url: String,
     pub client_id:  String,
+    /// Use an email address from this provider for first-time matching even
+    /// when the provider does not say it is verified. See sso_login::resolve_user.
+    pub trust_email: bool,
     /// Never serialised: the secret must not reach a rendered page.
     #[serde(skip)]
     pub client_secret: String,
@@ -65,7 +68,7 @@ pub struct Provider {
 // ─────────────────────────────────────────────────────────────────────────────
 pub async fn load_provider(pool: &SqlitePool, tenant_id: &str) -> Option<Provider> {
     let r = sqlx::query(
-        "SELECT id, tenant_id, enabled, name, issuer_url, client_id, client_secret
+        "SELECT id, tenant_id, enabled, name, issuer_url, client_id, client_secret, trust_email
            FROM sso_providers WHERE tenant_id = ?",
     )
     .bind(tenant_id)
@@ -79,6 +82,7 @@ pub async fn load_provider(pool: &SqlitePool, tenant_id: &str) -> Option<Provide
         name:          r.try_get("name").unwrap_or_default(),
         issuer_url:    r.try_get("issuer_url").unwrap_or_default(),
         client_id:     r.try_get("client_id").unwrap_or_default(),
+        trust_email:   r.try_get::<i64, _>("trust_email").unwrap_or(0) != 0,
         client_secret: r.try_get("client_secret").unwrap_or_default(),
     })
 }
@@ -395,6 +399,7 @@ pub async fn save_provider(
     let client_id = get("client_id");
     let new_secret = get("client_secret");
     let enabled = get("enabled") == "on";
+    let trust_email = get("trust_email") == "on";
 
     if name.is_empty() || name.chars().count() > 100 {
         return Err("Give the provider a display name of up to 100 characters".into());
@@ -438,11 +443,12 @@ pub async fn save_provider(
     }
 
     sqlx::query(
-        "INSERT INTO sso_providers (tenant_id, enabled, name, issuer_url, client_id, client_secret)
-         VALUES (?, ?, ?, ?, ?, ?)
+        "INSERT INTO sso_providers (tenant_id, enabled, name, issuer_url, client_id, client_secret, trust_email)
+         VALUES (?, ?, ?, ?, ?, ?, ?)
          ON CONFLICT(tenant_id) DO UPDATE SET
              enabled = excluded.enabled, name = excluded.name, issuer_url = excluded.issuer_url,
              client_id = excluded.client_id, client_secret = excluded.client_secret,
+             trust_email = excluded.trust_email,
              updated_at = CURRENT_TIMESTAMP",
     )
     .bind(&auth.tenant_id)
@@ -451,6 +457,7 @@ pub async fn save_provider(
     .bind(&issuer)
     .bind(&client_id)
     .bind(&secret)
+    .bind(trust_email)
     .execute(pool)
     .await
     .map_err(|e| {
@@ -462,7 +469,7 @@ pub async fn save_provider(
     crate::audit::record(
         pool, &auth.tenant_id, Some(auth), Some(ip),
         "sso.provider_save", Some("sso_provider"), None,
-        Some(&serde_json::json!({ "issuer": issuer, "enabled": enabled }).to_string()),
+        Some(&serde_json::json!({ "issuer": issuer, "enabled": enabled, "trust_email": trust_email }).to_string()),
     ).await;
     Ok(if enabled { "Provider saved and enabled" } else { "Provider saved (not enabled)" })
 }

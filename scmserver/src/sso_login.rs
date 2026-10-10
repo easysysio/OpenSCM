@@ -386,11 +386,27 @@ pub struct SignedIn {
 //
 // Without the verified-email rule, a provider that lets people set their own
 // address would let anyone claim another user's account by typing their email.
+//
+// Some providers never send `email_verified` at all — Microsoft Entra ID's
+// default ID token is one — and with the rule alone none of their users could
+// ever be matched. A tenant can therefore mark its provider "trust email
+// addresses" (sso_providers.trust_email): an address is then accepted when the
+// claim is ABSENT. That is the tenant saying addresses in its directory are set
+// by its administrators. An explicit `email_verified: false` is still refused:
+// there the provider itself is saying the address is unconfirmed.
 // Two users sharing the address is refused rather than guessed at. A user
 // already bound to a DIFFERENT subject is never matched by email, so a second
 // identity with the same address cannot take the account over.
 // ─────────────────────────────────────────────────────────────────────────────
-async fn resolve_user(pool: &SqlitePool, tenant_id: &str, claims: &IdClaims) -> Result<SignedIn, LoginFailure> {
+async fn resolve_user(
+    pool: &SqlitePool,
+    tenant_id: &str,
+    claims: &IdClaims,
+    trust_email: bool,
+) -> Result<SignedIn, LoginFailure> {
+    // Believed when the provider verified it, or — if the tenant trusts its
+    // provider's addresses — when the provider is simply silent about it.
+    let email_ok = claims.email_is_verified() || (trust_email && claims.email_verified.is_none());
     let t = Some(tenant_id);
     let row_to_user = |r: &sqlx::sqlite::SqliteRow| SignedIn {
         user_id: r.try_get("id").unwrap_or_default(),
@@ -413,7 +429,7 @@ async fn resolve_user(pool: &SqlitePool, tenant_id: &str, claims: &IdClaims) -> 
         let Some(email) = email else {
             return Err(fail(NO_ACCOUNT, t, "no user is bound to this subject and the token has no email"));
         };
-        if !claims.email_is_verified() {
+        if !email_ok {
             return Err(fail(NO_ACCOUNT, t, "no user is bound to this subject and the provider has not verified the email"));
         }
         let matches = sqlx::query(
@@ -450,7 +466,7 @@ async fn resolve_user(pool: &SqlitePool, tenant_id: &str, claims: &IdClaims) -> 
     // The provider vouching for the address IS a verification of it. Without
     // this, a SaaS user who never clicked the confirmation link would sign in
     // here and be turned away by the session check on the next request.
-    if claims.email_is_verified() {
+    if email_ok {
         if let (Some(theirs), Some(ours)) = (claims.email.as_deref(), user_email.as_deref()) {
             if theirs.trim().eq_ignore_ascii_case(ours.trim()) {
                 let _ = sqlx::query("UPDATE users SET email_verified = 1 WHERE id = ? AND tenant_id = ?")
@@ -561,7 +577,7 @@ pub async fn complete_login(pool: &SqlitePool, state: &str, code: &str, strict: 
         return Err(fail(SUSPENDED, t, "tenant is suspended"));
     }
 
-    resolve_user(pool, &tenant_id, &claims).await
+    resolve_user(pool, &tenant_id, &claims, provider.trust_email).await
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

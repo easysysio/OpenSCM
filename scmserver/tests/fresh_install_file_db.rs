@@ -17,7 +17,7 @@ use sqlx::SqlitePool;
 use std::path::PathBuf;
 
 // Bump with every migration (also in tests/schema_migration.rs).
-const CURRENT_SCHEMA_VERSION: i64 = 43;
+const CURRENT_SCHEMA_VERSION: i64 = 44;
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Helper: file_pool
@@ -119,5 +119,45 @@ async fn a_database_stuck_at_v25_recovers_on_the_next_start() {
         .fetch_one(&pool).await.unwrap();
     assert_eq!(kept, 1, "the rows copied before the failure must survive recovery");
 
+    cleanup(pool, path).await;
+}
+
+// v43 (the SSO tables) was on the main branch before sso_providers.trust_email
+// existed, so a database can already hold the table without the column. v44
+// must add it — and must be harmless where the column is already there.
+#[tokio::test]
+async fn a_v43_database_gains_the_trust_email_column() {
+    let (pool, path) = file_pool("v43").await;
+    scmserver::schema::initialize_database(&pool).await.unwrap();
+    scmserver::schema::run_migrations(&pool).await.unwrap();
+
+    // Put it back to how v43 left it: the table, a provider, no column.
+    let mut conn = pool.acquire().await.unwrap();
+    for q in [
+        "INSERT INTO sso_providers (tenant_id, enabled, name, issuer_url, client_id, client_secret)
+         VALUES ('default', 1, 'Existing', 'https://login.example.com', 'id', 'keep-me')",
+        "ALTER TABLE sso_providers DROP COLUMN trust_email",
+        "UPDATE schema_info SET version = 43",
+    ] {
+        sqlx::query(q).execute(&mut *conn).await.unwrap_or_else(|e| panic!("{q}: {e}"));
+    }
+    drop(conn);
+    let has_column = |pool: &SqlitePool| { let pool = pool.clone(); async move {
+        sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM pragma_table_info('sso_providers') WHERE name = 'trust_email'")
+            .fetch_one(&pool).await.unwrap() == 1
+    }};
+    assert!(!has_column(&pool).await);
+
+    scmserver::schema::run_migrations(&pool).await.expect("v43 → v44");
+    assert_eq!(version(&pool).await, CURRENT_SCHEMA_VERSION);
+    assert!(has_column(&pool).await);
+    let (enabled, secret, trust): (i64, String, i64) =
+        sqlx::query_as("SELECT enabled, client_secret, trust_email FROM sso_providers WHERE tenant_id = 'default'")
+            .fetch_one(&pool).await.unwrap();
+    assert_eq!((enabled, secret.as_str(), trust), (1, "keep-me", 0), "the existing provider is kept, with trust off");
+
+    // Running it again changes nothing.
+    scmserver::schema::run_migrations(&pool).await.expect("idempotent");
+    assert!(has_column(&pool).await);
     cleanup(pool, path).await;
 }

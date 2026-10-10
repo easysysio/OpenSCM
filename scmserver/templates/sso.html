@@ -85,6 +85,21 @@
                 </div>
               </div>
 
+              <div class="custom-control custom-checkbox mb-3">
+                <input type="checkbox" class="custom-control-input" id="trust_email" name="trust_email"
+                       {% if provider and provider.trust_email %}checked{% endif %}>
+                <label class="custom-control-label" for="trust_email">Trust email addresses from this provider</label>
+                <small class="form-text text-muted">
+                  The first time someone signs in, they are matched to their OpenSCM user by email address.
+                  Normally only an address the provider marks as <em>verified</em> is accepted. Some providers
+                  never say so &mdash; Microsoft Entra ID, by default &mdash; and then nobody can be matched.
+                  Tick this to accept the address anyway.
+                  <strong>Only do so if the provider is your own company directory, where administrators set
+                  email addresses.</strong> If people can choose their own address at the provider, leave it off:
+                  someone could enter a colleague's address and be signed in as them.
+                </small>
+              </div>
+
               <div class="custom-control custom-switch">
                 <input type="checkbox" class="custom-control-input" id="enabled" name="enabled"
                        {% if provider and provider.enabled %}checked{% endif %}>

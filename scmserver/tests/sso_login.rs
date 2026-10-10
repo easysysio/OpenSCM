@@ -554,6 +554,105 @@ async fn an_unverified_email_does_not_match_an_account() {
     assert!(w.sign_in(|c| c["email_verified"] = json!("true")).await.signed_in());
 }
 
+// ── "Trust email addresses from this provider" ──────────────────────────────
+// Some providers never send email_verified (Microsoft Entra ID's default ID
+// token, for one). With the verified-only rule none of their users could ever
+// be matched, so a tenant can say its provider's addresses are to be believed.
+async fn trust_provider_emails(w: &World) {
+    sqlx::query("UPDATE sso_providers SET trust_email = 1 WHERE tenant_id = 'acme'").execute(&w.pool).await.unwrap();
+}
+
+fn without_email_verified(c: &mut Value) {
+    c.as_object_mut().unwrap().remove("email_verified");
+}
+
+#[tokio::test]
+async fn a_trusted_provider_matches_by_email_when_it_says_nothing_about_verification() {
+    let w = world().await;
+    // Off (the default): a silent provider matches nobody.
+    w.refused(&w.sign_in(without_email_verified).await, "trust off", "has not verified the email").await;
+    assert_eq!(w.subject_of(20).await, None);
+
+    trust_provider_emails(&w).await;
+    let r = w.sign_in(without_email_verified).await;
+    assert!(r.signed_in(), "{}", r.message());
+    assert_eq!(w.whoami(&r.cookies["session"]).await.as_deref(), Some("bob:admin:acme"));
+    assert_eq!(w.subject_of(20).await.as_deref(), Some("idp-subject-bob"), "linked, as with a verified address");
+    // JSON null is "not stated", the same as absent.
+    sqlx::query("UPDATE users SET sso_subject = NULL WHERE id = 20").execute(&w.pool).await.unwrap();
+    assert!(w.sign_in(|c| c["email_verified"] = json!(null)).await.signed_in());
+}
+
+// Trusting a silent provider is not the same as overruling one that speaks.
+#[tokio::test]
+async fn a_trusted_provider_that_says_the_address_is_unverified_is_still_refused() {
+    let w = world().await;
+    trust_provider_emails(&w).await;
+    for stated in [json!(false), json!("false"), json!(0)] {
+        w.refused(&w.sign_in(move |c| c["email_verified"] = stated).await, "explicitly unverified", "has not verified the email").await;
+    }
+    assert_eq!(w.subject_of(20).await, None);
+    // And a verified address works exactly as before.
+    assert!(w.sign_in(|_| {}).await.signed_in());
+}
+
+// Trust changes only whether the address is believed. Every other rule holds.
+#[tokio::test]
+async fn trusting_a_provider_relaxes_nothing_else() {
+    let w = world().await;
+    trust_provider_emails(&w).await;
+
+    // Still no account → still refused, still nothing created.
+    let users = w.count("SELECT COUNT(*) FROM users").await;
+    w.refused(&w.sign_in(|c| { without_email_verified(c); c["sub"] = json!("x"); c["email"] = json!("stranger@acme.example"); }).await,
+              "no such user", "no user matches this subject or email").await;
+    assert_eq!(w.count("SELECT COUNT(*) FROM users").await, users);
+
+    // Still no email → nothing to match on.
+    w.refused(&w.sign_in(|c| { without_email_verified(c); c.as_object_mut().unwrap().remove("email"); }).await,
+              "no email", "has no email").await;
+
+    // Still never another tenant's user, even with their exact address.
+    w.refused(&w.sign_in(|c| { without_email_verified(c); c["sub"] = json!("y"); c["email"] = json!("gina@globex.example"); }).await,
+              "another tenant's address", "no user matches this subject or email").await;
+
+    // Still not an account already linked to a different identity.
+    assert!(w.sign_in(without_email_verified).await.signed_in());
+    w.refused(&w.sign_in(|c| { without_email_verified(c); c["sub"] = json!("someone-else"); }).await,
+              "linked account, other identity", "no user matches this subject or email").await;
+
+    // Still not a guess between two users.
+    sqlx::query("UPDATE users SET sso_subject = NULL WHERE id = 20").execute(&w.pool).await.unwrap();
+    sqlx::query("UPDATE users SET email = 'bob@acme.example' WHERE id = 21").execute(&w.pool).await.unwrap();
+    w.refused(&w.sign_in(without_email_verified).await, "shared address", "users share this email").await;
+
+    // And the token itself is checked as strictly as ever.
+    w.refused(&w.sign_in_as(Signer::Forged, without_email_verified).await, "forged", "InvalidSignature").await;
+}
+
+// The setting belongs to one tenant's provider.
+#[tokio::test]
+async fn trust_is_per_tenant() {
+    let w = world().await;
+    sqlx::query("INSERT INTO sso_providers (tenant_id, enabled, name, issuer_url, client_id, client_secret, trust_email)
+                 VALUES ('globex', 0, 'Globex', 'https://login.example.com', 'g', 's', 1)").execute(&w.pool).await.unwrap();
+    // globex trusts its provider; acme has not said so.
+    w.refused(&w.sign_in(without_email_verified).await, "acme did not opt in", "has not verified the email").await;
+}
+
+// A trusted address also counts as the account's email verification, or a
+// SaaS user who never confirmed theirs would be signed in and then turned away.
+#[tokio::test]
+async fn a_trusted_address_verifies_the_account_too() {
+    let w = world().await;
+    trust_provider_emails(&w).await;
+    sqlx::query("UPDATE users SET email_verified = 0 WHERE id = 20").execute(&w.pool).await.unwrap();
+    let r = w.sign_in(without_email_verified).await;
+    assert!(r.signed_in());
+    assert_eq!(w.count("SELECT email_verified FROM users WHERE id = 20").await, 1);
+    assert!(w.whoami(&r.cookies["session"]).await.is_some());
+}
+
 #[tokio::test]
 async fn an_address_shared_by_two_users_is_not_guessed_at() {
     let w = world().await;

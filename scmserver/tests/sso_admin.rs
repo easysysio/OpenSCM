@@ -176,6 +176,35 @@ async fn a_blank_secret_keeps_the_stored_one_and_a_new_one_replaces_it() {
                "one provider per tenant — saving updates it");
 }
 
+// "Trust email addresses" is a checkbox: on when ticked, and — like any
+// checkbox — off again when a later save does not include it.
+#[tokio::test]
+async fn the_trust_email_setting_is_stored_and_can_be_switched_off() {
+    let pool = db().await;
+    let base = [("name", "P"), ("issuer_url", "https://login.example.com"), ("client_id", "id"), ("client_secret", "s")];
+    let trust = |pool: &SqlitePool| { let pool = pool.clone(); async move {
+        sqlx::query_scalar::<_, i64>("SELECT trust_email FROM sso_providers WHERE tenant_id = 'default'").fetch_one(&pool).await.unwrap()
+    }};
+
+    save(&pool, admin("default"), &base).await;
+    assert_eq!(trust(&pool).await, 0, "off unless asked for");
+    assert!(!sso::load_provider(&pool, "default").await.unwrap().trust_email);
+
+    let mut on = base.to_vec();
+    on.push(("trust_email", "on"));
+    save(&pool, admin("default"), &on).await;
+    assert_eq!(trust(&pool).await, 1);
+    assert!(sso::load_provider(&pool, "default").await.unwrap().trust_email);
+
+    save(&pool, admin("default"), &base).await;
+    assert_eq!(trust(&pool).await, 0, "unticking it turns it off");
+
+    // The change is in the audit log: it widens who can be matched.
+    let details: Vec<String> = sqlx::query_scalar("SELECT details FROM audit_log WHERE action = 'sso.provider_save' ORDER BY id")
+        .fetch_all(&pool).await.unwrap();
+    assert!(details[1].contains("\"trust_email\":true") && details[2].contains("\"trust_email\":false"), "{details:?}");
+}
+
 #[tokio::test]
 async fn incomplete_or_malformed_input_is_refused() {
     let pool = db().await;

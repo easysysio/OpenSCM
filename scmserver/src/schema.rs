@@ -2867,6 +2867,31 @@ async fn run_migrations_on(pool: &SqlitePool) -> Result<(), sqlx::Error> {
         info!("Schema migration v42 → v43 complete.");
     }
 
+    // ─────────────────────────────────────────────────────────────────────
+    // v43 → v44: sso_providers.trust_email (0.10.0).
+    //
+    // A user's first single sign-on is matched to their account by email, and
+    // only an address the provider marks verified (`email_verified`) is
+    // believed. Some providers never send that claim — Microsoft Entra ID's
+    // default ID token among them — so nobody could ever be matched. When this
+    // is 1, an address from the provider is used even when the claim is
+    // absent: the tenant's statement that addresses in THEIR directory are
+    // set by its administrators, not chosen by users.
+    //
+    // A step of its own rather than a line in v43's CREATE TABLE: v43 was on
+    // the main branch before this was added, so a database may already have
+    // the table without the column.
+    // ─────────────────────────────────────────────────────────────────────
+    if version < 44 {
+        info!("Running schema migration v43 → v44 (sso_providers.trust_email)...");
+        if table_exists(pool, "sso_providers").await && !column_exists(pool, "sso_providers", "trust_email").await {
+            sqlx::query("ALTER TABLE sso_providers ADD COLUMN trust_email INTEGER NOT NULL DEFAULT 0")
+                .execute(pool).await?;
+        }
+        sqlx::query("UPDATE schema_info SET version = 44").execute(pool).await?;
+        info!("Schema migration v43 → v44 complete.");
+    }
+
     Ok(())
 }
 

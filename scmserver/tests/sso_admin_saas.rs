@@ -125,6 +125,22 @@ async fn the_page_shows_the_configuration_but_never_the_secret() {
     assert_eq!(stored(&pool, "acme").await.unwrap().2, "s3cr3t-VALUE-9f2");
 }
 
+#[tokio::test]
+async fn the_page_offers_trust_email_with_its_warning_and_shows_its_state() {
+    let pool = db().await;
+    let (_, html) = page(&pool, admin("acme")).await;
+    assert!(html.contains("Trust email addresses from this provider"));
+    assert!(html.contains("your own company directory"), "the condition for using it is stated");
+    assert!(html.contains("be signed in as them"), "and so is the risk");
+    let ticked = |h: &str| h.split("id=\"trust_email\"").nth(1).unwrap().split('>').next().unwrap().contains("checked");
+    assert!(!ticked(&html), "off by default");
+
+    let to = save(&pool, admin("acme"), &[("name", "P"), ("issuer_url", PUBLIC), ("client_id", "id"), ("client_secret", "s"), ("trust_email", "on")]).await;
+    assert!(to.contains("success_message"), "{to}");
+    let (_, html) = page(&pool, admin("acme")).await;
+    assert!(ticked(&html), "the page shows it is on");
+}
+
 // Through the real handler, not a hand-built context (the Alerts pages once
 // rendered their banner in a template test while the handlers never passed
 // the message along).

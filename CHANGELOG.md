@@ -10,13 +10,14 @@ All notable changes to OpenSCM are documented here.
 - **Single sign-on for OpenSCM SaaS.** An organization can connect its own identity provider — Microsoft Entra ID, Google Workspace, Okta, Auth0, Keycloak, or any other OpenID Connect provider — and its people can then sign in through it from the sign-in page.
     - **Set-up** is under **Settings → Single Sign-On** (Admin): enter the provider's issuer URL, client ID and client secret, use **Test connection** to check them, then enable. A provider is only switched on once it has answered correctly.
     - **Single sign-on confirms who someone is; it does not create accounts or assign roles.** Each user is still created in OpenSCM first. The first time someone signs in, they are matched to their user by a verified email address and linked to it; an administrator can **Unlink** a user from their edit page if the wrong person was linked.
+    - **For providers that do not report whether an address is verified** — Microsoft Entra ID, by default — there is a **Trust email addresses from this provider** option, off by default. It is meant for a company directory where administrators set the addresses.
     - **Passwords keep working**, so a misconfigured provider cannot lock an organization out.
     - Sign-ins, failures, configuration changes and unlinks are recorded in the audit log, which also gives the specific reason when a sign-in is refused.
 
   See the new [Single Sign-On guide](docs/guide/sso.md) for set-up, what removing someone at the provider does and does not do, and troubleshooting. **Community Edition is unchanged**: single sign-on is not offered there, and LDAP directories remain its way to use an existing directory.
 
 ### Changed
-- **Database schema v43.** Adds the tables single sign-on uses. They are created in every edition and stay empty in Community Edition. The upgrade is automatic.
+- **Database schema v44.** Adds the tables single sign-on uses (two steps, v43 and v44). They are created in every edition and stay empty in Community Edition. The upgrade is automatic.
 
 ---
 

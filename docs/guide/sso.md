@@ -54,16 +54,15 @@ The provider then gives you three things. Keep them for the next step.
 The application must be allowed to request the `openid`, `email` and `profile`
 scopes, and to use the **authorization code** flow.
 
-!!! warning "Your provider must send a verified email address"
+!!! warning "Check how your provider reports email addresses"
     The first time someone signs in, OpenSCM finds their account by **email
-    address**, and only trusts an address the provider marks as **verified**
-    (the `email_verified` claim). Without it the sign-in is refused — see
-    [The first sign-in](#the-first-sign-in) and
-    [Troubleshooting](#troubleshooting).
+    address**. Your provider must send the `email` claim in the ID token.
 
-    Check that your provider sends both `email` and `email_verified` in the ID
-    token. Some do not by default. Microsoft Entra ID in particular does not
-    include `email_verified` in its default ID token.
+    By default OpenSCM also requires the provider to mark the address as
+    **verified** (the `email_verified` claim). Some providers never send that
+    claim — Microsoft Entra ID's default ID token does not — and then every
+    first sign-in is refused. If yours is one of them, see
+    [Trusting your provider's email addresses](#trusting-your-providers-email-addresses).
 
 ### 2. Enter it in OpenSCM
 
@@ -75,6 +74,7 @@ Go to **Settings → Single Sign-On**.
 | **Issuer URL** | From your provider. Must be an `https://` address reachable from the internet |
 | **Client ID** | From your provider |
 | **Client secret** | From your provider. It is stored and never shown again; leave the field blank on later edits to keep it |
+| **Trust email addresses from this provider** | Off by default. See [below](#trusting-your-providers-email-addresses) before turning it on |
 
 Click **Save**. This stores the provider without switching it on.
 
@@ -93,6 +93,36 @@ correctly.
     says it is not set, SSO cannot be enabled until the platform operator sets
     it.
 
+### Trusting your provider's email addresses
+
+Matching a person to their OpenSCM user by email is only safe if the address
+really is theirs. That is what the provider's *verified* mark is for, and by
+default OpenSCM insists on it.
+
+Some providers do not send that mark at all. **Microsoft Entra ID is the common
+case**: its default ID token carries the address but says nothing about whether
+it is verified. With such a provider, tick **Trust email addresses from this
+provider** and OpenSCM accepts the address as it is.
+
+!!! danger "Only for a directory your administrators control"
+    Turn this on only when the provider is **your own company directory**,
+    where email addresses are set by your administrators.
+
+    Leave it off if people can choose or change their own address at the
+    provider. Someone could then enter a colleague's address and, the first
+    time they sign in, be linked to — and signed in as — that colleague.
+
+What it changes is narrow:
+
+- It applies only when the provider **says nothing** about verification. If the
+  provider explicitly reports an address as *not* verified, the sign-in is
+  still refused.
+- It affects only the **first** sign-in, when a person is matched to their
+  user. After that they are recognized by their link, not by email.
+- Every other rule in [The first sign-in](#the-first-sign-in) still applies.
+
+Turning it on or off is recorded in the audit log.
+
 ---
 
 ## Signing in
@@ -109,8 +139,10 @@ A session started this way is an ordinary OpenSCM session: it lasts the same
 
 The first time a person signs in through SSO, OpenSCM has to work out which of
 its users they are. It looks for the **one** user in your organization whose
-email address matches the verified address from your provider (letter case does
-not matter), and **links** that user to the person's identity at the provider.
+email address matches the address from your provider (letter case does not
+matter), and **links** that user to the person's identity at the provider. The
+address must be one the provider marks as verified, unless you have chosen to
+[trust your provider's addresses](#trusting-your-providers-email-addresses).
 
 From then on they are recognized by that link, not by email — so a later change
 of address at the provider does not affect them.
@@ -118,7 +150,8 @@ of address at the provider does not affect them.
 The sign-in is refused, and nothing is linked, when:
 
 - no user in your organization has that email address;
-- the provider does not say the address is verified;
+- the provider does not say the address is verified, and you have not chosen
+  to trust its addresses;
 - **two or more** users share that address — OpenSCM will not guess. Give each
   user a distinct email address in OpenSCM;
 - the only user with that address is already linked to a different identity.
@@ -177,7 +210,7 @@ entry whose details begin with `sso:`.
 | The sign-in page says | Likely cause | What to do |
 |---|---|---|
 | *Single sign-on is not set up for this organization.* | The organization name was mistyped, or SSO is not enabled | Check the name; an admin checks **Settings → Single Sign-On** shows **Enabled** |
-| *Your provider signed you in, but there is no OpenSCM account for you…* | No user matches (see [The first sign-in](#the-first-sign-in)) | An admin creates the user, or corrects their email address. If the audit log says the provider *has not verified the email*, configure your provider to send `email_verified` |
+| *Your provider signed you in, but there is no OpenSCM account for you…* | No user matches (see [The first sign-in](#the-first-sign-in)) | An admin creates the user, or corrects their email address. If the audit log says the provider *has not verified the email*, see [Trusting your provider's email addresses](#trusting-your-providers-email-addresses) |
 | *Sign-in was cancelled or refused at your provider.* | You cancelled, or you are not assigned to the application at the provider | Ask your provider's administrator to assign you to it |
 | *Single sign-on did not complete…* | Anything else — read the audit log entry | See below |
 | *This organization is suspended.* | The organization is suspended | Contact support |
