@@ -6,6 +6,10 @@ All notable changes to OpenSCM are documented here.
 
 ## [Unreleased]
 
+---
+
+## [0.10.0] - 2026-10-10
+
 ### Added
 - **Single sign-on for OpenSCM SaaS.** An organization can connect its own identity provider — Microsoft Entra ID, Google Workspace, Okta, Auth0, Keycloak, or any other OpenID Connect provider — and its people can then sign in through it from the sign-in page.
     - **Set-up** is under **Settings → Single Sign-On** (Admin): enter the provider's issuer URL, client ID and client secret, use **Test connection** to check them, then enable. A provider is only switched on once it has answered correctly.
