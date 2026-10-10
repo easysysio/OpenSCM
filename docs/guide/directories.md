@@ -11,7 +11,7 @@ login time).
     LDAP directories are available in **Community Edition (CE)** and
     **Enterprise Edition (EE)**. They are **disabled in SaaS mode** because
     the SaaS server can't reach into customer-internal networks. For SaaS,
-    use the upcoming OIDC/SAML SSO integration instead.
+    use [Single Sign-On](sso.md) (OpenID Connect) instead.
 
 ---
 
@@ -168,7 +168,7 @@ Then create a user with:
 
 - **Auto-provisioning** — directory users still need to be created manually in OpenSCM with a role assigned. JIT provisioning on first successful bind is a possible future addition.
 - **Group → role mapping** — there's no automatic sync from LDAP groups to OpenSCM roles. Assign roles per user.
-- **OIDC / SAML SSO** — separate feature tracked in the roadmap; will use browser-mediated federation rather than direct LDAP bind. Suitable for SaaS deployments.
+- **Single sign-on in Community Edition** — OpenID Connect [Single Sign-On](sso.md) is available in SaaS; it is not offered in CE. SAML is not supported in either.
 - **Kerberos / GSSAPI bind** — only simple bind is supported in v1.
 - **Field-level encryption** of the bind password in the DB.
 - **Certificate pinning** beyond the "verify normally / skip entirely" toggle.

@@ -198,6 +198,7 @@ these take effect **immediately**, without waiting for the session to expire:
 | Role changed | The new role applies from the next page load |
 | Password changed or reset | All of that user's sessions end — except, when users change their own password, the browser they did it from |
 | Organization suspended (SaaS) | All sessions in that organization end |
+| Single sign-on identity unlinked (SaaS) | All of that user's sessions end — except, when admins unlink their own account, the browser they did it from |
 
 !!! note "Secure cookies"
     The session cookie is marked **Secure** (sent only over HTTPS) when the
