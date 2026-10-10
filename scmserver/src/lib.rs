@@ -454,6 +454,8 @@ pub fn create_core_router(state: AppState, cookie_key: axum_extra::extract::cook
         .route("/admin/directories/test/{id}",    post(directories::test))
         // Single sign-on: the tenant's OpenID Connect provider. Admin only —
         // it holds a client secret and names a URL the server will fetch.
+        // SaaS only in 0.10.0: registered here because the code is shared, but
+        // each handler turns the request away in any other edition.
         .route("/admin/sso",          get(sso::sso_page))
         .route("/admin/sso/save",     post(sso::sso_save))
         .route("/admin/sso/test",     post(sso::sso_test))

@@ -6,9 +6,20 @@
 // provider is built on top of this.
 //
 // Configuring a provider is Admin work: it holds a client secret, and it names
-// a URL the server will fetch. That URL is tenant-supplied, so in SaaS every
-// request to it goes through net_guard (https, public addresses only, pinned,
-// no redirects); a self-hosted server may federate with an internal provider.
+// a URL the server will fetch. That URL is tenant-supplied, so every request to
+// it goes through net_guard (https, public addresses only, pinned, no
+// redirects).
+//
+// SaaS ONLY in 0.10.0. The code is here, in the crate both editions share, but
+// the routes answer only in SaaS mode (see `unavailable`). Community Edition
+// has LDAP for directory sign-in; opening SSO to it later means removing that
+// gate and adding its sign-in button. Withdrawing a feature people have
+// configured is not possible in the same way, so it starts closed.
+//
+// Each handler is a thin entry point — edition, then role — around a function
+// that takes the URL strictness as a parameter (save_provider, test_provider).
+// In production that parameter is always "strict"; it exists so the logic can
+// be tested against a provider on a local port.
 //
 // See docs/design/0.10.0-sso.md.
 // =============================================================================
@@ -227,9 +238,23 @@ fn back(kind: &str, msg: &str) -> Response {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Helper: unavailable
+// Single sign-on is offered in SaaS only (see the top of this file). In any
+// other edition every route here answers with this, before looking at who is
+// asking — the mirror image of how LDAP directories are closed in SaaS.
+// ─────────────────────────────────────────────────────────────────────────────
+fn unavailable() -> Option<Response> {
+    if is_saas_mode() {
+        None
+    } else {
+        Some(Redirect::to("/?error_message=Single+sign-on+is+not+available+in+this+edition").into_response())
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // GET /admin/sso
 // The provider configuration page.
-// Role: Admin.
+// Role: Admin. SaaS only.
 // ─────────────────────────────────────────────────────────────────────────────
 pub async fn sso_page(
     auth: AuthSession,
@@ -237,6 +262,9 @@ pub async fn sso_page(
     pool: Extension<SqlitePool>,
     tera: Extension<Arc<Tera>>,
 ) -> impl IntoResponse {
+    if let Some(r) = unavailable() {
+        return r;
+    }
     if let Some(redir) = auth::authorize(&auth.role, UserRole::Admin) {
         return redir;
     }
@@ -254,7 +282,6 @@ pub async fn sso_page(
         ctx.insert("provider", &p);
     }
     ctx.insert("redirect_uri", &redirect_uri(&pool).await);
-    ctx.insert("strict_urls", &is_saas_mode());
     render_template(&tera, Some(&pool), "sso.html", ctx, Some(auth))
         .await
         .into_response()
@@ -262,14 +289,8 @@ pub async fn sso_page(
 
 // ─────────────────────────────────────────────────────────────────────────────
 // POST /admin/sso/save
-// Creates or updates the tenant's provider.
-//
-// A blank client secret means "leave it alone", not "clear it": the page never
-// sends the stored value back, so an edit that does not retype it must not
-// wipe it. Enabling requires that the provider can actually be reached and
-// describes itself correctly — otherwise the sign-in page would offer a button
-// that cannot work, to people who are not the one who mistyped the URL.
-// Role: Admin.
+// Creates or updates the tenant's provider. See save_provider.
+// Role: Admin. SaaS only.
 // ─────────────────────────────────────────────────────────────────────────────
 pub async fn sso_save(
     auth: AuthSession,
@@ -277,11 +298,41 @@ pub async fn sso_save(
     ip: ClientIp,
     raw: RawForm,
 ) -> impl IntoResponse {
+    if let Some(r) = unavailable() {
+        return r;
+    }
     if let Some(redir) = auth::authorize(&auth.role, UserRole::Admin) {
         return redir;
     }
     let body = String::from_utf8_lossy(&raw.0).to_string();
-    let form = parse_form_data(&body);
+    match save_provider(&pool, &auth, ip.as_str(), &body, true).await {
+        Ok(msg) => back("success", msg),
+        Err(msg) => back("error", &msg),
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Public: save_provider
+// Validates and stores the tenant's provider from a posted form body. Ok is the
+// confirmation to show, Err the reason it was refused.
+//
+// A blank client secret means "leave it alone", not "clear it": the page never
+// sends the stored value back, so an edit that does not retype it must not
+// wipe it. Enabling requires that the provider can actually be reached and
+// describes itself correctly — otherwise the sign-in page would offer a button
+// that cannot work, to people who are not the one who mistyped the URL.
+//
+// `strict` selects the URL rules (see net_guard::check_url). The route always
+// passes true. The caller has already checked the role.
+// ─────────────────────────────────────────────────────────────────────────────
+pub async fn save_provider(
+    pool: &SqlitePool,
+    auth: &AuthSession,
+    ip: &str,
+    form_body: &str,
+    strict: bool,
+) -> Result<&'static str, String> {
+    let form = parse_form_data(form_body);
     let get = |k: &str| form.get(k).and_then(|v| v.first()).map(|s| s.trim().to_string()).unwrap_or_default();
 
     let name = get("name");
@@ -289,53 +340,44 @@ pub async fn sso_save(
     let client_id = get("client_id");
     let new_secret = get("client_secret");
     let enabled = get("enabled") == "on";
-    let strict = is_saas_mode();
 
     if name.is_empty() || name.chars().count() > 100 {
-        return back("error", "Give the provider a display name of up to 100 characters");
+        return Err("Give the provider a display name of up to 100 characters".into());
     }
     if client_id.is_empty() {
-        return back("error", "The client ID is required");
+        return Err("The client ID is required".into());
     }
     let issuer_for_check = issuer.clone();
-    let checked = tokio::task::spawn_blocking(move || {
-        crate::net_guard::check_url(&issuer_for_check, strict, "Issuer URL")
-    })
-    .await;
-    match checked {
-        Ok(Ok(_)) => {}
-        Ok(Err(e)) => return back("error", &e),
-        Err(_) => return back("error", "The Issuer URL could not be checked"),
-    }
+    tokio::task::spawn_blocking(move || crate::net_guard::check_url(&issuer_for_check, strict, "Issuer URL"))
+        .await
+        .map_err(|_| "The Issuer URL could not be checked".to_string())??;
 
-    let existing = load_provider(&pool, &auth.tenant_id).await;
+    let existing = load_provider(pool, &auth.tenant_id).await;
     let secret = if !new_secret.is_empty() {
         new_secret
     } else {
-        match existing.as_ref().map(|p| p.client_secret.clone()).filter(|s| !s.is_empty()) {
-            Some(kept) => kept,
-            None => return back("error", "The client secret is required"),
-        }
+        existing
+            .as_ref()
+            .map(|p| p.client_secret.clone())
+            .filter(|s| !s.is_empty())
+            .ok_or_else(|| "The client secret is required".to_string())?
     };
 
     if enabled {
         // Without an App URL there is no callback address: the provider would
         // have nowhere to send a user back to, and sign-in could never finish.
-        if redirect_uri(&pool).await.is_none() {
-            return back(
-                "error",
-                "Not enabled — set the App URL (Settings → Email) first. It is the address your provider sends users back to.",
-            );
+        if redirect_uri(pool).await.is_none() {
+            return Err("Not enabled — set the App URL (Settings → Email) first. \
+                        It is the address your provider sends users back to.".into());
         }
         if let Err(e) = discover(&issuer, strict).await {
-            return back(
-                "error",
-                &format!("Not enabled — the provider could not be verified. {e} Save it disabled, or correct it."),
-            );
+            return Err(format!(
+                "Not enabled — the provider could not be verified. {e} Save it disabled, or correct it."
+            ));
         }
     }
 
-    let saved = sqlx::query(
+    sqlx::query(
         "INSERT INTO sso_providers (tenant_id, enabled, name, issuer_url, client_id, client_secret)
          VALUES (?, ?, ?, ?, ?, ?)
          ON CONFLICT(tenant_id) DO UPDATE SET
@@ -349,72 +391,87 @@ pub async fn sso_save(
     .bind(&issuer)
     .bind(&client_id)
     .bind(&secret)
-    .execute(&*pool)
-    .await;
-    if let Err(e) = saved {
+    .execute(pool)
+    .await
+    .map_err(|e| {
         warn!("Failed to save SSO provider for tenant '{}': {}", auth.tenant_id, e);
-        return back("error", "Could not save the provider");
-    }
+        "Could not save the provider".to_string()
+    })?;
 
     info!("SSO provider saved for tenant '{}' by '{}' (enabled: {})", auth.tenant_id, auth.username, enabled);
     crate::audit::record(
-        &pool, &auth.tenant_id, Some(&auth), Some(ip.as_str()),
+        pool, &auth.tenant_id, Some(auth), Some(ip),
         "sso.provider_save", Some("sso_provider"), None,
         Some(&serde_json::json!({ "issuer": issuer, "enabled": enabled }).to_string()),
     ).await;
-    back("success", if enabled { "Provider saved and enabled" } else { "Provider saved (not enabled)" })
+    Ok(if enabled { "Provider saved and enabled" } else { "Provider saved (not enabled)" })
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
 // POST /admin/sso/test
-// Fetches the saved provider's discovery document and reports what it found.
-// A wrong issuer is otherwise invisible until someone cannot sign in — and
-// that someone is not the person who typed it.
-// Role: Admin.
+// Contacts the saved provider and reports what it found. See test_provider.
+// Role: Admin. SaaS only.
 // ─────────────────────────────────────────────────────────────────────────────
 pub async fn sso_test(
     auth: AuthSession,
     pool: Extension<SqlitePool>,
     ip: ClientIp,
 ) -> impl IntoResponse {
+    if let Some(r) = unavailable() {
+        return r;
+    }
     if let Some(redir) = auth::authorize(&auth.role, UserRole::Admin) {
         return redir;
     }
-    let Some(p) = load_provider(&pool, &auth.tenant_id).await else {
-        return back("error", "Save a provider first");
-    };
-    let result = discover(&p.issuer_url, is_saas_mode()).await;
+    match test_provider(&pool, &auth, ip.as_str(), true).await {
+        Ok(msg) => back("success", &msg),
+        Err(msg) => back("error", &msg),
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Public: test_provider
+// Fetches the saved provider's discovery document and says what it found. A
+// wrong issuer is otherwise invisible until someone cannot sign in — and that
+// someone is not the person who typed it. Audited either way.
+// ─────────────────────────────────────────────────────────────────────────────
+pub async fn test_provider(
+    pool: &SqlitePool,
+    auth: &AuthSession,
+    ip: &str,
+    strict: bool,
+) -> Result<String, String> {
+    let p = load_provider(pool, &auth.tenant_id)
+        .await
+        .ok_or_else(|| "Save a provider first".to_string())?;
+    let result = discover(&p.issuer_url, strict).await;
     crate::audit::record(
-        &pool, &auth.tenant_id, Some(&auth), Some(ip.as_str()),
+        pool, &auth.tenant_id, Some(auth), Some(ip),
         if result.is_ok() { "sso.provider_test_success" } else { "sso.provider_test_failure" },
         Some("sso_provider"), Some(&p.id.to_string()),
         result.as_ref().err().map(|e| serde_json::json!({ "error": e }).to_string()).as_deref(),
     ).await;
-    match result {
-        Ok(doc) => {
-            let host = |u: &str| reqwest::Url::parse(u).ok().and_then(|x| x.host_str().map(str::to_string)).unwrap_or_default();
-            back(
-                "success",
-                &format!(
-                    "The provider answered and identifies itself as {}. Sign-in goes to {}; tokens come from {}.",
-                    doc.issuer, host(&doc.authorization_endpoint), host(&doc.token_endpoint)
-                ),
-            )
-        }
-        Err(e) => back("error", &e),
-    }
+    let doc = result?;
+    let host = |u: &str| reqwest::Url::parse(u).ok().and_then(|x| x.host_str().map(str::to_string)).unwrap_or_default();
+    Ok(format!(
+        "The provider answered and identifies itself as {}. Sign-in goes to {}; tokens come from {}.",
+        doc.issuer, host(&doc.authorization_endpoint), host(&doc.token_endpoint)
+    ))
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
 // POST /admin/sso/disable
 // Turns single sign-on off for the tenant; the configuration is kept.
-// Role: Admin.
+// Role: Admin. SaaS only.
 // ─────────────────────────────────────────────────────────────────────────────
 pub async fn sso_disable(
     auth: AuthSession,
     pool: Extension<SqlitePool>,
     ip: ClientIp,
 ) -> impl IntoResponse {
+    if let Some(r) = unavailable() {
+        return r;
+    }
     if let Some(redir) = auth::authorize(&auth.role, UserRole::Admin) {
         return redir;
     }

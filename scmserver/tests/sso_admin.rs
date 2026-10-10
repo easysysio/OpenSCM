@@ -1,14 +1,21 @@
-// sso_admin.rs — configuring a tenant's single sign-on provider.
+// sso_admin.rs — the logic of configuring a single sign-on provider.
 //
-// The provider page holds a client secret and names a URL the server will
-// fetch, so the things pinned here are: who may touch it, that one tenant
-// cannot reach another's, that the secret never comes back out, and that a
-// provider is only switched on once it has answered and described itself
-// correctly — checked against a fake provider running inside the test.
+// Single sign-on is SaaS-only in 0.10.0, so its routes answer only in SaaS
+// mode, where a provider must be a public https address. A test cannot stand
+// up one of those. The routes are therefore thin entry points around
+// save_provider / test_provider / discover, which take the URL strictness as a
+// parameter, and THIS file tests that logic with the relaxed rules against a
+// fake provider on a local port: what is stored, that a blank secret keeps the
+// old one, that one tenant's provider is not another's, and that a provider is
+// only switched on once it has answered and described itself correctly.
 //
-// The SaaS-only URL rules are in sso_admin_saas.rs (SaaS mode is process-wide).
+// This process runs in Community Edition mode, so it also holds the test that
+// CE turns every SSO route away. The routes themselves — roles, the page, the
+// strict URL rules — are tested in sso_admin_saas.rs (SaaS mode is a
+// process-wide switch).
 
 use axum::extract::{Extension, Query, RawForm};
+use axum::http::StatusCode;
 use axum::response::IntoResponse;
 use axum::routing::get;
 use axum::Router;
@@ -50,22 +57,29 @@ fn ip() -> ClientIp { ClientIp("127.0.0.1".into()) }
 
 fn location(resp: axum::response::Response) -> String {
     let raw = resp.headers().get("location").expect("a redirect").to_str().unwrap().to_string();
-    urlencoding::decode(&raw).unwrap().into_owned()
+    // '+' is a space in a query string.
+    urlencoding::decode(&raw.replace('+', " ")).unwrap().into_owned()
 }
 
+fn form_body(fields: &[(&str, &str)]) -> String {
+    fields.iter().map(|(k, v)| format!("{k}={}", urlencoding::encode(v))).collect::<Vec<_>>().join("&")
+}
+
+// save_provider with the relaxed URL rules. The result is rendered the way the
+// route renders it — "success_message: …" / "error_message: …" — so the
+// assertions read the same as they would against the route.
 async fn save(pool: &SqlitePool, who: AuthSession, fields: &[(&str, &str)]) -> String {
-    let body = fields.iter().map(|(k, v)| format!("{k}={}", urlencoding::encode(v))).collect::<Vec<_>>().join("&");
-    location(sso::sso_save(who, Extension(pool.clone()), ip(), RawForm(body.into())).await.into_response())
+    match sso::save_provider(pool, &who, "127.0.0.1", &form_body(fields), false).await {
+        Ok(m) => format!("success_message: {m}"),
+        Err(m) => format!("error_message: {m}"),
+    }
 }
 
-async fn page(pool: &SqlitePool, who: AuthSession) -> (axum::http::StatusCode, String) {
-    let tera = Arc::new(scmserver::init_tera().unwrap());
-    let resp = sso::sso_page(who, Query(serde_json::from_value(json!({})).unwrap()), Extension(pool.clone()), Extension(tera))
-        .await
-        .into_response();
-    let status = resp.status();
-    let bytes = axum::body::to_bytes(resp.into_body(), 1 << 22).await.unwrap();
-    (status, String::from_utf8_lossy(&bytes).to_string())
+async fn test(pool: &SqlitePool, who: AuthSession) -> String {
+    match sso::test_provider(pool, &who, "127.0.0.1", false).await {
+        Ok(m) => format!("success_message: {m}"),
+        Err(m) => format!("error_message: {m}"),
+    }
 }
 
 async fn stored(pool: &SqlitePool, tenant: &str) -> Option<(i64, String, String, String, String)> {
@@ -112,23 +126,6 @@ async fn dead_address() -> String {
     url
 }
 
-// ── the page ────────────────────────────────────────────────────────────────
-#[tokio::test]
-async fn the_page_renders_before_anything_is_configured() {
-    let pool = db().await;
-    let (status, html) = page(&pool, admin("default")).await;
-    assert_eq!(status, 200);
-    assert!(html.contains("Not configured"));
-    // No App URL yet: there is no callback address to give the provider.
-    assert!(html.contains("App URL") && html.contains("is not set"), "missing App URL warning");
-
-    sqlx::query("INSERT OR REPLACE INTO settings (tenant_id, skey, value) VALUES ('default', 'app_url', 'https://scm.example.com/')")
-        .execute(&pool).await.unwrap();
-    let (_, html) = page(&pool, admin("default")).await;
-    assert!(html.contains("https:&#x2F;&#x2F;scm.example.com&#x2F;auth&#x2F;sso&#x2F;callback")
-            || html.contains("https://scm.example.com/auth/sso/callback"), "redirect URI not shown");
-}
-
 // The redirect URI comes from the platform App URL for every tenant.
 #[tokio::test]
 async fn the_redirect_uri_is_the_installations_for_every_tenant() {
@@ -141,7 +138,7 @@ async fn the_redirect_uri_is_the_installations_for_every_tenant() {
 
 // ── saving ──────────────────────────────────────────────────────────────────
 #[tokio::test]
-async fn the_client_secret_is_stored_and_never_sent_back() {
+async fn the_client_secret_is_stored_and_never_serialised() {
     let pool = db().await;
     let to = save(&pool, admin("default"), &[
         ("name", "Acme Entra ID"), ("issuer_url", "https://login.example.com/tenant/v2.0/"),
@@ -154,11 +151,11 @@ async fn the_client_secret_is_stored_and_never_sent_back() {
                      "abc-123".into(), "s3cr3t-VALUE-9f2".into()),
                "stored disabled, issuer without its trailing slash");
 
-    let (_, html) = page(&pool, admin("default")).await;
-    assert!(!html.contains("s3cr3t-VALUE-9f2"), "the secret must never appear in the page");
-    assert!(html.contains("leave blank to keep the stored secret"));
-    assert!(html.contains("abc-123") && html.contains("Acme Entra ID"), "the rest of the configuration is shown");
-    assert!(html.contains("Saved, not enabled"));
+    // What a page is built from carries no secret at all.
+    let p = sso::load_provider(&pool, "default").await.unwrap();
+    let shown = serde_json::to_string(&p).unwrap();
+    assert!(!shown.contains("s3cr3t-VALUE-9f2") && !shown.contains("client_secret"), "{shown}");
+    assert!(shown.contains("abc-123") && shown.contains("Acme Entra ID"));
 }
 
 #[tokio::test]
@@ -229,8 +226,7 @@ async fn a_provider_that_answers_correctly_can_be_enabled() {
     let to = save(&pool, admin("default"), &enable(&idp)).await;
     assert!(to.contains("success_message") && to.contains("enabled"), "{to}");
     assert_eq!(stored(&pool, "default").await.unwrap().0, 1);
-    let (_, html) = page(&pool, admin("default")).await;
-    assert!(html.contains(">Enabled<"));
+    assert!(sso::load_provider(&pool, "default").await.unwrap().enabled);
 }
 
 #[tokio::test]
@@ -329,50 +325,34 @@ async fn strict_discovery_refuses_internal_and_plain_http_issuers() {
     }
 }
 
-// ── test + disable ──────────────────────────────────────────────────────────
+// ── test connection ─────────────────────────────────────────────────────────
 #[tokio::test]
 async fn test_connection_reports_what_the_provider_said() {
     let pool = db().await;
-    let to = location(sso::sso_test(admin("default"), Extension(pool.clone()), ip()).await.into_response());
-    assert!(to.contains("Save a provider first"), "{to}");
+    assert!(test(&pool, admin("default")).await.contains("Save a provider first"));
 
     let idp = good_provider().await;
     let mut off = enable(&idp);
     off.pop();
     save(&pool, admin("default"), &off).await;
-    let to = location(sso::sso_test(admin("default"), Extension(pool.clone()), ip()).await.into_response());
-    assert!(to.contains("success_message") && to.contains(&idp) && to.contains("127.0.0.1"), "{to}");
+    let said = test(&pool, admin("default")).await;
+    assert!(said.contains("success_message") && said.contains(&idp) && said.contains("127.0.0.1"), "{said}");
     assert_eq!(stored(&pool, "default").await.unwrap().0, 0, "testing does not enable");
 
     // Point it at nothing and test again.
     let dead = dead_address().await;
     sqlx::query("UPDATE sso_providers SET issuer_url = ?").bind(&dead).execute(&pool).await.unwrap();
-    let to = location(sso::sso_test(admin("default"), Extension(pool.clone()), ip()).await.into_response());
-    assert!(to.contains("error_message") && to.contains("Could not connect"), "{to}");
+    let said = test(&pool, admin("default")).await;
+    assert!(said.contains("error_message") && said.contains("Could not connect"), "{said}");
 
     let audited: Vec<String> = sqlx::query_scalar("SELECT action FROM audit_log WHERE action LIKE 'sso.%' ORDER BY id")
         .fetch_all(&pool).await.unwrap();
     assert_eq!(audited, ["sso.provider_save", "sso.provider_test_success", "sso.provider_test_failure"]);
 }
 
+// ── one tenant, one provider ────────────────────────────────────────────────
 #[tokio::test]
-async fn disabling_turns_it_off_and_keeps_the_configuration() {
-    let pool = db().await;
-    set_app_url(&pool).await;
-    let to = location(sso::sso_disable(admin("default"), Extension(pool.clone()), ip()).await.into_response());
-    assert!(to.contains("No provider is configured"), "{to}");
-
-    let idp = good_provider().await;
-    save(&pool, admin("default"), &enable(&idp)).await;
-    let to = location(sso::sso_disable(admin("default"), Extension(pool.clone()), ip()).await.into_response());
-    assert!(to.contains("success_message"), "{to}");
-    let row = stored(&pool, "default").await.unwrap();
-    assert_eq!((row.0, row.2.as_str(), row.4.as_str()), (0, idp.as_str(), "s"));
-}
-
-// ── who may do this, and to whom ────────────────────────────────────────────
-#[tokio::test]
-async fn one_tenant_cannot_see_or_change_anothers_provider() {
+async fn one_tenants_provider_is_not_anothers() {
     let pool = db().await;
     set_app_url(&pool).await;
     let idp = good_provider().await;
@@ -380,43 +360,47 @@ async fn one_tenant_cannot_see_or_change_anothers_provider() {
     acme[3] = ("client_secret", "acme-secret");
     save(&pool, admin("acme"), &acme).await;
 
-    let (_, html) = page(&pool, admin("default")).await;
-    assert!(html.contains("Not configured") && !html.contains(&idp), "default must not see acme's provider");
+    assert!(sso::load_provider(&pool, "default").await.is_none(), "default has no provider");
+    assert!(test(&pool, admin("default")).await.contains("Save a provider first"), "and cannot test acme's");
 
     // default's save creates its own row and leaves acme's alone.
     save(&pool, admin("default"), &[("name", "Mine"), ("issuer_url", "https://login.example.com"), ("client_id", "d"), ("client_secret", "default-secret")]).await;
-    location(sso::sso_disable(admin("default"), Extension(pool.clone()), ip()).await.into_response());
     let a = stored(&pool, "acme").await.unwrap();
     assert_eq!((a.0, a.2.as_str(), a.4.as_str()), (1, idp.as_str(), "acme-secret"), "acme's provider is untouched and still enabled");
+    let d = stored(&pool, "default").await.unwrap();
+    assert_eq!((d.0, d.4.as_str()), (0, "default-secret"));
+    // A blank secret on default's form keeps DEFAULT's secret, never acme's.
+    save(&pool, admin("default"), &[("name", "Mine"), ("issuer_url", "https://login.example.com"), ("client_id", "d"), ("client_secret", "")]).await;
     assert_eq!(stored(&pool, "default").await.unwrap().4, "default-secret");
 }
 
+// ── Community Edition ───────────────────────────────────────────────────────
+// Single sign-on is offered in SaaS only. In CE every route turns the request
+// away — for an administrator too — and changes nothing.
 #[tokio::test]
-async fn only_an_admin_may_configure_single_sign_on() {
+async fn community_edition_turns_every_sso_route_away() {
     let pool = db().await;
-    for role in ["viewer", "runner", "editor"] {
-        let who = || user("default", role);
-        let (status, _) = page(&pool, who()).await;
-        assert!(status.is_redirection(), "{role} must not see the page");
-        let to = save(&pool, who(), &[("name", "P"), ("issuer_url", "https://login.example.com"), ("client_id", "id"), ("client_secret", "s")]).await;
-        assert!(to.contains("Unauthorized"), "{role} save → {to}");
-        assert!(location(sso::sso_test(who(), Extension(pool.clone()), ip()).await.into_response()).contains("Unauthorized"));
-        assert!(location(sso::sso_disable(who(), Extension(pool.clone()), ip()).await.into_response()).contains("Unauthorized"));
-    }
-    assert!(stored(&pool, "default").await.is_none());
-}
-
-// Through the real handler, not a hand-built context: a message in the URL
-// must reach the page. (The Alerts pages rendered their banner correctly in a
-// template test while the handlers never passed the message along.)
-#[tokio::test]
-async fn flash_messages_in_the_url_reach_the_page() {
-    let pool = db().await;
+    assert!(!scmserver::handlers::is_saas_mode(), "this test file must run in CE mode");
+    // A provider row, as if left over from a SaaS database or a future edition.
+    sqlx::query("INSERT INTO sso_providers (tenant_id, enabled, name, issuer_url, client_id, client_secret)
+                 VALUES ('default', 1, 'Leftover', 'https://login.example.com', 'id', 'leftover-secret')")
+        .execute(&pool).await.unwrap();
     let tera = Arc::new(scmserver::init_tera().unwrap());
-    for (param, class) in [("error_message", "alert-danger"), ("success_message", "alert-success")] {
-        let q = serde_json::from_value(json!({ param: "PROBE-7c1 was shown" })).unwrap();
-        let resp = sso::sso_page(admin("default"), Query(q), Extension(pool.clone()), Extension(tera.clone())).await.into_response();
-        let html = String::from_utf8_lossy(&axum::body::to_bytes(resp.into_body(), 1 << 22).await.unwrap()).to_string();
-        assert!(html.contains("PROBE-7c1 was shown") && html.contains(class), "{param} not rendered");
-    }
+    let not_here = "not available in this edition";
+
+    let resp = sso::sso_page(admin("default"), Query(serde_json::from_value(json!({})).unwrap()),
+                             Extension(pool.clone()), Extension(tera)).await.into_response();
+    assert_eq!(resp.status(), StatusCode::SEE_OTHER, "the page must not render in CE");
+    assert!(location(resp).contains(not_here));
+
+    let body = form_body(&[("name", "P"), ("issuer_url", "https://8.8.8.8"), ("client_id", "x"), ("client_secret", "new-secret")]);
+    let to = location(sso::sso_save(admin("default"), Extension(pool.clone()), ip(), RawForm(body.into())).await.into_response());
+    assert!(to.contains(not_here), "{to}");
+    assert!(location(sso::sso_test(admin("default"), Extension(pool.clone()), ip()).await.into_response()).contains(not_here));
+    assert!(location(sso::sso_disable(admin("default"), Extension(pool.clone()), ip()).await.into_response()).contains(not_here));
+
+    let row = stored(&pool, "default").await.unwrap();
+    assert_eq!((row.0, row.1.as_str(), row.4.as_str()), (1, "Leftover", "leftover-secret"), "nothing may change");
+    let audited: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM audit_log WHERE action LIKE 'sso.%'").fetch_one(&pool).await.unwrap();
+    assert_eq!(audited, 0);
 }
