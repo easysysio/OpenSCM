@@ -126,11 +126,18 @@ pub struct Discovery {
     pub jwks_uri: String,
     #[serde(default)]
     pub id_token_signing_alg_values_supported: Vec<String>,
+    /// How the provider wants the client to authenticate at the token
+    /// endpoint. Absent means client_secret_basic (OpenID Connect Discovery).
+    #[serde(default)]
+    pub token_endpoint_auth_methods_supported: Vec<String>,
 }
 
-/// ID-token signature algorithms this server can verify.
-pub const SUPPORTED_ALGS: [&str; 10] = [
-    "RS256", "RS384", "RS512", "PS256", "PS384", "PS512", "ES256", "ES384", "EdDSA", "ES256K",
+/// ID-token signature algorithms this server can verify — the asymmetric ones
+/// jsonwebtoken implements on ring. Deliberately no HS* (a shared-secret
+/// "signature" made with the client secret proves nothing about the provider)
+/// and no "none".
+pub const SUPPORTED_ALGS: [&str; 9] = [
+    "RS256", "RS384", "RS512", "PS256", "PS384", "PS512", "ES256", "ES384", "EdDSA",
 ];
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -138,7 +145,7 @@ pub const SUPPORTED_ALGS: [&str; 10] = [
 // GETs a tenant-supplied URL through net_guard and returns the body, capped.
 // The DNS lookup inside check_url blocks, so it runs off the async threads.
 // ─────────────────────────────────────────────────────────────────────────────
-async fn guarded_get(url: &str, strict: bool, what: &'static str) -> Result<Vec<u8>, String> {
+pub(crate) async fn guarded_get(url: &str, strict: bool, what: &'static str) -> Result<Vec<u8>, String> {
     let owned = url.to_string();
     let target = tokio::task::spawn_blocking(move || crate::net_guard::check_url(&owned, strict, what))
         .await
@@ -227,6 +234,54 @@ pub async fn discover(issuer_url: &str, strict: bool) -> Result<Discovery, Strin
     }
 
     Ok(doc)
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Discovery cache
+//
+// Signing in needs the provider's discovery document every time. Fetching it
+// on every sign-in would be an outbound request per click of a public button,
+// so a verified document is kept for CACHE_TTL. Saving a provider drops its
+// entry, so a corrected configuration takes effect at once.
+//
+// Only the DOCUMENT is cached. The addresses in it are still checked by
+// net_guard immediately before each request made to them.
+// ─────────────────────────────────────────────────────────────────────────────
+pub(crate) const CACHE_TTL: Duration = Duration::from_secs(600);
+
+type DiscoveryCache = std::sync::Mutex<std::collections::HashMap<(String, bool), (std::time::Instant, Discovery)>>;
+static DISCOVERY_CACHE: std::sync::LazyLock<DiscoveryCache> =
+    std::sync::LazyLock::new(|| std::sync::Mutex::new(std::collections::HashMap::new()));
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Public: discover_cached
+// discover(), remembered for CACHE_TTL. Failures are not cached.
+// ─────────────────────────────────────────────────────────────────────────────
+pub async fn discover_cached(issuer_url: &str, strict: bool) -> Result<Discovery, String> {
+    let key = (normalize_issuer(issuer_url), strict);
+    if let Ok(cache) = DISCOVERY_CACHE.lock() {
+        if let Some((at, doc)) = cache.get(&key) {
+            if at.elapsed() < CACHE_TTL {
+                return Ok(doc.clone());
+            }
+        }
+    }
+    let doc = discover(issuer_url, strict).await?;
+    if let Ok(mut cache) = DISCOVERY_CACHE.lock() {
+        cache.insert(key, (std::time::Instant::now(), doc.clone()));
+    }
+    Ok(doc)
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Helper: forget_discovery
+// Drops an issuer's cached document (both strictness variants).
+// ─────────────────────────────────────────────────────────────────────────────
+pub(crate) fn forget_discovery(issuer_url: &str) {
+    if let Ok(mut cache) = DISCOVERY_CACHE.lock() {
+        let issuer = normalize_issuer(issuer_url);
+        cache.retain(|(i, _), _| *i != issuer);
+    }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -353,6 +408,11 @@ pub async fn save_provider(
         .map_err(|_| "The Issuer URL could not be checked".to_string())??;
 
     let existing = load_provider(pool, &auth.tenant_id).await;
+    // A saved change must not be answered from a remembered document.
+    forget_discovery(&issuer);
+    if let Some(old) = &existing {
+        forget_discovery(&old.issuer_url);
+    }
     let secret = if !new_secret.is_empty() {
         new_secret
     } else {
@@ -492,5 +552,72 @@ pub async fn sso_disable(
         }
         Ok(_) => back("error", "No provider is configured"),
         Err(_) => back("error", "Could not disable the provider"),
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// POST /users/sso/unlink/{id}
+// Clears a user's binding to their identity at the provider.
+//
+// The binding is made automatically, the first time someone signs in whose
+// verified email matches the account. If that was the wrong person — a
+// recycled address, a mistyped email on the account — this is how an admin
+// undoes it without editing the database. The user's sessions end too, since
+// one of them may be the wrong person's. Signing in with SSO again binds
+// afresh, by the same rules.
+//
+// An admin unlinking THEIR OWN account keeps the browser they did it from:
+// the session cookie is re-issued at the new epoch, as change_password does,
+// so the other sessions end and this one does not.
+// Role: Admin. SaaS only.
+// ─────────────────────────────────────────────────────────────────────────────
+pub async fn user_unlink(
+    auth: AuthSession,
+    pool: Extension<SqlitePool>,
+    ip: ClientIp,
+    jar: axum_extra::extract::cookie::SignedCookieJar,
+    axum::extract::Path(user_id): axum::extract::Path<i64>,
+) -> Response {
+    if let Some(r) = unavailable() {
+        return r;
+    }
+    if let Some(redir) = auth::authorize(&auth.role, UserRole::Admin) {
+        return redir;
+    }
+    let to = |kind: &str, msg: &str| {
+        Redirect::to(&format!("/users/edit/{user_id}?{kind}_message={}", urlencoding::encode(msg))).into_response()
+    };
+    let done = sqlx::query(
+        "UPDATE users SET sso_subject = NULL WHERE id = ? AND tenant_id = ? AND sso_subject IS NOT NULL",
+    )
+    .bind(user_id)
+    .bind(&auth.tenant_id)
+    .execute(&*pool)
+    .await;
+    match done {
+        Ok(r) if r.rows_affected() == 1 => {
+            auth::revoke_sessions(&pool, user_id).await;
+            info!("SSO identity unlinked from user {} in tenant '{}' by '{}'", user_id, auth.tenant_id, auth.username);
+            crate::audit::record(
+                &pool, &auth.tenant_id, Some(&auth), Some(ip.as_str()),
+                "sso.user_unlink", Some("user"), Some(&user_id.to_string()), None,
+            ).await;
+            if user_id == auth.userid as i64 && auth.impersonating.is_none() {
+                let session = serde_json::json!({
+                    "username": auth.username,
+                    "userid": auth.userid.to_string(),
+                    "tenant_id": auth.tenant_id,
+                    "role": auth.role,
+                });
+                let cookie = auth::issue_session_cookie(&pool, session, auth::SESSION_TTL).await;
+                return (
+                    jar.add(cookie),
+                    to("success", "Single sign-on identity unlinked. Your other sessions have been signed out."),
+                ).into_response();
+            }
+            to("success", "Single sign-on identity unlinked. The user has been signed out.")
+        }
+        Ok(_) => to("error", "This user is not linked to a single sign-on identity"),
+        Err(_) => to("error", "Could not unlink the user"),
     }
 }

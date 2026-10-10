@@ -253,6 +253,15 @@
                   <p>Audit Log</p>
                 </a>
               </li>
+              {# Single sign-on is offered in SaaS only (see sso.rs). #}
+              {% if is_saas and is_admin %}
+              <li class="nav-item">
+                <a href="/admin/sso" class="nav-link" style="padding-left: 30px;">
+                  <i class="fas fa-id-badge nav-icon"></i>
+                  <p>Single Sign-On</p>
+                </a>
+              </li>
+              {% endif %}
               {% if not is_saas %}
               <li class="nav-item">
                 <a href="/admin/directories" class="nav-link" style="padding-left: 30px;">

@@ -175,6 +175,29 @@
             </form>
           </div>
 
+          {# Shown only when the account is bound to a provider identity. #}
+          {% if is_saas and sso_linked %}
+          <div class="card card-outline card-info shadow-sm">
+            <div class="card-header">
+              <h3 class="card-title text-dark"><i class="fas fa-id-badge mr-1"></i> Single sign-on</h3>
+            </div>
+            <div class="card-body">
+              <p class="mb-0">
+                This account is linked to an identity at your organization's sign-in provider.
+                The link was made the first time that person signed in with a matching, verified email address.
+              </p>
+            </div>
+            {% if is_admin %}
+            <div class="card-footer text-right">
+              <a href="#" class="btn btn-outline-danger shadow-sm"
+                 onclick="return postTo('/users/sso/unlink/{{ user.id }}', 'Unlink this account from its single sign-on identity? The user is signed out. The next single sign-on with a matching verified email links it again.')">
+                <i class="fas fa-unlink mr-1"></i> Unlink
+              </a>
+            </div>
+            {% endif %}
+          </div>
+          {% endif %}
+
         </div>
       </div>
     </div>

@@ -404,3 +404,48 @@ async fn community_edition_turns_every_sso_route_away() {
     let audited: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM audit_log WHERE action LIKE 'sso.%'").fetch_one(&pool).await.unwrap();
     assert_eq!(audited, 0);
 }
+
+// Signing in through a provider, and unlinking a user, are closed in CE too —
+// including the public routes, which have no role check to fall back on.
+#[tokio::test]
+async fn community_edition_turns_the_sign_in_routes_away() {
+    use axum::body::Body;
+    use axum::http::Request;
+    use axum::routing::{get, post};
+    use tower::ServiceExt;
+
+    let pool = db().await;
+    assert!(!scmserver::handlers::is_saas_mode());
+    // An enabled provider and a bound user, as if left from a SaaS database.
+    sqlx::query("INSERT INTO sso_providers (tenant_id, enabled, name, issuer_url, client_id, client_secret)
+                 VALUES ('default', 1, 'Leftover', 'https://login.example.com', 'id', 's')").execute(&pool).await.unwrap();
+    sqlx::query("UPDATE users SET sso_subject = 'bound' WHERE id = 10").execute(&pool).await.unwrap();
+    set_app_url(&pool).await;
+
+    let app = || axum::Router::new()
+        .route("/auth/sso/start", post(scmserver::sso_login::sso_start))
+        .route("/auth/sso/callback", get(scmserver::sso_login::sso_callback))
+        .layer(Extension(pool.clone()))
+        // Even with the relaxed URL rules a test may add, the edition gate holds.
+        .layer(Extension(scmserver::sso_login::SsoUrlRules { strict: false }))
+        .with_state(axum_extra::extract::cookie::Key::from(&[7u8; 64]));
+
+    let start = app().oneshot(Request::post("/auth/sso/start")
+        .header("content-type", "application/x-www-form-urlencoded")
+        .body(Body::from("organization=default")).unwrap()).await.unwrap();
+    let to = location(start);
+    assert!(to.starts_with("/login?") && to.contains("not available in this edition"), "{to}");
+
+    let cb = app().oneshot(Request::get("/auth/sso/callback?code=c&state=s").body(Body::empty()).unwrap()).await.unwrap();
+    assert!(cb.headers().get_all("set-cookie").iter().all(|c| !c.to_str().unwrap().starts_with("session=")), "no session in CE");
+    assert!(location(cb).contains("not available in this edition"));
+    let states: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM sso_login_state").fetch_one(&pool).await.unwrap();
+    assert_eq!(states, 0, "no sign-in was started");
+
+    let to = location(sso::user_unlink(admin("default"), Extension(pool.clone()), ip(),
+        axum_extra::extract::cookie::SignedCookieJar::new(axum_extra::extract::cookie::Key::from(&[7u8; 64])),
+        axum::extract::Path(10)).await);
+    assert!(to.contains("not available in this edition"), "{to}");
+    let still: Option<String> = sqlx::query_scalar("SELECT sso_subject FROM users WHERE id = 10").fetch_one(&pool).await.unwrap();
+    assert_eq!(still.as_deref(), Some("bound"));
+}

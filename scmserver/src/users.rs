@@ -404,6 +404,17 @@ pub async fn users_edit(
     // can change it to prevent accidental lock-out of the primary account.
     let is_bootstrap = user.id == 1 && auth.tenant_id == "default";
     context.insert("is_bootstrap", &is_bootstrap);
+    // Whether this account is bound to an identity at the tenant's single
+    // sign-on provider (SaaS). The page offers an admin "Unlink" when it is.
+    let sso_linked: bool = sqlx::query_scalar::<_, i64>(
+        "SELECT COUNT(*) FROM users WHERE id = ? AND tenant_id = ? AND sso_subject IS NOT NULL",
+    )
+    .bind(id)
+    .bind(&auth.tenant_id)
+    .fetch_one(&*pool)
+    .await
+    .unwrap_or(0) > 0;
+    context.insert("sso_linked", &sso_linked);
     render_template(&tera, Some(&pool), "users_edit.html", context, Some(auth))
         .await
         .into_response()

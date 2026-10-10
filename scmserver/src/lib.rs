@@ -34,6 +34,7 @@ pub mod reports;
 pub mod users;
 pub mod settings;
 pub mod sso;
+pub mod sso_login;
 pub mod schedule;
 pub mod scheduler;
 pub mod install;
@@ -460,6 +461,10 @@ pub fn create_core_router(state: AppState, cookie_key: axum_extra::extract::cook
         .route("/admin/sso/save",     post(sso::sso_save))
         .route("/admin/sso/test",     post(sso::sso_test))
         .route("/admin/sso/disable",  post(sso::sso_disable))
+        .route("/users/sso/unlink/{id}", post(sso::user_unlink))
+        // Signing in through the provider. Public, like /login.
+        .route("/auth/sso/start",     post(sso_login::sso_start))
+        .route("/auth/sso/callback",  get(sso_login::sso_callback))
         .route("/systems/upgrade/{id}", post(systems::systems_upgrade))
         .route("/systems/bulk/upgrade", post(systems::systems_bulk_upgrade))
         .route("/systems/upgrade_all",  post(systems::systems_upgrade_all))

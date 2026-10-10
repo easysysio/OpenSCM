@@ -120,6 +120,23 @@ pub async fn issue_session_cookie(
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Public: tenant_id_for_organization
+// The tenant id an organization name, as typed on a sign-in form, refers to:
+// lower-cased, every other character a hyphen, hyphens trimmed from the ends.
+// One definition, so password sign-in and single sign-on cannot disagree about
+// which tenant "Acme Corp" is.
+// ─────────────────────────────────────────────────────────────────────────────
+pub fn tenant_id_for_organization(org: &str) -> String {
+    org.trim()
+        .to_lowercase()
+        .chars()
+        .map(|c| if c.is_alphanumeric() { c } else { '-' })
+        .collect::<String>()
+        .trim_matches('-')
+        .to_string()
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Helper: cookie_should_be_secure
 // Secure is derived from the configured public URL rather than hardcoded. A
 // session cookie without it travels in clear text, but forcing it on would
@@ -131,7 +148,7 @@ pub async fn issue_session_cookie(
 // email.rs). This used to be looked up under the user's own tenant, which in
 // SaaS never matched — so no tenant's session cookie was ever Secure.
 // ─────────────────────────────────────────────────────────────────────────────
-async fn cookie_should_be_secure(pool: &SqlitePool) -> bool {
+pub(crate) async fn cookie_should_be_secure(pool: &SqlitePool) -> bool {
     let secure = sqlx::query_scalar::<_, String>(
         "SELECT value FROM settings WHERE skey = 'app_url' AND tenant_id = 'default'",
     )
@@ -338,12 +355,7 @@ pub async fn login_submit(
         if org.is_empty() {
             None
         } else {
-            let tid = org.to_lowercase()
-                .chars()
-                .map(|c| if c.is_alphanumeric() { c } else { '-' })
-                .collect::<String>()
-                .trim_matches('-')
-                .to_string();
+            let tid = tenant_id_for_organization(org);
 
             // Read the status too, not just existence. Suspension previously set
             // tenants.status and nothing ever read it, so a suspended tenant
