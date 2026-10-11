@@ -6,6 +6,9 @@ All notable changes to OpenSCM are documented here.
 
 ## [Unreleased]
 
+### Changed
+- **The documentation website (openscm.io) now uses Google Analytics, with a cookie consent banner.** Analytics is loaded only after a visitor accepts; declining, or ignoring the banner, loads nothing. A **Change cookie settings** link in the footer reopens the choice. This concerns the documentation site only: nothing was added to the OpenSCM application, in Community Edition or SaaS.
+
 ---
 
 ## [0.10.0] - 2026-10-10

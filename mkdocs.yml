@@ -5,7 +5,11 @@ repo_url: https://github.com/easysysio/OpenSCM
 repo_name: OpenSCM
 # Docs now live in this repo, so "edit this page" can point at the real file.
 edit_uri: edit/main/docs/
-copyright: Copyright &copy; 2025-2026 OpenSCM
+# The "Change cookie settings" link reopens the consent banner (extra.consent
+# below), so a visitor who accepted or declined analytics can change their mind.
+copyright: >-
+  Copyright &copy; 2025-2026 OpenSCM &middot;
+  <a href="#__consent">Change cookie settings</a>
 
 # docs/design/ holds internal design specs that ship with the source but are
 # not part of the public manual.
@@ -107,6 +111,24 @@ plugins:
   - glightbox
 
 extra:
+  # Google Analytics 4 for this documentation site only — nothing here is part
+  # of the OpenSCM application.
+  analytics:
+    provider: google
+    property: G-EQJMCTBFPD
+  # Analytics sets cookies, which needs consent from visitors in the EU and UK.
+  # With this block present the theme loads Google Analytics ONLY after a
+  # visitor accepts; declining, or ignoring the banner, loads nothing.
+  consent:
+    title: Cookie consent
+    description: >-
+      We use cookies to see which pages of this documentation are read and
+      whether searches find what people are looking for, so we can improve it.
+      Nothing is collected unless you accept.
+    actions:
+      - accept
+      - reject
+      - manage
   social:
     - icon: fontawesome/brands/github
       link: https://github.com/easysysio/OpenSCM
