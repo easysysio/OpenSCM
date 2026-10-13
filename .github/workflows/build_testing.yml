@@ -70,10 +70,13 @@ jobs:
           cargo-zigbuild --version
           rustup target add ${{ matrix.target }}
 
-      - uses: goto-bus-stop/setup-zig@v2
+      - name: Install Zig
+        uses: mlugg/setup-zig@v2
+        timeout-minutes: 5
         if: runner.os == 'Linux'
         with:
           version: 0.16.0
+          cache-key: ${{ matrix.target }}
 
       - name: Build Binary
         run: |

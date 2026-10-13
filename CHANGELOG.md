@@ -8,6 +8,7 @@ All notable changes to OpenSCM are documented here.
 
 ### Changed
 - **The documentation website (openscm.io) now uses Google Analytics, with a cookie consent banner.** Analytics is loaded only after a visitor accepts; declining, or ignoring the banner, loads nothing. A **Change cookie settings** link in the footer reopens the choice. This concerns the documentation site only: nothing was added to the OpenSCM application, in Community Edition or SaaS.
+- **Release and testing builds install Zig with a different GitHub Action** (`mlugg/setup-zig@v2` in place of `goto-bus-stop/setup-zig@v2`), with a 5-minute limit on the step. The old one downloaded Zig from a single server and failed a 0.10.0 release job with "Request timed out"; the new one tries the community mirrors first, checks the download's signature, and falls back to ziglang.org. The Zig version is unchanged (0.16.0). Build tooling only: no change to the application.
 
 ---
 

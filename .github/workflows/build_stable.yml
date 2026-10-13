@@ -68,9 +68,12 @@ jobs:
           cargo-zigbuild --version
           rustup target add ${{ matrix.target }}
 
-      - uses: goto-bus-stop/setup-zig@v2
+      - name: Install Zig
+        uses: mlugg/setup-zig@v2
+        timeout-minutes: 5
         with:
           version: 0.16.0
+          cache-key: ${{ matrix.target }}
 
       - name: Build Binary
         run: |
@@ -165,9 +168,12 @@ jobs:
           cargo-zigbuild --version
           rustup target add ${{ matrix.target }}
 
-      - uses: goto-bus-stop/setup-zig@v2
+      - name: Install Zig
+        uses: mlugg/setup-zig@v2
+        timeout-minutes: 5
         with:
           version: 0.16.0
+          cache-key: ${{ matrix.target }}
 
       # Stage agent binaries into the server's static dir BEFORE compiling so
       # include_dir! embeds them into the resulting scmserver binary.
@@ -228,7 +234,9 @@ jobs:
           cargo-zigbuild --version
           rustup target add x86_64-pc-windows-gnu
 
-      - uses: goto-bus-stop/setup-zig@v2
+      - name: Install Zig
+        uses: mlugg/setup-zig@v2
+        timeout-minutes: 5
         with:
           version: 0.16.0
 
@@ -286,7 +294,9 @@ jobs:
           cargo-zigbuild --version
           rustup target add x86_64-pc-windows-gnu
 
-      - uses: goto-bus-stop/setup-zig@v2
+      - name: Install Zig
+        uses: mlugg/setup-zig@v2
+        timeout-minutes: 5
         with:
           version: 0.16.0
 
@@ -585,9 +595,12 @@ jobs:
           cargo-zigbuild --version
           rustup target add ${{ matrix.target }}
 
-      - uses: goto-bus-stop/setup-zig@v2
+      - name: Install Zig
+        uses: mlugg/setup-zig@v2
+        timeout-minutes: 5
         with:
           version: 0.16.0
+          cache-key: ${{ matrix.target }}
 
       - name: Stage Embedded Agent Binaries
         uses: actions/download-artifact@v4
