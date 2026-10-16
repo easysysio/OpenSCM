@@ -40,6 +40,7 @@ pub mod scheduler;
 pub mod install;
 pub mod email;
 pub mod directories;
+pub mod security_headers;
 
 // 2. Imports needed for the public API
 use std::{sync::{Arc, atomic::{AtomicBool, Ordering}, OnceLock}, path::PathBuf, error::Error};
@@ -347,6 +348,7 @@ pub fn create_core_router(state: AppState, cookie_key: axum_extra::extract::cook
     // Compute the login timing-parity hash now rather than on the first
     // unknown-user login, which would otherwise be measurably slower once.
     let _ = auth::dummy_hash();
+    let pool_for_headers = state.pool.clone();
 
     Router::new()
         // Probes — must come first so they're not shadowed by anything else
@@ -493,5 +495,8 @@ pub fn create_core_router(state: AppState, cookie_key: axum_extra::extract::cook
         // route; tower-http adds `Vary: accept-encoding` and skips responses
         // that are already encoded or too small to be worth it.
         .layer(tower_http::compression::CompressionLayer::new())
+        // Browser security headers (CSP, framing, HSTS …) on every response,
+        // including redirects, errors and static assets.
+        .layer(middleware::from_fn_with_state(pool_for_headers, security_headers::security_headers))
         .with_state(cookie_key)
 }

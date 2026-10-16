@@ -521,6 +521,15 @@ pod in rotation while a rolling deploy runs migrations on the new one.
       will not double-compress something already carrying `Content-Encoding`.
       Leaving it on is harmless.
 
+!!! note "Security headers come from OpenSCM"
+    OpenSCM sets its own browser security headers on every response:
+    `Content-Security-Policy`, `X-Frame-Options: DENY`,
+    `X-Content-Type-Options: nosniff` and `Referrer-Policy: same-origin`. It
+    also sends `Strict-Transport-Security` (one year) once the **App URL**
+    under Settings starts with `https://`. Your reverse proxy doesn't need to
+    add them. If it adds its own `Content-Security-Policy`, the browser
+    enforces both, and a stricter proxy policy can break pages.
+
 !!! note "Both endpoints bypass the init-guard"
     Unlike every other route on the server, `/health` and `/ready` answer
     even before `/install` has been completed. This is deliberate so that
