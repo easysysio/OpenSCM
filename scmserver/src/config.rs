@@ -62,6 +62,11 @@ pub struct Config {
 pub struct ServerConfig {
     pub port: Option<String>,
     pub loglevel: Option<String>,
+    /// Peers whose X-Forwarded-For / X-Real-IP headers are believed, as CIDR
+    /// ranges or single addresses. Unset: loopback and private ranges
+    /// (handlers::DEFAULT_TRUSTED_PROXIES). An empty list trusts nobody.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub trusted_proxies: Option<Vec<String>>,
 }
 
 #[derive(Debug, Deserialize, Clone, Serialize, Default)]
@@ -90,6 +95,7 @@ impl Default for Config {
             server: ServerConfig {
                 port: Some("8000".to_string()),
                 loglevel: Some("info".to_string()),
+                trusted_proxies: None,
             },
             database: DatabaseConfig {
                 path: DB_PATH.to_string(),
@@ -203,6 +209,9 @@ impl Config {
                 let mut config = Config::default();
                 config.server.port = Some(port);
                 config.server.loglevel = Some(loglevel);
+                // Optional, comma-separated; absent means the defaults.
+                config.server.trusted_proxies = key.get_value::<String, _>("TrustedProxies").ok()
+                    .map(|v| v.split(',').map(|e| e.trim().to_string()).filter(|e| !e.is_empty()).collect());
 
                 // 2. Check if we need to repair missing registry values
                 let needs_repair = [

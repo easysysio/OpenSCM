@@ -349,6 +349,7 @@ pub fn create_core_router(state: AppState, cookie_key: axum_extra::extract::cook
     // unknown-user login, which would otherwise be measurably slower once.
     let _ = auth::dummy_hash();
     let pool_for_headers = state.pool.clone();
+    handlers::set_trusted_proxies(state.config.server.trusted_proxies.as_deref());
 
     Router::new()
         // Probes — must come first so they're not shadowed by anything else

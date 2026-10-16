@@ -32,6 +32,7 @@ The `scmserver` manages the central database and agent authorizations.
     | :--- | :--- | :--- |
     | `Port` | REG_SZ | Port for the server (e.g., `8000`) |
     | `LogLevel` | REG_SZ | Logging level (`info`, `debug`, etc.) |
+    | `TrustedProxies` | REG_SZ | Optional. Comma-separated; see [Behind a proxy or CDN](#behind-a-proxy-or-cdn) |
 
 !!! info "Fixed Paths"
     The SQLite database and key paths are fixed and cannot be changed via config.
@@ -141,6 +142,42 @@ The `scmclient` agent handles heartbeats and local compliance scanning.
 | :--- | :--- | :--- |
 | `server.port` | `8000` | Port the server listens on |
 | `server.loglevel` | `info` | Log verbosity: `error`, `warn`, `info`, `debug` |
+| `server.trusted_proxies` | loopback and private ranges | Addresses allowed to tell the server who the client is. See below |
+
+#### Behind a proxy or CDN
+
+OpenSCM records the client's address in the audit log and uses it for the
+sign-in rate limits. Behind a reverse proxy, the connection comes from the
+proxy, and the real address arrives in the `X-Forwarded-For` header. Anyone
+can send that header, so OpenSCM only believes it when the connection comes
+from a trusted proxy.
+
+By default, loopback (`127.0.0.0/8`, `::1`) and the private ranges
+(`10.0.0.0/8`, `172.16.0.0/12`, `192.168.0.0/16`, `fc00::/7`) are trusted.
+That covers nginx or Caddy on the same host or the same Docker network, and
+needs no setting.
+
+If something on a public address sits in front, such as Cloudflare or a cloud
+load balancer, list its ranges, together with your own proxy:
+
+```toml
+[server]
+trusted_proxies = ["127.0.0.1", "173.245.48.0/20", "103.21.244.0/22"]
+```
+
+Setting the list replaces the defaults; it doesn't add to them. Without the
+CDN's ranges, every visitor appears with the CDN's address, and visitors
+share one sign-in rate limit. An empty list (`trusted_proxies = []`) trusts
+nobody and ignores the header entirely, the right choice when nothing sits in
+front of OpenSCM.
+
+Make sure your proxy appends the client's address to `X-Forwarded-For` rather
+than passing the client's own header through unchanged. Caddy does this by
+default. In nginx:
+
+```nginx
+proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+```
 
 ### Client Parameters
 

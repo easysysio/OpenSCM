@@ -430,16 +430,22 @@ pub async fn ready(Extension(pool): Extension<SqlitePool>) -> impl IntoResponse 
 // ─────────────────────────────────────────────────────────────────────────────
 // ClientIp — extractor for the requesting client's IP address.
 //
-// Resolution order (first hit wins):
-//   1. X-Forwarded-For        — leftmost entry, typical reverse-proxy header
-//   2. X-Real-IP              — nginx's other common forwarding header
-//   3. ConnectInfo<SocketAddr> — direct peer when no proxy is in front
-//   4. "unknown"              — fallback if axum was started without
-//                                into_make_service_with_connect_info
+// The forwarding headers are believed only when the connection itself comes
+// from a trusted proxy (see set_trusted_proxies); anyone else could write any
+// address into them. Resolution, in resolve_client_ip:
+//   1. Peer not a trusted proxy  → the peer address, headers ignored
+//   2. X-Forwarded-For           → walked right to left, skipping trusted
+//                                  hops; the first untrusted entry is the
+//                                  client (the leftmost entries are whatever
+//                                  the client sent and prove nothing)
+//   3. X-Real-IP                 → when there is no X-Forwarded-For
+//   4. The peer address          → trusted, but forwarded nothing usable
+//   5. "unknown"                 → no peer address at all (a server started
+//                                  without into_make_service_with_connect_info)
 //
-// Used by audit-log call sites. Never fails — always extracts cleanly so
-// adding it to a handler signature can't accidentally take the handler off
-// the happy path.
+// Used by audit-log call sites and the login rate limits. Never fails —
+// always extracts cleanly so adding it to a handler signature can't
+// accidentally take the handler off the happy path.
 // ─────────────────────────────────────────────────────────────────────────────
 #[derive(Clone, Debug)]
 pub struct ClientIp(pub String);
@@ -455,30 +461,120 @@ where
     type Rejection = std::convert::Infallible;
 
     async fn from_request_parts(parts: &mut Parts, _state: &S) -> Result<Self, Self::Rejection> {
-        // X-Forwarded-For: "client, proxy1, proxy2" — leftmost is the real client.
-        if let Some(v) = parts.headers.get("x-forwarded-for") {
-            if let Ok(s) = v.to_str() {
-                if let Some(first) = s.split(',').next() {
-                    let ip = first.trim();
-                    if !ip.is_empty() {
-                        return Ok(ClientIp(ip.to_string()));
-                    }
-                }
-            }
-        }
-        // X-Real-IP: single value.
-        if let Some(v) = parts.headers.get("x-real-ip") {
-            if let Ok(s) = v.to_str() {
-                let ip = s.trim();
-                if !ip.is_empty() {
-                    return Ok(ClientIp(ip.to_string()));
-                }
-            }
-        }
-        // Direct peer address (requires into_make_service_with_connect_info).
-        if let Some(ConnectInfo(addr)) = parts.extensions.get::<ConnectInfo<SocketAddr>>() {
-            return Ok(ClientIp(addr.ip().to_string()));
-        }
-        Ok(ClientIp("unknown".to_string()))
+        let peer = parts.extensions.get::<ConnectInfo<SocketAddr>>().map(|ConnectInfo(a)| a.ip());
+        let header = |name: &str| parts.headers.get(name).and_then(|v| v.to_str().ok());
+        Ok(ClientIp(resolve_client_ip(
+            peer,
+            header("x-forwarded-for"),
+            header("x-real-ip"),
+            trusted_proxies(),
+        )))
     }
+}
+
+static TRUSTED_PROXIES: OnceLock<Vec<ipnet::IpNet>> = OnceLock::new();
+
+// Trusted when `trusted_proxies` is not set in the config: loopback and the
+// private ranges, which covers a proxy on the same host or the same Docker or
+// internal network. A proxy or CDN on a public address must be listed.
+pub const DEFAULT_TRUSTED_PROXIES: &[&str] = &[
+    "127.0.0.0/8", "::1/128",
+    "10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16",
+    "fc00::/7",
+];
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Helper: set_trusted_proxies
+// Sets, once per process, which peers may supply X-Forwarded-For / X-Real-IP.
+// None means DEFAULT_TRUSTED_PROXIES; an empty list trusts nobody, so the
+// headers are never read. Entries are CIDR ranges or single addresses; one
+// that parses as neither is logged and skipped. Called from
+// create_core_router, which both editions go through.
+// ─────────────────────────────────────────────────────────────────────────────
+pub fn set_trusted_proxies(configured: Option<&[String]>) {
+    let list: Vec<String> = match configured {
+        Some(l) => l.to_vec(),
+        None => DEFAULT_TRUSTED_PROXIES.iter().map(|s| s.to_string()).collect(),
+    };
+    let nets = parse_proxy_list(&list);
+    let shown: Vec<String> = nets.iter().map(|n| n.to_string()).collect();
+    if TRUSTED_PROXIES.set(nets).is_ok() {
+        info!(
+            "Forwarded client addresses trusted from: {}",
+            if shown.is_empty() { "nobody (X-Forwarded-For ignored)".to_string() } else { shown.join(", ") }
+        );
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Helper: parse_proxy_list
+// CIDR ranges and bare addresses (taken as a single-address range).
+// ─────────────────────────────────────────────────────────────────────────────
+pub fn parse_proxy_list(list: &[String]) -> Vec<ipnet::IpNet> {
+    list.iter()
+        .filter_map(|e| {
+            let e = e.trim();
+            e.parse::<ipnet::IpNet>().ok()
+                .or_else(|| e.parse::<std::net::IpAddr>().ok().map(ipnet::IpNet::from))
+                .or_else(|| {
+                    tracing::warn!("trusted_proxies: '{}' is not an address or CIDR range; ignored", e);
+                    None
+                })
+        })
+        .collect()
+}
+
+fn trusted_proxies() -> &'static [ipnet::IpNet] {
+    TRUSTED_PROXIES.get_or_init(|| parse_proxy_list(
+        &DEFAULT_TRUSTED_PROXIES.iter().map(|s| s.to_string()).collect::<Vec<_>>(),
+    ))
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Helper: resolve_client_ip
+// The decision behind ClientIp, kept free of request types so it can be
+// tested directly. IPv4-mapped IPv6 addresses (::ffff:a.b.c.d, what a
+// dual-stack listener reports for an IPv4 peer) are judged as IPv4.
+// ─────────────────────────────────────────────────────────────────────────────
+pub fn resolve_client_ip(
+    peer: Option<std::net::IpAddr>,
+    forwarded_for: Option<&str>,
+    real_ip: Option<&str>,
+    trusted: &[ipnet::IpNet],
+) -> String {
+    let is_trusted = |ip: std::net::IpAddr| {
+        let ip = ip.to_canonical();
+        trusted.iter().any(|n| n.contains(&ip))
+    };
+    let peer = match peer {
+        Some(p) => p.to_canonical(),
+        None => return "unknown".to_string(),
+    };
+    if !is_trusted(peer) {
+        return peer.to_string();
+    }
+    if let Some(xff) = forwarded_for {
+        // Walk from the hop nearest us. An entry that is not an address means
+        // the chain cannot be followed further; the last hop we could verify
+        // is the best answer left.
+        let mut last = peer;
+        for entry in xff.rsplit(',') {
+            match entry.trim().parse::<std::net::IpAddr>() {
+                Ok(ip) => {
+                    let ip = ip.to_canonical();
+                    if !is_trusted(ip) {
+                        return ip.to_string();
+                    }
+                    last = ip;
+                }
+                Err(_) => return last.to_string(),
+            }
+        }
+        // Every hop is trusted: the client is on the internal network itself.
+        return last.to_string();
+    }
+    if let Some(ip) = real_ip.and_then(|v| v.trim().parse::<std::net::IpAddr>().ok()) {
+        return ip.to_canonical().to_string();
+    }
+    peer.to_string()
 }
