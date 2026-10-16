@@ -6,6 +6,10 @@ All notable changes to OpenSCM are documented here.
 
 ## [Unreleased]
 
+---
+
+## [0.10.1] - 2026-10-16
+
 ### Security
 - **Every response now carries browser security headers.** `Content-Security-Policy` allows content only from the OpenSCM server itself (plus Google Fonts), forbids framing and plugins, and pins `<base>`. `X-Frame-Options: DENY`, `X-Content-Type-Options: nosniff` and `Referrer-Policy: same-origin` are set too. `Strict-Transport-Security` (one year) is sent once the App URL is `https://`, the same signal the session cookie's Secure flag already follows. This applies to pages, redirects, error pages and static files. The policy still allows inline scripts and styles, because the pages use them throughout, so it does not yet stop an injected inline script; that needs the inline code moved into files first.
 - **A client can no longer choose the address recorded for it.** The server took the first address in `X-Forwarded-For` from anyone, so any client could write a fake address into the audit log, and any limit counted per address could be dodged. The header is now believed only when the connection comes from a trusted proxy, and it is read from the right, skipping trusted hops, so entries the client put there are ignored. By default loopback and the private ranges are trusted, which covers nginx or Caddy on the same host or Docker network. **If a CDN or a load balancer on a public address sits in front (Cloudflare, for example), list its ranges under the new `trusted_proxies` setting** (registry value `TrustedProxies` on Windows); otherwise every visitor shows up with the CDN's address. See *Configuration → Behind a proxy or CDN*.
