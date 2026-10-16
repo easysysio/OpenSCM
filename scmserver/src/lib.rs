@@ -41,6 +41,7 @@ pub mod install;
 pub mod email;
 pub mod directories;
 pub mod security_headers;
+pub mod rate_limit;
 
 // 2. Imports needed for the public API
 use std::{sync::{Arc, atomic::{AtomicBool, Ordering}, OnceLock}, path::PathBuf, error::Error};

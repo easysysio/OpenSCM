@@ -205,6 +205,33 @@ these take effect **immediately**, without waiting for the session to expire:
     **App URL** under **Settings → Email** starts with `https://`.
     Set it if you serve OpenSCM over HTTPS, including behind a proxy.
 
+### Failed sign-in limits
+
+Repeated failed sign-ins lock further attempts for **15 minutes**:
+
+| Limit | Locks |
+|---|---|
+| 10 failures for one account within 15 minutes | That account, from every address |
+| 30 failures from one address within 15 minutes | That address, for every account |
+
+While a lock is on, the sign-in page says *Too many failed sign-in
+attempts. Try again in N minutes.* The password isn't checked during a lock,
+not even a correct one, so a guess made then reveals nothing. A successful
+sign-in resets the account's count. Password and LDAP sign-ins both count.
+
+The start of each lock is recorded once in the audit log as
+`auth.login_locked`. An account lock is logged in that account's
+organization; an address lock in the platform's log.
+
+Counts are kept in memory: restarting the server clears every count and
+every lock. To unlock an account early, restart the server.
+
+!!! warning "Behind a proxy, check the trusted proxies"
+    The address limit relies on knowing the visitor's real address. Behind a
+    proxy or CDN on a public address, add it to `trusted_proxies` (see
+    [Configuration](../start/configuration.md#behind-a-proxy-or-cdn)), or all
+    visitors share the proxy's address and one limit.
+
 ---
 
 ## Server Maintenance

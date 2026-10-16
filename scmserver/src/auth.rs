@@ -21,6 +21,7 @@ use tera::{Tera, Context};
 use tracing::{info, warn, error};
 
 use crate::handlers::{render_template, add_notification};
+use crate::rate_limit;
 use crate::models::{UserRole, ErrorQuery, AuthSession};
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -349,6 +350,20 @@ pub async fn login_submit(
         return (jar, Redirect::to("/login?error_message=Organization+is+required."));
     }
 
+    // Rate limits, checked before anything else is looked at: while a lock is
+    // on, the password is not checked at all, so a guess made during it
+    // learns nothing — not even whether it was right.
+    let account_key = rate_limit::login_account_key(form.organization.as_deref(), &form.username);
+    let left = [
+        rate_limit::LOGIN_ADDRESS.locked(ip.as_str()),
+        rate_limit::LOGIN_ACCOUNT.locked(&account_key),
+    ].into_iter().flatten().max();
+    if let Some(left) = left {
+        warn!("Login refused for '{}' from {}: rate limited", form.username, ip.as_str());
+        let msg = rate_limit::retry_message("failed sign-in attempts", left);
+        return (jar, Redirect::to(&format!("/login?error_message={}", urlencoding::encode(&msg))));
+    }
+
     // If an organization was supplied, derive the tenant_id and verify it exists
     let tenant_id_filter: Option<String> = if let Some(org) = form.organization.as_deref() {
         let org = org.trim();
@@ -375,6 +390,8 @@ pub async fn login_submit(
 
             if exists == 0 {
                 warn!("Login attempt for unknown organization: '{}'", org);
+                // Counts against the address only: there is no account to lock.
+                note_address_failure(&pool, &ip).await;
                 return (jar, Redirect::to("/login?error_message=Organization+not+found."));
             }
 
@@ -517,6 +534,7 @@ pub async fn login_submit(
             });
             let cookie = issue_session_cookie(&pool, session_data, SESSION_TTL).await;
 
+            rate_limit::LOGIN_ACCOUNT.clear(&account_key);
             info!("User '{}' logged in successfully for tenant '{}'", username, tenant_id);
             crate::audit::record_raw(
                 &pool, &tenant_id,
@@ -530,6 +548,25 @@ pub async fn login_submit(
         }
     } else {
         warn!("Failed login attempt for user: '{}'", form.username);
+        note_address_failure(&pool, &ip).await;
+        if rate_limit::LOGIN_ACCOUNT.record(&account_key) {
+            // Logged once, when the lock starts. Under the account's own
+            // organization when the user exists, so its admins see it.
+            let (tenant, uid) = match &maybe_row {
+                Some(r) => (
+                    r.try_get::<String, _>("tenant_id").unwrap_or_else(|_| "default".to_string()),
+                    Some(r.get::<i32, _>("id")),
+                ),
+                None => ("default".to_string(), None),
+            };
+            warn!("Account '{}' locked for {} minutes after repeated failed sign-ins",
+                  form.username, rate_limit::LOGIN_LOCKOUT.as_secs() / 60);
+            crate::audit::record_raw(
+                &pool, &tenant, uid, &form.username, Some(ip.as_str()),
+                "auth.login_locked", Some("user"), uid.map(|u| u.to_string()).as_deref(),
+                Some("account"),
+            ).await;
+        }
 
         // If user exists but password was wrong, notify them
         if let Some(row) = maybe_row {
@@ -574,6 +611,23 @@ pub async fn login_submit(
 
 
 
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Helper: note_address_failure
+// Counts a failed sign-in against the client address, and records the lock
+// in the platform audit log (the 'default' tenant) the moment it starts.
+// ─────────────────────────────────────────────────────────────────────────────
+async fn note_address_failure(pool: &SqlitePool, ip: &crate::handlers::ClientIp) {
+    if rate_limit::LOGIN_ADDRESS.record(ip.as_str()) {
+        warn!("Address {} locked for {} minutes after repeated failed sign-ins",
+              ip.as_str(), rate_limit::LOGIN_LOCKOUT.as_secs() / 60);
+        crate::audit::record_raw(
+            pool, "default", None, "", Some(ip.as_str()),
+            "auth.login_locked", Some("address"), Some(ip.as_str()),
+            Some("address"),
+        ).await;
+    }
+}
 
 // ─────────────────────────────────────────────────────────────────────────────
 // GET /logout
