@@ -6,6 +6,10 @@ All notable changes to OpenSCM are documented here.
 
 ## [Unreleased]
 
+---
+
+## [0.10.2] - 2026-10-16
+
 ### Security
 - **`rustls` updated to 0.23.46** for RUSTSEC-2026-0346 (TLS secrets in `Debug` output), -0347 (ECH rejection), -0348 (Brotli certificate decompression; that feature is not enabled in OpenSCM) and -0349 (key-exchange downgrade). rustls secures the server's outgoing connections: SMTP, webhooks, single sign-on, LDAP and the update check. `cargo audit` is clean again.
 
