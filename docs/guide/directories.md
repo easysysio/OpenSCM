@@ -88,7 +88,7 @@ The LDAP directory only handles **authentication** (proving who the user is). Au
 
 ## Security Notes
 
-- **Bind password is stored plaintext** in the OpenSCM database. The DB file is intended to be protected by filesystem permissions and (in production) full-disk encryption. Field-level encryption of the bind password is a planned hardening follow-up but does not exist in v1.
+- **The bind password is stored encrypted** with a key derived from the server's key file, so a copy of the database alone doesn't reveal it. It is never sent back to the browser: when you edit a directory, the password field stays empty, and leaving it empty keeps the saved password. Back up the key file with the database (see [Key Backup](admin.md#key-backup)).
 - **Skip TLS verification** is dangerous — it disables certificate-pinning protections and allows a network attacker to MITM the LDAP traffic. Only enable it on isolated networks where you control both endpoints and where a proper PKI is impractical (typically dev/test labs).
 - **All directory operations are audited.** Look for these events in the [Audit Log](admin.md):
   - `directory.create`, `directory.update`, `directory.delete`
@@ -170,5 +170,4 @@ Then create a user with:
 - **Group → role mapping** — there's no automatic sync from LDAP groups to OpenSCM roles. Assign roles per user.
 - **Single sign-on in Community Edition** — OpenID Connect [Single Sign-On](sso.md) is available in SaaS; it is not offered in CE. SAML is not supported in either.
 - **Kerberos / GSSAPI bind** — only simple bind is supported in v1.
-- **Field-level encryption** of the bind password in the DB.
 - **Certificate pinning** beyond the "verify normally / skip entirely" toggle.

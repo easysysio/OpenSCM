@@ -83,7 +83,11 @@ pub async fn load_provider(pool: &SqlitePool, tenant_id: &str) -> Option<Provide
         issuer_url:    r.try_get("issuer_url").unwrap_or_default(),
         client_id:     r.try_get("client_id").unwrap_or_default(),
         trust_email:   r.try_get::<i64, _>("trust_email").unwrap_or(0) != 0,
-        client_secret: r.try_get("client_secret").unwrap_or_default(),
+        // Unreadable reads as unset, so the admin page asks for it again.
+        client_secret: crate::secrets::open_or_empty(
+            crate::secrets::COL_SSO_SECRET,
+            &r.try_get::<String, _>("client_secret").unwrap_or_default(),
+        ),
     })
 }
 
@@ -456,7 +460,7 @@ pub async fn save_provider(
     .bind(&name)
     .bind(&issuer)
     .bind(&client_id)
-    .bind(&secret)
+    .bind(crate::secrets::seal(crate::secrets::COL_SSO_SECRET, &secret))
     .bind(trust_email)
     .execute(pool)
     .await

@@ -256,7 +256,8 @@ For those reviewing the integration:
 - **Each sign-in is single-use and tied to the browser that started it**, and
   must be completed within 10 minutes.
 - **An identity only ever matches a user in your own organization.**
-- **The client secret is never shown again** after you save it.
+- **The client secret is never shown again** after you save it, and it is
+  stored encrypted with a key derived from the server's key file.
 - **Sign-ins and failures are recorded** in the audit log, as are changes to
   the configuration and every unlink.
 

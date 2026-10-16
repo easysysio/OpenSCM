@@ -144,11 +144,11 @@
                 <div class="form-group">
                   <label for="bind_password">Service Account Password</label>
                   <input type="password" class="form-control" id="bind_password" name="bind_password"
-                         value="{{ bind_password | default(value='') }}"
+                         {% if has_bind_password %}placeholder="(unchanged if left blank)"{% endif %}
                          autocomplete="new-password">
                   <small class="form-text text-muted">
                     <i class="fas fa-info-circle mr-1"></i>
-                    Stored in the OpenSCM database. Protect the DB file accordingly.
+                    Stored encrypted with the server's key.
                   </small>
                 </div>
               </div>

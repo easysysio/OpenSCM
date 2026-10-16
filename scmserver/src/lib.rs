@@ -42,6 +42,7 @@ pub mod email;
 pub mod directories;
 pub mod security_headers;
 pub mod rate_limit;
+pub mod secrets;
 
 // 2. Imports needed for the public API
 use std::{sync::{Arc, atomic::{AtomicBool, Ordering}, OnceLock}, path::PathBuf, error::Error};
@@ -350,6 +351,7 @@ pub fn create_core_router(state: AppState, cookie_key: axum_extra::extract::cook
     // unknown-user login, which would otherwise be measurably slower once.
     let _ = auth::dummy_hash();
     let pool_for_headers = state.pool.clone();
+    secrets::init_from_cookie_key(&cookie_key);
     handlers::set_trusted_proxies(state.config.server.trusted_proxies.as_deref());
 
     Router::new()

@@ -197,6 +197,17 @@ pub async fn get_by_id(pool: &SqlitePool, id: i64) -> Option<Directory> {
         .await
         .ok()
         .flatten()
+        .map(reveal)
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Helper: reveal
+// The directory with its bind password decrypted, for code that binds with
+// it. An unreadable password reads as empty, so the bind fails and says so.
+// ─────────────────────────────────────────────────────────────────────────────
+fn reveal(mut dir: Directory) -> Directory {
+    dir.bind_password = crate::secrets::open_or_empty(crate::secrets::COL_BIND_PASSWORD, &dir.bind_password);
+    dir
 }
 
 // ============================================================
@@ -295,7 +306,7 @@ pub async fn add_submit(
     .bind(skip_verify)
     .bind(form.base_dn.trim())
     .bind(form.bind_dn.trim())
-    .bind(&form.bind_password)
+    .bind(crate::secrets::seal(crate::secrets::COL_BIND_PASSWORD, &form.bind_password))
     .bind(if form.user_attribute.trim().is_empty() { "uid" } else { form.user_attribute.trim() })
     .execute(&pool)
     .await;
@@ -349,8 +360,9 @@ pub async fn edit_form(
     if let Some(m) = q.success_message { ctx.insert("success_message", &m); }
     ctx.insert("mode", "edit");
     ctx.insert("directory", &dir);
-    // Re-expose bind_password so the edit form can pre-fill it (skipped in default Serialize).
-    ctx.insert("bind_password", &dir.bind_password);
+    // The password itself never goes back to the browser; the form only
+    // says whether one is set, and a blank field keeps it.
+    ctx.insert("has_bind_password", &!dir.bind_password.is_empty());
 
     render_template(&tera, Some(&pool), "directories_form.html", ctx, Some(auth))
         .await
@@ -384,7 +396,9 @@ pub async fn edit_submit(
     let res = sqlx::query(
         "UPDATE directories SET
             name=?, host=?, port=?, use_tls=?, skip_tls_verify=?,
-            base_dn=?, bind_dn=?, bind_password=?, user_attribute=?,
+            base_dn=?, bind_dn=?,
+            bind_password = CASE WHEN ? = '' THEN bind_password ELSE ? END,
+            user_attribute=?,
             updated_at=CURRENT_TIMESTAMP
          WHERE id=? AND tenant_id=?",
     )
@@ -395,7 +409,9 @@ pub async fn edit_submit(
     .bind(skip_verify)
     .bind(form.base_dn.trim())
     .bind(form.bind_dn.trim())
+    // Blank keeps the stored password (the edit form is never pre-filled).
     .bind(&form.bind_password)
+    .bind(crate::secrets::seal(crate::secrets::COL_BIND_PASSWORD, &form.bind_password))
     .bind(if form.user_attribute.trim().is_empty() { "uid" } else { form.user_attribute.trim() })
     .bind(id)
     .bind(&auth.tenant_id)
@@ -491,7 +507,7 @@ pub async fn test(
     .bind(id).bind(&auth.tenant_id)
     .fetch_optional(&pool).await
     {
-        Ok(Some(d)) => d,
+        Ok(Some(d)) => reveal(d),
         _ => return Json(TestResponse { ok: false, error: Some("Directory not found".into()) }),
     };
 

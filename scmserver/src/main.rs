@@ -160,6 +160,9 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
     if db_initialized {
         run_migrations(&pool).await?;
+        // Secrets saved before encryption existed are rewritten encrypted.
+        scmserver::secrets::init_from_cookie_key(&cookie_key);
+        scmserver::secrets::encrypt_existing(&pool).await;
         scmserver::agents::startup_scan(&pool).await;
     } else {
         info!("Fresh install detected — waiting for setup via /install");

@@ -263,14 +263,16 @@ async fn dispatch(pool: &SqlitePool, d: &Pending) -> Result<(), String> {
 
             // Per ACTION, not per rule: a rule can now have several webhooks,
             // each with its own credential.
-            let secret: Option<String> = sqlx::query_scalar(
+            let secret: Option<String> = sqlx::query_scalar::<_, String>(
                 "SELECT target_secret FROM alert_actions WHERE id = ?",
             )
             .bind(d.action_id)
             .fetch_optional(pool)
             .await
             .ok()
-            .flatten();
+            .flatten()
+            .map(|s| crate::secrets::open(crate::secrets::COL_WEBHOOK_SECRET, &s))
+            .transpose()?;
 
             let mut req = client.post(url.trim()).json(&payload);
             if let Some(s) = secret.filter(|s| !s.trim().is_empty()) {

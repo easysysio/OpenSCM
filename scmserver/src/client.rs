@@ -50,6 +50,8 @@ pub async fn sign_response(
     .fetch_optional(pool)
     .await?
     .ok_or_else(|| format!("CRITICAL: No signing key found for tenant '{}'", tenant_id))?;
+    let priv_base64 = crate::secrets::open(crate::secrets::COL_TENANT_KEY, &priv_base64)
+        .map_err(|e| format!("Signing key for tenant '{}': {}. Rotate Signing Key under Settings → Danger Zone issues a new one.", tenant_id, e))?;
 
     let priv_bytes = general_purpose::STANDARD.decode(priv_base64.trim())?;
     let key_array: [u8; 32] = priv_bytes

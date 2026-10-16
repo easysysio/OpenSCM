@@ -389,9 +389,12 @@ async fn save_actions(
         .bind(alert_id).execute(pool).await;
 
     for (kind, target, secret) in actions {
-        let keep = secret.clone().or_else(|| {
-            existing.iter().find(|(k, _)| k == kind).and_then(|(_, s)| s.clone())
-        });
+        // A new secret is sealed; a kept one is carried over as stored.
+        let keep = secret.as_deref()
+            .map(|s| crate::secrets::seal(crate::secrets::COL_WEBHOOK_SECRET, s))
+            .or_else(|| {
+                existing.iter().find(|(k, _)| k == kind).and_then(|(_, s)| s.clone())
+            });
         if let Err(e) = sqlx::query(
             "INSERT INTO alert_actions (alert_id, action, target, target_secret)
              VALUES (?, ?, ?, ?)",

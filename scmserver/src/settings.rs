@@ -332,7 +332,7 @@ pub async fn settings_save(
         ]);
 
         if !smtp_password.is_empty() {
-            updates.push(("smtp_password", smtp_password));
+            updates.push(("smtp_password", crate::secrets::seal(crate::secrets::COL_SMTP_PASSWORD, &smtp_password)));
         }
 
         // SaaS-only platform toggle (superuser, global). Checkbox: present in
@@ -464,7 +464,10 @@ pub async fn settings_test_email(
 
     let port: u16 = map.get("smtp_port").and_then(|v| v.parse().ok()).unwrap_or(587);
     let username  = map.get("smtp_username").cloned().unwrap_or_default();
-    let password  = map.get("smtp_password").cloned().unwrap_or_default();
+    let password  = crate::secrets::open_or_empty(
+        crate::secrets::COL_SMTP_PASSWORD,
+        &map.get("smtp_password").cloned().unwrap_or_default(),
+    );
     let from      = map.get("smtp_from").cloned()
         .filter(|s| !s.is_empty())
         .unwrap_or_else(|| format!("OpenSCM <noreply@{}>", host));
@@ -656,7 +659,7 @@ pub async fn settings_rotate_keys(
         )
         .bind(&auth.tenant_id)
         .bind(&public_b64)
-        .bind(&private_b64)
+        .bind(crate::secrets::seal(crate::secrets::COL_TENANT_KEY, &private_b64))
         .execute(&pool)
         .await?;
 

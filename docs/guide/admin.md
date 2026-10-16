@@ -294,9 +294,27 @@ Back up the database file regularly to prevent data loss:
 
 ### Key Backup
 
-Back up your server keypair alongside the database. If the server keys
-are lost all registered agents will fail signature verification and need
-to re-register.
+Back up the server's key file **together with the database**. The secrets
+OpenSCM has to use are stored in the database encrypted under a key derived
+from it:
+
+- each organization's agent-signing key
+- the SMTP password
+- LDAP bind passwords
+- single sign-on client secrets
+- webhook secrets
+
+A copy of the database alone doesn't reveal them. A database restored
+without its key file can't read them either. If the key file is lost or
+replaced:
+
+- Every session ends, and users sign in again.
+- Agents stop accepting the server's answers. Under **Settings → Danger
+  Zone**, **Rotate Signing Key** issues a new key, and agents re-enrol on
+  their next check-in.
+- Re-enter the SMTP password, LDAP bind passwords, the single sign-on client
+  secret and webhook secrets. Until you do, they read as not set, and the
+  server log names each one it couldn't read.
 
 === "Linux"
     ```bash

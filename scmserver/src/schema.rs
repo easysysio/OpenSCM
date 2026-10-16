@@ -872,7 +872,7 @@ pub async fn initialize_database(pool: &SqlitePool) -> Result<(), sqlx::Error> {
             "INSERT INTO tenant_keys (tenant_id, public_key, private_key) VALUES ('default', ?, ?)"
         )
         .bind(public_base64)
-        .bind(private_base64)
+        .bind(crate::secrets::seal(crate::secrets::COL_TENANT_KEY, &private_base64))
         .execute(pool)
         .await?;
 

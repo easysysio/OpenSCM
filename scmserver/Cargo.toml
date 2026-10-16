@@ -63,6 +63,9 @@ semver = "1.0"
 # ring, the crypto provider already in the build, so nothing else is added —
 # in particular not the `rsa` crate (see .cargo/audit.toml).
 jsonwebtoken = { version = "9", default-features = false }
+# AEAD for secrets stored in the database (secrets.rs). Already in the build
+# as rustls's crypto provider; named here so it can be used directly.
+ring = "0.17"
 regex = "1.10"
 ipnet = "2.9"
 ldap3 = { version = "0.12", default-features = false, features = ["sync", "tls-rustls-ring"] }
