@@ -6,6 +6,9 @@ All notable changes to OpenSCM are documented here.
 
 ## [Unreleased]
 
+### Changed
+- **Release builds allow 20 minutes to install Zig instead of 5.** The 5-minute limit added in 0.10.1 ran out while the setup action was still retrying one slow download server, before it could try the others, and failed the build. Build tooling only: no change to the application.
+
 ---
 
 ## [0.10.1] - 2026-10-16

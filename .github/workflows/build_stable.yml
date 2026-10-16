@@ -70,7 +70,10 @@ jobs:
 
       - name: Install Zig
         uses: mlugg/setup-zig@v2
-        timeout-minutes: 5
+        # Long enough to fall through a slow download server or two: the
+        # action tries the community mirrors in random order, retrying each
+        # before moving on, and 5 minutes ran out on the first bad one.
+        timeout-minutes: 20
         with:
           version: 0.16.0
           cache-key: ${{ matrix.target }}
@@ -170,7 +173,10 @@ jobs:
 
       - name: Install Zig
         uses: mlugg/setup-zig@v2
-        timeout-minutes: 5
+        # Long enough to fall through a slow download server or two: the
+        # action tries the community mirrors in random order, retrying each
+        # before moving on, and 5 minutes ran out on the first bad one.
+        timeout-minutes: 20
         with:
           version: 0.16.0
           cache-key: ${{ matrix.target }}
@@ -236,7 +242,10 @@ jobs:
 
       - name: Install Zig
         uses: mlugg/setup-zig@v2
-        timeout-minutes: 5
+        # Long enough to fall through a slow download server or two: the
+        # action tries the community mirrors in random order, retrying each
+        # before moving on, and 5 minutes ran out on the first bad one.
+        timeout-minutes: 20
         with:
           version: 0.16.0
 
@@ -296,7 +305,10 @@ jobs:
 
       - name: Install Zig
         uses: mlugg/setup-zig@v2
-        timeout-minutes: 5
+        # Long enough to fall through a slow download server or two: the
+        # action tries the community mirrors in random order, retrying each
+        # before moving on, and 5 minutes ran out on the first bad one.
+        timeout-minutes: 20
         with:
           version: 0.16.0
 
@@ -597,7 +609,10 @@ jobs:
 
       - name: Install Zig
         uses: mlugg/setup-zig@v2
-        timeout-minutes: 5
+        # Long enough to fall through a slow download server or two: the
+        # action tries the community mirrors in random order, retrying each
+        # before moving on, and 5 minutes ran out on the first bad one.
+        timeout-minutes: 20
         with:
           version: 0.16.0
           cache-key: ${{ matrix.target }}
