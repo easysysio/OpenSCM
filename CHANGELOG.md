@@ -6,6 +6,10 @@ All notable changes to OpenSCM are documented here.
 
 ## [Unreleased]
 
+---
+
+## [0.10.3] - 2026-10-17
+
 ### Added
 - **The sidebar shows how many systems are waiting for an agent update.** A yellow number on **Inventory**, so it shows while the menu is collapsed, and on **Systems** counts the approved systems running an older agent than the one this server ships for their platform: the systems with an **Upgrade** button. A system whose upgrade is queued keeps counting until its agent reports the new version. The Systems page's Upgrade buttons, **Upgrade All** and the new count now share one version check, so they cannot disagree.
 
