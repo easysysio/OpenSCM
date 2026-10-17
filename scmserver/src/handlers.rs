@@ -111,6 +111,11 @@ pub async fn render_template(
             .unwrap_or((0i64, session.tenant_id.clone()));
 
             context.insert("pending_count", &pending_count);
+            // Sidebar badge on Inventory / Systems.
+            context.insert(
+                "agent_update_count",
+                &crate::agents::systems_awaiting_update(db_pool, &session.tenant_id).await,
+            );
 
             // Batch query 2: top 10 notifications + total count in one round-trip.
             // COUNT(*) OVER() is a window function supported by SQLite ≥ 3.25 (2018).
@@ -148,6 +153,7 @@ pub async fn render_template(
         } else {
             // Guest defaults
             context.insert("pending_count", &0i64);
+            context.insert("agent_update_count", &0i64);
             context.insert("notify_count", &0i64);
             context.insert("notifications", &Vec::<Notification>::new());
             context.insert("tenant_name", &String::new());
@@ -155,6 +161,7 @@ pub async fn render_template(
     } else {
         // No pool available
         context.insert("pending_count", &0i64);
+        context.insert("agent_update_count", &0i64);
         context.insert("notify_count", &0i64);
         context.insert("notifications", &Vec::<Notification>::new());
         context.insert("tenant_name", &String::new());

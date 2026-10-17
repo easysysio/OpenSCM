@@ -170,7 +170,10 @@
           <li class="nav-item">
             <a href="#" class="nav-link">
               <i class="nav-icon fas fa-warehouse"></i>
-              <p>Inventory <i class="fas fa-angle-left right"></i></p>
+              {# The update count is repeated here so it shows while the menu
+                 is collapsed. AdminLTE offsets a second .right item, so the
+                 badge sits beside the arrow rather than on top of it. #}
+              <p>Inventory <i class="fas fa-angle-left right"></i>{% if agent_update_count and agent_update_count > 0 %}<span class="badge badge-warning right" title="{{ agent_update_count }} system(s) waiting for an agent update">{{ agent_update_count }}</span>{% endif %}</p>
             </a>
             <ul class="nav nav-treeview">
               <li class="nav-item">
@@ -179,7 +182,10 @@
                   <p>
                     Systems
                     {% if pending_count > 0 %}
-                      <span class="badge badge-danger right">{{ pending_count }}</span>
+                      <span class="badge badge-danger right" title="{{ pending_count }} system(s) waiting for enrollment approval">{{ pending_count }}</span>
+                    {% endif %}
+                    {% if agent_update_count and agent_update_count > 0 %}
+                      <span class="badge badge-warning right" title="{{ agent_update_count }} system(s) waiting for an agent update">{{ agent_update_count }}</span>
                     {% endif %}
                   </p>
                 </a>

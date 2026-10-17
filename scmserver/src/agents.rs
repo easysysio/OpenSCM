@@ -22,7 +22,83 @@ use sha2::{Digest, Sha256};
 use sqlx::SqlitePool;
 use tracing::{error, info, warn};
 
+use std::collections::HashMap;
+
+use crate::models::AgentPackage;
 use crate::STATIC_FILES_DIR;
+
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Helper: load_packages
+// The bundled agent for each platform, keyed by platform. Empty on a database
+// error, which shows as "no upgrades available" rather than a failed page.
+// ─────────────────────────────────────────────────────────────────────────────
+pub async fn load_packages(pool: &SqlitePool) -> HashMap<String, AgentPackage> {
+    sqlx::query_as::<_, AgentPackage>("SELECT platform, version, sha256, url FROM agent_packages")
+        .fetch_all(pool)
+        .await
+        .unwrap_or_else(|e| { error!("Failed to fetch agent packages: {}", e); Vec::new() })
+        .into_iter()
+        .map(|p| (p.platform.clone(), p))
+        .collect()
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Helper: available_upgrade
+// The version a system's agent can be upgraded to, or None. The ONE place
+// that decides it: the Systems page's Upgrade buttons, Upgrade All and the
+// sidebar's "waiting for an agent update" badge all ask here, so they cannot
+// disagree. None when the platform is unknown ("NA" or empty — the agent has
+// not reported it), when no agent is bundled for it, or when either version
+// is not semver (very old agents).
+// ─────────────────────────────────────────────────────────────────────────────
+pub fn available_upgrade(
+    pkgs: &HashMap<String, AgentPackage>,
+    ver: &str,
+    arch: &str,
+    os: &str,
+) -> Option<String> {
+    let known = |v: &str| !v.is_empty() && v != "NA";
+    if !known(ver) || !known(arch) || !known(os) {
+        return None;
+    }
+    let pkg = pkgs.get(&derive_platform(arch, os))?;
+    let current = semver::Version::parse(ver).ok()?;
+    let available = semver::Version::parse(&pkg.version).ok()?;
+    (available > current).then(|| pkg.version.clone())
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Helper: systems_awaiting_update
+// How many of the tenant's approved systems run an older agent than the one
+// bundled for their platform. A system with an upgrade already queued still
+// counts until its agent reports the new version; offline systems count too.
+// Drives the sidebar badge, so it runs on every page load: one indexed query
+// over the tenant's active systems plus the (small) package table.
+// ─────────────────────────────────────────────────────────────────────────────
+pub async fn systems_awaiting_update(pool: &SqlitePool, tenant_id: &str) -> i64 {
+    let rows: Vec<(String, String, String)> = match sqlx::query_as(
+        "SELECT COALESCE(ver, ''), COALESCE(arch, ''), COALESCE(os, '')
+           FROM systems WHERE tenant_id = ? AND status = 'active'",
+    )
+    .bind(tenant_id)
+    .fetch_all(pool)
+    .await
+    {
+        Ok(r) => r,
+        Err(e) => {
+            error!("Failed to count systems awaiting an agent update: {}", e);
+            return 0;
+        }
+    };
+    if rows.is_empty() {
+        return 0;
+    }
+    let pkgs = load_packages(pool).await;
+    rows.iter()
+        .filter(|(ver, arch, os)| available_upgrade(&pkgs, ver, arch, os).is_some())
+        .count() as i64
+}
 
 
 // ─────────────────────────────────────────────────────────────────────────────

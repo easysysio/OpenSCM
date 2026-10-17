@@ -170,6 +170,13 @@ The button compares versions using semver, so it only appears when the bundled
 version is strictly newer. Re-clicking an already-queued upgrade is a no-op (one
 upgrade per system at a time, enforced by a unique index).
 
+A yellow number in the sidebar, on **Inventory** and on **Systems**, shows how
+many approved systems are waiting for an agent update: the systems that have an
+**Upgrade** button. A system whose upgrade is already queued keeps counting
+until its agent reports the new version, and offline systems count too. The
+number disappears once every agent is current. (The red number beside it on
+**Systems** is the systems waiting for enrollment approval.)
+
 !!! tip "Per-platform availability"
     The Upgrade button only appears when the server bundles a binary for that
     system's platform (`{arch}-{os}` — for example `x86_64-linux`). If a system

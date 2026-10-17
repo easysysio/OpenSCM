@@ -23,11 +23,10 @@ use bytes::Bytes;
 use chrono::{DateTime, Utc};
 
 use std::collections::BTreeMap;
-use semver::Version;
 use crate::agents::derive_platform;
 use crate::handlers::{normalize_status, is_system_passed};
 use crate::models::{
-    AgentPackage, ErrorQuery, System, SystemGroup, SystemInsideGroup, UserRole, AuthSession,
+    ErrorQuery, System, SystemGroup, SystemInsideGroup, UserRole, AuthSession,
     IndividualResult, PolicyResultGroup, SystemReportData, TestMeta,
 };
 use crate::auth::{self};
@@ -191,16 +190,8 @@ pub async fn systems(
     };
 
     // Fetch all agent packages once for upgrade-availability annotation.
-    // On a DB error, log it and degrade to no upgrade badges.
-    let agent_pkgs: HashMap<String, AgentPackage> = sqlx::query_as::<_, AgentPackage>(
-        "SELECT platform, version, sha256, url FROM agent_packages",
-    )
-    .fetch_all(&pool)
-    .await
-    .unwrap_or_else(|e| { error!("Failed to fetch agent packages: {}", e); Vec::new() })
-    .into_iter()
-    .map(|p| (p.platform.clone(), p))
-    .collect();
+    // On a DB error, load_packages logs it and the page shows no upgrade badges.
+    let agent_pkgs = crate::agents::load_packages(&pool).await;
 
     let systems: Vec<System> = rows
         .into_iter()
@@ -217,23 +208,12 @@ pub async fn systems(
                 _ => None,
             };
 
-            // Determine upgrade availability: compare versions with semver.
-            // Silently ignore unparseable version strings (very old agents may
-            // not conform; they simply show no upgrade button).
-            let (upgrade_available, upgrade_version) = if let (Some(pf), Some(cv)) = (&platform, &ver) {
-                if let Some(pkg) = agent_pkgs.get(pf) {
-                    let current  = Version::parse(cv).ok();
-                    let available = Version::parse(&pkg.version).ok();
-                    match (current, available) {
-                        (Some(c), Some(a)) if a > c => (true, Some(pkg.version.clone())),
-                        _ => (false, None),
-                    }
-                } else {
-                    (false, None)
-                }
-            } else {
-                (false, None)
+            // Same decision as Upgrade All and the sidebar badge.
+            let upgrade_version = match (&ver, &arch, &os) {
+                (Some(v), Some(a), Some(o)) => crate::agents::available_upgrade(&agent_pkgs, v, a, o),
+                _ => None,
             };
+            let upgrade_available = upgrade_version.is_some();
 
             System {
                 id:               row.try_get("system_id").unwrap_or(None),
@@ -1774,42 +1754,18 @@ pub async fn systems_upgrade_all(
         }
     };
 
-    let agent_pkgs: HashMap<String, AgentPackage> = sqlx::query_as::<_, AgentPackage>(
-        "SELECT platform, version, sha256, url FROM agent_packages",
-    )
-    .fetch_all(&pool)
-    .await
-    .unwrap_or_default()
-    .into_iter()
-    .map(|p| (p.platform.clone(), p))
-    .collect();
+    let agent_pkgs = crate::agents::load_packages(&pool).await;
 
-    // Find every system whose bundled agent_packages row is strictly newer
-    // (by semver) than the system's reported version. Systems on platforms
-    // we don't ship binaries for are skipped silently.
-    let mut targets: Vec<i64> = Vec::new();
-    for row in &rows {
-        let id:   i64    = row.try_get("id").unwrap_or(0);
-        let ver:  String = row.try_get("ver").unwrap_or_default();
-        let arch: String = row.try_get("arch").unwrap_or_default();
-        let os:   String = row.try_get("os").unwrap_or_default();
-
-        if arch.is_empty() || os.is_empty() || ver.is_empty() {
-            continue;
-        }
-        let platform = crate::agents::derive_platform(&arch, &os);
-        let pkg = match agent_pkgs.get(&platform) {
-            Some(p) => p,
-            None    => continue,
-        };
-        let current   = Version::parse(&ver).ok();
-        let available = Version::parse(&pkg.version).ok();
-        if let (Some(c), Some(a)) = (current, available) {
-            if a > c {
-                targets.push(id);
-            }
-        }
-    }
+    // Every system whose bundled agent is strictly newer than what it runs —
+    // the same check as the per-row buttons (agents::available_upgrade).
+    let targets: Vec<i64> = rows
+        .iter()
+        .filter(|row| {
+            let field = |c: &str| row.try_get::<String, _>(c).unwrap_or_default();
+            crate::agents::available_upgrade(&agent_pkgs, &field("ver"), &field("arch"), &field("os")).is_some()
+        })
+        .map(|row| row.try_get::<i64, _>("id").unwrap_or(0))
+        .collect();
 
     if targets.is_empty() {
         let msg = urlencoding::encode("No systems are eligible for upgrade.").to_string();
