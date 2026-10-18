@@ -6,6 +6,9 @@ All notable changes to OpenSCM are documented here.
 
 ## [Unreleased]
 
+### Changed
+- **The manual testing workflow tries four candidate agent platforms**: Windows on ARM (client and server), ARMv6 for Raspberry Pi Zero and 1, FreeBSD x86_64 built with Zig instead of a virtual machine, and NetBSD x86_64. Build only, nothing is packaged or published; it shows which of them could be added to releases. Build tooling only: no change to the application.
+
 ---
 
 ## [0.10.4] - 2026-10-18

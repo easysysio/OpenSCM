@@ -195,6 +195,83 @@ jobs:
           retention-days: 1
 
 
+  # ── CANDIDATE TARGETS (experiment: build only, nothing is packaged) ──────
+  # Platforms that newer Zig can reach and Rust ships a standard library for,
+  # tried here before any of them goes near a release:
+  #   aarch64-pc-windows-gnullvm    Windows on ARM (client and server)
+  #   arm-unknown-linux-musleabihf  ARMv6 — Raspberry Pi Zero / 1
+  #   x86_64-unknown-freebsd        Zig 0.15+ cross-compiles to FreeBSD 14+;
+  #                                 could replace the QEMU VM job below if
+  #                                 sysinfo's libkvm/libprocstat link
+  #   x86_64-unknown-netbsd         Zig 0.15+ cross-compiles to NetBSD 10.1+
+  # Uses the newest cargo-zigbuild (0.23.4) so a failure is not just an old
+  # release; the jobs above stay on 0.23.0. A red job here says only that
+  # the target does not build yet.
+  candidate-targets:
+    name: candidate · ${{ matrix.app }} · ${{ matrix.target }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        app: [client, server]
+        target:
+          - aarch64-pc-windows-gnullvm
+          - arm-unknown-linux-musleabihf
+          - x86_64-unknown-freebsd
+          - x86_64-unknown-netbsd
+        exclude:
+          # Servers only where one could plausibly ship.
+          - app: server
+            target: arm-unknown-linux-musleabihf
+          - app: server
+            target: x86_64-unknown-freebsd
+          - app: server
+            target: x86_64-unknown-netbsd
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install cargo-zigbuild
+        run: |
+          CARGO_ZIGBUILD_VERSION=0.23.4
+          curl -fsSL "https://github.com/rust-cross/cargo-zigbuild/releases/download/v${CARGO_ZIGBUILD_VERSION}/cargo-zigbuild-x86_64-unknown-linux-musl.tar.xz" \
+            | sudo tar -xJ -C /usr/local/bin --strip-components=1 \
+                  cargo-zigbuild-x86_64-unknown-linux-musl/cargo-zigbuild
+          cargo-zigbuild --version
+          rustup target add ${{ matrix.target }}
+
+      - name: Install Zig
+        uses: mlugg/setup-zig@v2
+        timeout-minutes: 20
+        with:
+          version: 0.16.0
+          cache-key: candidate-${{ matrix.target }}
+
+      - name: Build Binary
+        run: cargo zigbuild --release --target ${{ matrix.target }} -p scm${{ matrix.app }}
+
+      - name: Inspect Binary
+        run: |
+          # What was produced, for whom, and how it links. Nothing here can
+          # run it: the runner is x86_64 Linux.
+          mkdir -p dist
+          for f in target/${{ matrix.target }}/release/scm${{ matrix.app }} \
+                   target/${{ matrix.target }}/release/scm${{ matrix.app }}.exe; do
+            [ -f "$f" ] || continue
+            ls -l "$f"
+            file "$f"
+            cp "$f" dist/
+          done
+          ls dist/* >/dev/null
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: candidate-${{ matrix.app }}-${{ matrix.target }}
+          path: dist/*
+          retention-days: 3
+
+
   # ── FREEBSD (native QEMU VM — zigbuild can't cross-compile sysinfo) ──────
   build-freebsd:
     name: client · freebsd
