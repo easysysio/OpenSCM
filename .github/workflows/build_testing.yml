@@ -17,7 +17,9 @@ jobs:
         target:
           - x86_64-unknown-linux-musl
           - aarch64-unknown-linux-musl
-          - armv7-unknown-linux-musleabihf
+          # ARMv6 hard-float: runs on Raspberry Pi Zero / 1 AND every ARMv7
+          # board, and is what Raspberry Pi OS 32-bit calls armhf.
+          - arm-unknown-linux-musleabihf
           - riscv64gc-unknown-linux-musl
           - powerpc64le-unknown-linux-musl
           - s390x-unknown-linux-gnu
@@ -31,7 +33,7 @@ jobs:
         exclude:
           # Server only supported on x86_64 and ARM64 (Linux) and x86_64 Windows
           - app: server
-            target: armv7-unknown-linux-musleabihf
+            target: arm-unknown-linux-musleabihf
           - app: server
             target: riscv64gc-unknown-linux-musl
           - app: server
@@ -61,7 +63,7 @@ jobs:
           # every job that needs it — roughly 13 jobs per release once the
           # 8-target client matrix is counted — for an identical binary each
           # time. Pinned so a release is reproducible; bump deliberately.
-          CARGO_ZIGBUILD_VERSION=0.23.0
+          CARGO_ZIGBUILD_VERSION=0.23.4
           # The binary sits inside a versioned directory in the archive, so
           # strip that component rather than extracting the whole tree.
           curl -fsSL "https://github.com/rust-cross/cargo-zigbuild/releases/download/v${CARGO_ZIGBUILD_VERSION}/cargo-zigbuild-x86_64-unknown-linux-musl.tar.xz" \
@@ -111,7 +113,7 @@ jobs:
           case "${{ matrix.target }}" in
             x86_64-*)        ARCH=amd64      ;;
             aarch64-*)       ARCH=arm64      ;;
-            armv7-*)         ARCH=armhf      ;;
+            arm-*)           ARCH=armhf      ;;
             riscv64gc-*)     ARCH=riscv64    ;;
             powerpc64le-*)   ARCH=ppc64le    ;;
             s390x-*)         ARCH=s390x      ;;

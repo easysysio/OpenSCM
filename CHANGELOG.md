@@ -7,6 +7,8 @@ All notable changes to OpenSCM are documented here.
 ## [Unreleased]
 
 ### Changed
+- **The 32-bit ARM agent (`armhf` package) now also runs on Raspberry Pi Zero and Pi 1.** It is built for ARMv6 instead of ARMv7; ARMv6 code runs on every ARMv7 board too, and Raspberry Pi OS 32-bit is ARMv6. Package names and architecture labels are unchanged.
+- **Builds use cargo-zigbuild 0.23.4** (was 0.23.0).
 - **The manual testing workflow tries four candidate agent platforms**: Windows on ARM (client and server), ARMv6 for Raspberry Pi Zero and 1, FreeBSD x86_64 built with Zig instead of a virtual machine, and NetBSD x86_64. Build only, nothing is packaged or published; it shows which of them could be added to releases. Build tooling only: no change to the application.
 
 ---
