@@ -6,6 +6,14 @@ All notable changes to OpenSCM are documented here.
 
 ## [Unreleased]
 
+### Security
+- **The agent pins the server's signing key.** Until now, a reply with a bad signature, or an HTTP 404, made the agent delete the server key it had saved, and the next reply was then accepted unchecked, including an **UPGRADE** naming any download address. Anyone able to intercept an agent's traffic (plain HTTP, DNS spoofing) could therefore run a program of their choosing on the host as root, whatever `cmd_enabled` said. The agent now keeps the key it pinned at registration and refuses any reply not signed by it. With no key pinned it accepts nothing but registration. A 404 resets the agent's ID, not its key. **This only protects hosts running the 0.10.4 agent: upgrade the fleet** (the sidebar's yellow number shows how many systems are waiting).
+- **Upgrades come only from the agent's own server, and never go backwards.** The agent refuses an UPGRADE whose download address is not on its configured server, or whose version is not newer than its own.
+- **Rotating the signing key no longer relies on agents trusting whatever key comes next.** After **Rotate Signing Key**, the previous key keeps signing for 30 days for agents that still hold it, and those replies tell them the new key; agents switch at their next check-in. The Danger Zone shows how many agents have switched. Agents older than 0.10.4 keep working as before. Schema v44 → v45 adds `tenant_keys.retire_after` and `systems.agent_server_key`.
+
+### Added
+- **`scmclient --reset-server-key`** forgets the pinned server key, so the next check-in pins the one the server presents. Needed after the server is reinstalled or its key file is lost, or when an agent was off for a rotation's whole 30 days. See *Configuration → Server key pinning*.
+
 ---
 
 ## [0.10.3] - 2026-10-17

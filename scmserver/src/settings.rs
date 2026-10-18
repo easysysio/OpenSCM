@@ -66,6 +66,11 @@ pub struct Settings {
     pub dormant_warn_days: String,
 }
 
+
+// How long a rotated-out signing key keeps signing for agents that still hold
+// it, handing them the new key (docs/design/0.11.0-agent-protocol.md, D2).
+pub const KEY_GRACE_DAYS: i64 = 30;
+
 // ─────────────────────────────────────────────────────────────────────────────
 // GET /settings
 // Render the admin settings page with current thresholds and SMTP config.
@@ -168,11 +173,41 @@ pub async fn settings(
         ("(none)".to_string(), String::new())
     };
 
+    // Where the approved agents stand after a rotation: on the active key,
+    // on a previous key still in its grace period, or not reporting (agents
+    // before 0.10.4). Shown only when a previous key is still in grace.
+    let rotation: Option<(String, i64, i64, i64)> = sqlx::query_as(
+        "SELECT MAX(k.retire_after),
+                (SELECT COUNT(*) FROM systems s WHERE s.tenant_id = ?1 AND s.status = 'active'
+                   AND s.agent_server_key = (SELECT public_key FROM tenant_keys
+                                              WHERE tenant_id = ?1 AND is_active = 1)),
+                (SELECT COUNT(*) FROM systems s WHERE s.tenant_id = ?1 AND s.status = 'active'
+                   AND s.agent_server_key IN (SELECT public_key FROM tenant_keys
+                                               WHERE tenant_id = ?1 AND is_active = 0
+                                                 AND retire_after > CURRENT_TIMESTAMP)),
+                (SELECT COUNT(*) FROM systems s WHERE s.tenant_id = ?1 AND s.status = 'active'
+                   AND s.agent_server_key IS NULL)
+           FROM tenant_keys k
+          WHERE k.tenant_id = ?1 AND k.is_active = 0 AND k.retire_after > CURRENT_TIMESTAMP
+         HAVING MAX(k.retire_after) IS NOT NULL",
+    )
+    .bind(&auth.tenant_id)
+    .fetch_optional(&*pool)
+    .await
+    .unwrap_or_else(|e| { error!("Failed to read key rotation status: {}", e); None });
+
     let mut context = Context::new();
     if let Some(msg) = query.error_message { context.insert("error_message", &msg); }
     if let Some(msg) = query.success_message { context.insert("success_message", &msg); }
     context.insert("settings", &settings);
     context.insert("key_fingerprint", &key_fingerprint);
+    if let Some((until, switched, waiting, unknown)) = rotation {
+        context.insert("previous_key_until", &until);
+        context.insert("agents_switched", &switched);
+        context.insert("agents_waiting", &waiting);
+        context.insert("agents_unreported", &unknown);
+    }
+    context.insert("key_grace_days", &KEY_GRACE_DAYS);
     context.insert("key_created_at", &key_created_at);
 
     render_template(&tera, Some(&pool), "settings.html", context, Some(auth))
@@ -647,8 +682,17 @@ pub async fn settings_rotate_keys(
     let public_b64   = general_purpose::STANDARD.encode(verifying_key.to_bytes());
 
     let result: Result<(), sqlx::Error> = async {
-        // Deactivate all current keys for this tenant
-        sqlx::query("UPDATE tenant_keys SET is_active = 0 WHERE tenant_id = ?")
+        // Retire the current key. It keeps signing for agents that still
+        // hold it for the grace period, and those replies hand them the new
+        // key (client::sign_response_for). Keys retired earlier keep their
+        // own deadline.
+        sqlx::query(
+            "UPDATE tenant_keys
+                SET retire_after = CASE WHEN is_active = 1 THEN datetime('now', ?) ELSE retire_after END,
+                    is_active = 0
+              WHERE tenant_id = ?",
+        )
+        .bind(format!("+{} days", KEY_GRACE_DAYS))
             .bind(&auth.tenant_id)
             .execute(&pool)
             .await?;
@@ -681,7 +725,12 @@ pub async fn settings_rotate_keys(
                 Some(auth.tenant_id.as_str()),
                 Some(&format!("{{\"new_fingerprint\":\"{}\"}}", &public_b64[..public_b64.len().min(24)])),
             ).await;
-            Redirect::to("/settings?success_message=Signing+key+rotated+successfully.+All+agents+will+re-enrol+on+next+heartbeat.#danger").into_response()
+            let msg = format!(
+                "Signing key rotated. Agents switch to the new key at their next check-in; \
+                 the previous key keeps working for {} days.",
+                KEY_GRACE_DAYS
+            );
+            Redirect::to(&format!("/settings?success_message={}#danger", urlencoding::encode(&msg))).into_response()
         }
         Err(e) => {
             error!("Key rotation failed for tenant '{}': {}", auth.tenant_id, e);

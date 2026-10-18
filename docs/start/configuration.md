@@ -220,8 +220,37 @@ The `heartbeat` setting controls how frequently the agent checks in with the ser
     to re-approve the system in the dashboard.
 
 !!! warning "Key Backup"
-    Back up your **server** key files regularly. If the server keys are lost, 
-    all registered agents will fail signature verification and need to re-register.
+    Back up your **server** key files regularly, together with the database.
+    If they are lost, agents from 0.10.4 on refuse the server's replies until
+    `scmclient --reset-server-key` is run on each host (see below).
+
+### Server key pinning
+
+Since 0.10.4 the agent pins the server's signing key the first time it
+registers, and from then on acts only on replies signed with it. A reply
+signed with any other key is refused and logged; the agent never gives up the
+pinned key because of what arrives over the network. This is what stops
+someone on the network between agent and server from sending the agent
+commands or upgrades.
+
+The pinned key changes in two ways only:
+
+- **Key rotation.** Under **Settings → Danger Zone**, **Rotate Signing Key**
+  issues a new key. The previous key keeps working for 30 days, and replies
+  signed with it tell the agent the new key; the agent switches at its next
+  check-in. The Danger Zone shows how many agents have switched.
+- **By hand, on the host.** After the server is reinstalled, its key file is
+  lost, or an agent was off for the whole 30 days:
+
+    ```bash
+    sudo scmclient --reset-server-key
+    ```
+
+    The agent forgets the pinned key, and its next check-in pins the key the
+    server presents. It can run while the agent service is running.
+
+Agents also download upgrades only from their own server, and never to an
+older version than the one they run.
 
 Keys are generated automatically on first run — no manual setup required.
 

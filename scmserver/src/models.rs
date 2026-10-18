@@ -324,6 +324,11 @@ pub struct UnsignedPayload {
     /// Approval bypass only — see docs/design/0.6.0-enrollment-tokens.md.
     #[serde(default)]
     pub enrollment_token: Option<String>,
+    /// The server public key this agent holds (base64), so the reply can be
+    /// signed with it during a rotation's grace period. None from agents
+    /// before 0.10.4. See docs/design/0.11.0-agent-protocol.md, D2.
+    #[serde(default)]
+    pub server_key: Option<String>,
     // Telemetry — all optional; absent from old clients defaults to None.
     #[serde(default)]
     pub cpu_usage:    Option<f32>,

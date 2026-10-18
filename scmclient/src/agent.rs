@@ -546,6 +546,9 @@ async fn post_heartbeat(
         enrollment_token: if needs_handshake {
             config.server.enrollment_token.clone()
         } else { None },
+        server_key:   fs::read_to_string(&identity.server_pub_path).ok()
+            .map(|k| k.trim().to_string())
+            .filter(|k| !k.is_empty()),
         cpu_usage:    sys.cpu_usage,
         mem_used_mb:  sys.mem_used_mb,
         mem_total_mb: sys.mem_total_mb,
@@ -561,12 +564,14 @@ async fn post_heartbeat(
     let response = http_client.post(send_url).json(&request).send().await?;
 
     if response.status() == reqwest::StatusCode::NOT_FOUND {
+        // The system was deleted on the server: register again. The pinned
+        // server key is KEPT — an unsigned 404 is not a reason to trust a new
+        // one (design D1); the registration reply must verify against it.
         warn!(
-            "Server at '{}' rejected ID '{}'. Resetting identity for re-registration.",
+            "Server at '{}' rejected ID '{}'. Resetting the ID for re-registration.",
             base_url, identity.current_id
         );
         let _ = fs::remove_file(&identity.id_path);
-        let _ = fs::remove_file(&identity.server_pub_path);
         return Ok(None);
     }
     if !response.status().is_success() {
@@ -578,40 +583,126 @@ async fn post_heartbeat(
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Verify server signature when we have a cached server public key.
-// Returns Ok(true) if verified (or no key cached yet — first handshake),
-// Ok(false) if verification failed (caller should abort this cycle), or
-// Err on I/O failures we cannot recover from.
+// How far a server reply can be trusted.
+//   Verified — signed by the server key pinned on disk.
+//   Unpinned — no key pinned yet (first registration, or after
+//              `scmclient --reset-server-key`): the reply may only register
+//              us and hand over the key to pin. It cannot run anything.
+//   Rejected — a key is pinned and the reply is not signed by it. Refused and
+//              the pinned key KEPT: dropping it on a bad reply is what let
+//              anyone on the network make the agent trust a key of their
+//              choosing (docs/design/0.11.0-agent-protocol.md, D1).
+// ─────────────────────────────────────────────────────────────────────────────
+#[derive(Debug, PartialEq)]
+pub(crate) enum Trust {
+    Verified,
+    Unpinned,
+    Rejected,
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// check_trust — the decision above, for a reply and the pinned key (if any).
+// ─────────────────────────────────────────────────────────────────────────────
+pub(crate) fn check_trust(pinned_b64: Option<&str>, signed_res: &SignedResponse) -> Trust {
+    let Some(pinned) = pinned_b64.map(str::trim).filter(|k| !k.is_empty()) else {
+        return Trust::Unpinned;
+    };
+    match decode_public_key(pinned) {
+        Ok(verifier) => match verify_server_response(&signed_res.payload, &signed_res.signature, &verifier) {
+            Ok(()) => Trust::Verified,
+            Err(_) => Trust::Rejected,
+        },
+        // A pinned key we cannot read is not "no key": refuse, never re-pin.
+        Err(_) => Trust::Rejected,
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// command_allowed — whether a reply at this trust level may carry `command`.
+// Without a pinned key only registration (and doing nothing) is accepted.
+// ─────────────────────────────────────────────────────────────────────────────
+pub(crate) fn command_allowed(trust: &Trust, command: Option<&str>) -> bool {
+    match trust {
+        Trust::Verified => true,
+        Trust::Unpinned => matches!(command, None | Some("REGISTER") | Some("NONE")),
+        Trust::Rejected => false,
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Read the pinned key and judge the reply; logs a refusal.
 // ─────────────────────────────────────────────────────────────────────────────
 fn verify_response(
     identity:    &AgentIdentity,
     signed_res:  &SignedResponse,
     base_url:    &str,
-) -> Result<bool, Box<dyn std::error::Error>> {
-    if !identity.server_pub_path.exists() {
-        return Ok(true);
+) -> Trust {
+    let pinned = fs::read_to_string(&identity.server_pub_path).ok();
+    let trust = check_trust(pinned.as_deref(), signed_res);
+    match trust {
+        Trust::Verified => debug!("Server signature verified for '{}'.", base_url),
+        Trust::Unpinned => info!("No server key pinned for '{}' yet; accepting registration only.", base_url),
+        Trust::Rejected => error!(
+            "SECURITY ALERT: reply from '{}' is not signed by the pinned server key. Refused; \
+             the pinned key is kept. If the server was reinstalled or its key replaced, run \
+             `scmclient --reset-server-key` on this host to trust the new one.",
+            base_url
+        ),
     }
+    trust
+}
 
-    let server_pub_b64 = fs::read_to_string(&identity.server_pub_path)?;
-    let verifier = match decode_public_key(&server_pub_b64) {
-        Ok(v) => v,
-        Err(e) => {
-            error!("Failed to load server public key: {}", e);
-            return Ok(false);
-        }
-    };
-
-    if let Err(e) = verify_server_response(&signed_res.payload, &signed_res.signature, &verifier) {
-        error!(
-            "SECURITY ALERT: Invalid server signature from '{}': {}. \
-             Dropping cached server key — will re-handshake next cycle.",
-            base_url, e
-        );
-        let _ = fs::remove_file(&identity.server_pub_path);
-        return Ok(false);
+// ─────────────────────────────────────────────────────────────────────────────
+// reset_server_key — `scmclient --reset-server-key`: forget the pinned key for
+// the configured server so the next registration reply pins a new one.
+// Returns the removed file, or None if none was pinned.
+// ─────────────────────────────────────────────────────────────────────────────
+pub fn reset_server_key(config: &Config) -> Result<Option<PathBuf>, Box<dyn std::error::Error>> {
+    let identity = load_or_create_identity(config)?;
+    if identity.server_pub_path.exists() {
+        fs::remove_file(&identity.server_pub_path)?;
+        Ok(Some(identity.server_pub_path))
+    } else {
+        Ok(None)
     }
-    debug!("Server signature verified for '{}'.", base_url);
-    Ok(true)
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// upgrade_source — where an UPGRADE may be downloaded from, or why not.
+//   • Only from our own server: a path, or a URL with the same scheme, host
+//     and port as base_url. Never an address the reply merely names.
+//   • Only to a newer version than the running one (no downgrades, which a
+//     replayed old reply could otherwise cause).
+// docs/design/0.11.0-agent-protocol.md, D4.
+// ─────────────────────────────────────────────────────────────────────────────
+pub(crate) fn upgrade_source(base_url: &str, url: &str, current: &str, target: &str) -> Result<String, String> {
+    match (parse_version(current), parse_version(target)) {
+        (Some(c), Some(t)) if t > c => {}
+        (Some(_), Some(_)) => return Err(format!("v{target} is not newer than the running v{current}")),
+        _ => return Err(format!("cannot compare versions '{current}' and '{target}'")),
+    }
+    let base = reqwest::Url::parse(base_url).map_err(|e| format!("bad server URL: {e}"))?;
+    if url.starts_with('/') && !url.starts_with("//") {
+        return Ok(format!("{}{}", base_url.trim_end_matches('/'), url));
+    }
+    let target_url = reqwest::Url::parse(url).map_err(|e| format!("bad upgrade URL: {e}"))?;
+    if target_url.scheme() == base.scheme()
+        && target_url.host_str() == base.host_str()
+        && target_url.port_or_known_default() == base.port_or_known_default()
+    {
+        Ok(url.to_string())
+    } else {
+        Err(format!("{url} is not on this agent's server"))
+    }
+}
+
+// "1.2.3" (anything after a '-' or '+' ignored) → (1, 2, 3).
+fn parse_version(v: &str) -> Option<(u64, u64, u64)> {
+    let core = v.trim().trim_start_matches('v').split(['-', '+']).next()?;
+    let mut it = core.split('.').map(|p| p.parse::<u64>().ok());
+    let v = (it.next()??, it.next()??, it.next()??);
+    if it.next().is_some() { return None; }
+    Some(v)
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -625,14 +716,45 @@ async fn dispatch_server_command(
     result_url:  &str,
     base_url:    &str,
     inner_json:  &serde_json::Value,
+    trust:       &Trust,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    // Save server public key if the server included one this cycle.
-    if let Some(server_key) = inner_json.get("server_public_key").and_then(|k| k.as_str()) {
-        fs::write(&identity.server_pub_path, server_key.trim())?;
-        info!("Server public key saved for namespace '{}'.", identity.namespace);
+    let command = inner_json.get("command").and_then(|c| c.as_str());
+
+    match trust {
+        // Nothing pinned yet: the registration reply hands us the key to pin
+        // (trust on first use — the one moment it is unavoidable).
+        Trust::Unpinned => {
+            if let Some(server_key) = inner_json.get("server_public_key").and_then(|k| k.as_str()) {
+                if decode_public_key(server_key.trim()).is_ok() {
+                    fs::write(&identity.server_pub_path, server_key.trim())?;
+                    info!("Server public key pinned for namespace '{}'.", identity.namespace);
+                }
+            }
+        }
+        // A reply signed by the key we trust may hand over its successor
+        // (rotation, design D2). `server_public_key` is never taken from a
+        // verified reply: the pin only changes this way.
+        Trust::Verified => {
+            if let Some(next) = inner_json.get("next_server_public_key").and_then(|k| k.as_str()) {
+                if decode_public_key(next.trim()).is_ok() {
+                    fs::write(&identity.server_pub_path, next.trim())?;
+                    info!("Server signing key rotated; now trusting the new key for namespace '{}'.",
+                          identity.namespace);
+                }
+            }
+        }
+        Trust::Rejected => return Ok(()),
     }
 
-    match inner_json.get("command").and_then(|c| c.as_str()) {
+    if !command_allowed(trust, command) {
+        warn!(
+            "Ignoring '{}' from '{}': no server key is pinned yet, so only registration is accepted.",
+            command.unwrap_or(""), base_url
+        );
+        return Ok(());
+    }
+
+    match command {
         Some("REGISTER") => {
             if let Some(new_id) = inner_json.get("id").and_then(|id| id.as_i64()) {
                 fs::write(&identity.id_path, new_id.to_string())?;
@@ -680,14 +802,14 @@ async fn dispatch_server_command(
                 return Ok(());
             }
 
-            info!("Upgrade to v{} requested — downloading from {}", version, url);
-
-            // Build full URL: relative paths are resolved against the server base.
-            let full_url = if url.starts_with("http://") || url.starts_with("https://") {
-                url.to_string()
-            } else {
-                format!("{}{}", base_url, url)
+            let full_url = match upgrade_source(base_url, url, env!("CARGO_PKG_VERSION"), version) {
+                Ok(u) => u,
+                Err(why) => {
+                    error!("UPGRADE to v{} refused: {}.", version, why);
+                    return Ok(());
+                }
             };
+            info!("Upgrade to v{} requested — downloading from {}", version, full_url);
 
             let bytes = match http_client.get(&full_url).send().await {
                 Ok(resp) if resp.status().is_success() => {
@@ -802,9 +924,89 @@ pub async fn send_system_info(
         None    => return Ok(()),  // 404 reset or non-2xx — cycle ends here.
     };
 
-    if !verify_response(&identity, &signed_res, &base_url)? {
+    let trust = verify_response(&identity, &signed_res, &base_url);
+    if trust == Trust::Rejected {
         return Ok(());
     }
 
-    dispatch_server_command(config, &identity, http_client, &result_url, &base_url, &signed_res.payload).await
+    dispatch_server_command(config, &identity, http_client, &result_url, &base_url, &signed_res.payload, &trust).await
+}
+
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // A reply signed by `key`, the way the server signs: serde_json bytes of
+    // the payload value.
+    fn reply(key: &SigningKey, payload: serde_json::Value) -> SignedResponse {
+        let sig = key.sign(&serde_json::to_vec(&payload).unwrap());
+        SignedResponse { payload, signature: general_purpose::STANDARD.encode(sig.to_bytes()) }
+    }
+    fn pub_b64(key: &SigningKey) -> String {
+        general_purpose::STANDARD.encode(key.verifying_key().to_bytes())
+    }
+
+    #[test]
+    fn a_reply_signed_by_the_pinned_key_is_verified() {
+        let server = SigningKey::from_bytes(&[1u8; 32]);
+        let r = reply(&server, serde_json::json!({"command": "TEST"}));
+        assert_eq!(check_trust(Some(&pub_b64(&server)), &r), Trust::Verified);
+    }
+
+    #[test]
+    fn a_reply_signed_by_any_other_key_is_rejected_not_re_trusted() {
+        let server = SigningKey::from_bytes(&[1u8; 32]);
+        let attacker = SigningKey::from_bytes(&[2u8; 32]);
+        let r = reply(&attacker, serde_json::json!({"command": "UPGRADE", "server_public_key": pub_b64(&attacker)}));
+        assert_eq!(check_trust(Some(&pub_b64(&server)), &r), Trust::Rejected);
+        // Garbage instead of a signature, or an unreadable pin, is no better.
+        let mut bad = reply(&server, serde_json::json!({"command": "NONE"}));
+        bad.signature = "not-a-signature".into();
+        assert_eq!(check_trust(Some(&pub_b64(&server)), &bad), Trust::Rejected);
+        assert_eq!(check_trust(Some("corrupt-pin"), &reply(&server, serde_json::json!({}))), Trust::Rejected);
+    }
+
+    #[test]
+    fn without_a_pin_a_reply_may_only_register() {
+        let anyone = SigningKey::from_bytes(&[3u8; 32]);
+        let r = reply(&anyone, serde_json::json!({"command": "REGISTER"}));
+        let t = check_trust(None, &r);
+        assert_eq!(t, Trust::Unpinned);
+        assert!(command_allowed(&t, Some("REGISTER")));
+        assert!(command_allowed(&t, Some("NONE")));
+        assert!(command_allowed(&t, None));
+        assert!(!command_allowed(&t, Some("TEST")), "tests must not run on an unverified reply");
+        assert!(!command_allowed(&t, Some("UPGRADE")), "upgrades must not run on an unverified reply");
+        assert!(!command_allowed(&Trust::Rejected, Some("NONE")));
+        assert!(command_allowed(&Trust::Verified, Some("UPGRADE")));
+    }
+
+    #[test]
+    fn upgrades_come_only_from_our_own_server() {
+        let base = "https://scm.example.com";
+        assert_eq!(upgrade_source(base, "/agents/scmclient-x86_64-linux", "0.10.3", "0.10.4").unwrap(),
+                   "https://scm.example.com/agents/scmclient-x86_64-linux");
+        assert_eq!(upgrade_source("https://scm.example.com/", "/agents/a", "0.10.3", "0.10.4").unwrap(),
+                   "https://scm.example.com/agents/a");
+        assert!(upgrade_source(base, "https://scm.example.com:443/agents/a", "0.10.3", "0.10.4").is_ok());
+        for evil in [
+            "https://evil.example/agents/a",
+            "http://scm.example.com/agents/a",        // scheme differs
+            "https://scm.example.com:8443/agents/a",  // port differs
+            "//evil.example/agents/a",                 // protocol-relative
+            "https://scm.example.com.evil.example/a",
+        ] {
+            assert!(upgrade_source(base, evil, "0.10.3", "0.10.4").is_err(), "{evil} accepted");
+        }
+    }
+
+    #[test]
+    fn upgrades_never_go_backwards() {
+        let base = "http://10.0.0.5:8000";
+        assert!(upgrade_source(base, "/agents/a", "0.10.4", "0.10.4").is_err(), "same version");
+        assert!(upgrade_source(base, "/agents/a", "0.10.4", "0.9.9").is_err(), "downgrade");
+        assert!(upgrade_source(base, "/agents/a", "0.9.9", "0.10.0").is_ok(), "numeric, not text, order");
+        assert!(upgrade_source(base, "/agents/a", "0.10.4", "unknown").is_err());
+    }
 }

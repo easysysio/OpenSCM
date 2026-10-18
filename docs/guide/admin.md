@@ -294,6 +294,10 @@ Back up the database file regularly to prevent data loss:
 
 ### Key Backup
 
+!!! warning "Since 0.10.4, agents pin the server's key"
+    Losing the key file now also means visiting every host running a 0.10.4
+    or later agent, to run `scmclient --reset-server-key`. Back it up.
+
 Back up the server's key file **together with the database**. The secrets
 OpenSCM has to use are stored in the database encrypted under a key derived
 from it:
@@ -310,8 +314,11 @@ replaced:
 
 - Every session ends, and users sign in again.
 - Agents stop accepting the server's answers. Under **Settings → Danger
-  Zone**, **Rotate Signing Key** issues a new key, and agents re-enrol on
-  their next check-in.
+  Zone**, **Rotate Signing Key** issues a new key. Agents older than 0.10.4
+  pick it up on their own. Agents from 0.10.4 on only trust a new key when
+  the old one hands it over, and the old key is gone, so run
+  `scmclient --reset-server-key` on each of their hosts (see
+  [Configuration](../start/configuration.md#server-key-pinning)).
 - Re-enter the SMTP password, LDAP bind passwords, the single sign-on client
   secret and webhook secrets. Until you do, they read as not set, and the
   server log names each one it couldn't read.

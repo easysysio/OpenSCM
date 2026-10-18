@@ -43,16 +43,64 @@ pub async fn sign_response(
     tenant_id: &str,
     payload: serde_json::Value,
 ) -> Result<SignedResponse, Box<dyn std::error::Error>> {
-    let priv_base64 = sqlx::query_scalar::<_, String>(
-        "SELECT private_key FROM tenant_keys WHERE tenant_id = ? AND is_active = 1",
+    sign_response_for(pool, tenant_id, payload, None).await
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Helper: sign_response_for
+// Signs a reply for an agent that says which server key it holds.
+//
+// The agent pins the server key it got at registration and accepts a new one
+// only from a reply signed by the key it already has (design D1/D2). So while
+// a rotated-out key is within its grace period (tenant_keys.retire_after) and
+// the agent still holds it, the reply is signed with THAT key and carries
+// `next_server_public_key`: the agent switches on reading it. Any other case —
+// no key named (agents before 0.10.4), the active key, or a key that is
+// unknown or past its grace period — is signed with the active key. In the
+// last case a current agent refuses the reply, as it should: it needs
+// `scmclient --reset-server-key` on the host.
+// ─────────────────────────────────────────────────────────────────────────────
+pub async fn sign_response_for(
+    pool: &SqlitePool,
+    tenant_id: &str,
+    mut payload: serde_json::Value,
+    agent_server_key: Option<&str>,
+) -> Result<SignedResponse, Box<dyn std::error::Error>> {
+    let active: (String, String) = sqlx::query_as(
+        "SELECT public_key, private_key FROM tenant_keys WHERE tenant_id = ? AND is_active = 1",
     )
     .bind(tenant_id)
     .fetch_optional(pool)
     .await?
     .ok_or_else(|| format!("CRITICAL: No signing key found for tenant '{}'", tenant_id))?;
-    let priv_base64 = crate::secrets::open(crate::secrets::COL_TENANT_KEY, &priv_base64)
-        .map_err(|e| format!("Signing key for tenant '{}': {}. Rotate Signing Key under Settings → Danger Zone issues a new one.", tenant_id, e))?;
 
+    let mut priv_stored = active.1;
+    if let Some(held) = agent_server_key.map(str::trim).filter(|k| !k.is_empty() && *k != active.0) {
+        let previous: Option<String> = sqlx::query_scalar(
+            "SELECT private_key FROM tenant_keys
+              WHERE tenant_id = ? AND public_key = ? AND is_active = 0
+                AND retire_after IS NOT NULL AND retire_after > CURRENT_TIMESTAMP
+              ORDER BY id DESC LIMIT 1",
+        )
+        .bind(tenant_id)
+        .bind(held)
+        .fetch_optional(pool)
+        .await?;
+        match previous {
+            Some(p) => {
+                priv_stored = p;
+                payload["next_server_public_key"] = serde_json::json!(active.0);
+            }
+            None => warn!(
+                "An agent of tenant '{}' holds a server key that is unknown or past its grace \
+                 period; it will refuse this reply until reset with --reset-server-key.",
+                tenant_id
+            ),
+        }
+    }
+
+    let priv_base64 = crate::secrets::open(crate::secrets::COL_TENANT_KEY, &priv_stored)
+        .map_err(|e| format!("Signing key for tenant '{}': {}. Rotate Signing Key under Settings → Danger Zone issues a new one.", tenant_id, e))?;
     let priv_bytes = general_purpose::STANDARD.decode(priv_base64.trim())?;
     let key_array: [u8; 32] = priv_bytes
         .try_into()
@@ -336,7 +384,7 @@ pub async fn send(
                         rereg_data["server_public_key"] = serde_json::json!(pub_key);
                     }
                     // Must go through sign_response — client verifies the signature on every response.
-                    return match sign_response(&pool, tenant_id, rereg_data).await {
+                    return match sign_response_for(&pool, tenant_id, rereg_data, payload.server_key.as_deref()).await {
                         Ok(signed) => (StatusCode::OK, Json(signed)).into_response(),
                         Err(e) => {
                             error!("Failed to sign re-registration response for '{}': {}", payload.hostname, e);
@@ -535,7 +583,8 @@ pub async fn send(
                 // rebuild can't get out of sync with stale stored data.
                 if let Err(e) = sqlx::query(
                     "UPDATE systems SET name=?, ver=?, os=?, ip=?, arch=?, status='active', last_seen=CURRENT_TIMESTAMP,
-                     cpu_usage=?, mem_used_mb=?, mem_total_mb=?, disk_used_gb=?, disk_total_gb=?, uptime_secs=?
+                     cpu_usage=?, mem_used_mb=?, mem_total_mb=?, disk_used_gb=?, disk_total_gb=?, uptime_secs=?,
+                     agent_server_key=?
                      WHERE id=? AND tenant_id=?",
                 )
                 .bind(&payload.hostname)
@@ -549,6 +598,7 @@ pub async fn send(
                 .bind(payload.disk_used_gb)
                 .bind(payload.disk_total_gb)
                 .bind(payload.uptime_secs)
+                .bind(&payload.server_key)
                 .bind(id)
                 .bind(tenant_id)
                 .execute(&mut *tx)
@@ -866,8 +916,9 @@ pub async fn send(
         } // end else (not denied)
     } // end else (id > 0 heartbeat path)
 
-    // Sign and return response
-    match sign_response(&pool, tenant_id, response_data).await {
+    // Sign and return response — with the key this agent holds while a
+    // rotation's grace period lasts (sign_response_for).
+    match sign_response_for(&pool, tenant_id, response_data, payload.server_key.as_deref()).await {
         Ok(signed) => (StatusCode::OK, Json(signed)).into_response(),
         Err(e) => {
             error!("Failed to sign response for tenant '{}': {}", tenant_id, e);

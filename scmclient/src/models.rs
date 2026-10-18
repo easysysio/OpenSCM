@@ -22,6 +22,12 @@ pub struct UnsignedPayload {
     /// servers see no new field. See docs/design/0.6.0-enrollment-tokens.md.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub enrollment_token: Option<String>,
+    /// The server public key this agent has pinned (base64), so during a key
+    /// rotation the server signs with the key we trust and hands us the new
+    /// one. Omitted until a key is pinned. See
+    /// docs/design/0.11.0-agent-protocol.md, D2.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub server_key: Option<String>,
     // Telemetry — optional so old servers ignore unknown fields gracefully.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub cpu_usage:    Option<f32>,

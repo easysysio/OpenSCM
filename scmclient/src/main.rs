@@ -198,6 +198,22 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     //     binary in place; Rust opens files O_CLOEXEC by default, so this lock
     //     is released across the exec and the re-exec'd image re-acquires it —
     //     no self-deadlock. Dropping `_instance_lock` (process exit) releases it.
+    // 3b. `--reset-server-key`: forget the pinned server key so the next
+    //     registration reply pins a new one. One-shot, safe while the daemon
+    //     runs (it re-registers at its next heartbeat). The only way, besides
+    //     a rotation announced by the trusted key, to trust a new server key.
+    if args.iter().any(|a| a == "--reset-server-key") {
+        let config = config::get_config()?;
+        match agent::reset_server_key(&config)? {
+            Some(path) => println!(
+                "Forgot the pinned server key for {} ({}). The next check-in pins the key the server presents.",
+                config.server.url, path.display()
+            ),
+            None => println!("No server key was pinned for {}.", config.server.url),
+        }
+        return Ok(());
+    }
+
     let _instance_lock = {
         use fs2::FileExt;
         use std::io::{Seek, SeekFrom, Write};
@@ -330,6 +346,9 @@ OPTIONS:
     -h, --help          Print this help message
     -ver, --version     Print version information
     --url <URL>         Set or override the Server URL (e.g., http://localhost:8000)
+    --reset-server-key  Forget the pinned server key; the next check-in trusts the key
+                        the server presents. Needed after the server is reinstalled,
+                        or when the agent missed a key rotation's grace period.
 
 RUN OPTIONS (for `scmclient run`):
     --policy <FILE>     Path to an OpenSCM policy JSON file (required)

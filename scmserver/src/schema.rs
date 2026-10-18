@@ -2892,6 +2892,32 @@ async fn run_migrations_on(pool: &SqlitePool) -> Result<(), sqlx::Error> {
         info!("Schema migration v43 → v44 complete.");
     }
 
+    // ─────────────────────────────────────────────────────────────────────
+    // v44 → v45: signing-key rotation with a grace period (0.10.4).
+    //
+    // tenant_keys.retire_after — a rotated-out key keeps signing for agents
+    //   that still hold it until this time, and its replies announce the new
+    //   key. Agents switch only on a reply signed by the key they already
+    //   trust. NULL: retired immediately (keys rotated before 0.10.4).
+    // systems.agent_server_key — the server key the agent says it holds, so
+    //   the Danger Zone can show who has switched. NULL: an agent from before
+    //   0.10.4, which does not report it.
+    // See docs/design/0.11.0-agent-protocol.md, D2.
+    // ─────────────────────────────────────────────────────────────────────
+    if version < 45 {
+        info!("Running schema migration v44 → v45 (signing-key grace period)...");
+        if table_exists(pool, "tenant_keys").await && !column_exists(pool, "tenant_keys", "retire_after").await {
+            sqlx::query("ALTER TABLE tenant_keys ADD COLUMN retire_after DATETIME")
+                .execute(pool).await?;
+        }
+        if table_exists(pool, "systems").await && !column_exists(pool, "systems", "agent_server_key").await {
+            sqlx::query("ALTER TABLE systems ADD COLUMN agent_server_key TEXT")
+                .execute(pool).await?;
+        }
+        sqlx::query("UPDATE schema_info SET version = 45").execute(pool).await?;
+        info!("Schema migration v44 → v45 complete.");
+    }
+
     Ok(())
 }
 

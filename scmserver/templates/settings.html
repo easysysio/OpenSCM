@@ -637,14 +637,24 @@
                       <div>
                         <strong>Rotate Signing Key</strong>
                         <p class="text-muted mb-1" style="font-size:0.88rem;">
-                          Generates a new Ed25519 keypair for this tenant and deactivates the current one.
-                          <strong>All registered agents will automatically re-enrol on their next heartbeat</strong>
-                          — no manual action is needed per agent, but there will be a brief gap until each agent checks in.
+                          Generates a new Ed25519 keypair for this tenant. Agents switch to it at their next
+                          check-in, told to by a message signed with the key they already trust. The previous key
+                          keeps working for <strong>{{ key_grace_days }} days</strong>; an agent that does not check in
+                          during that time needs <code>scmclient --reset-server-key</code> on its host.
                         </p>
                         <small class="text-muted">
                           <i class="fas fa-key mr-1"></i>Active key: <code>{{ key_fingerprint }}</code>
                           {% if key_created_at %}&nbsp;·&nbsp;Created <span class="datetime" data-utc="{{ key_created_at }}">{{ key_created_at }}</span>{% endif %}
                         </small>
+                        {% if previous_key_until %}
+                        <div class="small mt-1" id="rotation-status">
+                          <i class="fas fa-exchange-alt mr-1"></i>
+                          Previous key accepted until <span class="datetime" data-utc="{{ previous_key_until }}">{{ previous_key_until }}</span>:
+                          <strong>{{ agents_switched }}</strong> agent(s) switched,
+                          <strong>{{ agents_waiting }}</strong> not yet{% if agents_unreported > 0 %},
+                          <strong>{{ agents_unreported }}</strong> on agents older than 0.10.4 (they re-trust the new key on their own){% endif %}.
+                        </div>
+                        {% endif %}
                       </div>
                       <button type="button" class="btn btn-outline-warning btn-sm ml-4 flex-shrink-0"
                               data-toggle="modal" data-target="#rotateKeyModal">
@@ -702,8 +712,8 @@
             <form method="post" action="/settings/rotate-keys">
               <div class="modal-body">
                 <p>A new Ed25519 signing keypair will be generated for this tenant.</p>
-                <p><strong>All registered agents will re-enrol automatically on their next heartbeat.</strong>
-                   Until each agent checks in it will be unable to submit compliance results.</p>
+                <p>Agents switch to the new key at their next check-in. The current key keeps working for
+                   <strong>{{ key_grace_days }} days</strong> for agents that have not checked in yet.</p>
                 <p class="mb-0 text-muted" style="font-size:0.88rem;">
                   Current key: <code>{{ key_fingerprint }}</code>
                 </p>

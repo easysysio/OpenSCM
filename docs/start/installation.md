@@ -102,8 +102,9 @@ The server only needs to be installed once on a central host.
     ```
 
     !!! warning "Volume Backup"
-        Always mount the `/etc/openscm` volume. If it is lost all registered
-        agents will need to re-register.
+        Always mount the `/etc/openscm` volume. If it is lost, agents from
+        0.10.4 on refuse the server until `scmclient --reset-server-key` is
+        run on each host.
 
 === "Windows"
 
