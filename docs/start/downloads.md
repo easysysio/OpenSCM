@@ -48,6 +48,7 @@ The central server manages agents, policies, and compliance reports.
     | Architecture | Package |
     | :--- | :--- |
     | x86_64 | [:material-download: scmserver-0.10.4-1-x86_64.exe](https://repo.openscm.io/stable/windows/scmserver-0.10.4-1-x86_64.exe) |
+    | ARM64 | [:material-download: scmserver-0.10.4-1-aarch64.exe](https://repo.openscm.io/stable/windows/scmserver-0.10.4-1-aarch64.exe) |
 
     Run the installer and follow the setup wizard. The server will be registered
     as a Windows Service automatically.
@@ -66,7 +67,7 @@ package for the machine it runs on.
     | :--- | :--- |
     | x86_64 (amd64) | [:material-download: scmclient_0.10.4-1_amd64.deb](https://repo.openscm.io/stable/debian/pool/main/s/scmclient/scmclient_0.10.4-1_amd64.deb) |
     | ARM64 (aarch64) | [:material-download: scmclient_0.10.4-1_arm64.deb](https://repo.openscm.io/stable/debian/pool/main/s/scmclient/scmclient_0.10.4-1_arm64.deb) |
-    | ARMv7 (armhf) | [:material-download: scmclient_0.10.4-1_armhf.deb](https://repo.openscm.io/stable/debian/pool/main/s/scmclient/scmclient_0.10.4-1_armhf.deb) |
+    | ARMv6+ (armhf; Raspberry Pi Zero and up) | [:material-download: scmclient_0.10.4-1_armhf.deb](https://repo.openscm.io/stable/debian/pool/main/s/scmclient/scmclient_0.10.4-1_armhf.deb) |
     | i686 (32-bit x86) | [:material-download: scmclient_0.10.4-1_i386.deb](https://repo.openscm.io/stable/debian/pool/main/s/scmclient/scmclient_0.10.4-1_i386.deb) |
     | RISC-V 64 | [:material-download: scmclient_0.10.4-1_riscv64.deb](https://repo.openscm.io/stable/debian/pool/main/s/scmclient/scmclient_0.10.4-1_riscv64.deb) |
     | PowerPC 64 LE | [:material-download: scmclient_0.10.4-1_ppc64el.deb](https://repo.openscm.io/stable/debian/pool/main/s/scmclient/scmclient_0.10.4-1_ppc64el.deb) |
@@ -83,7 +84,7 @@ package for the machine it runs on.
     | :--- | :--- |
     | x86_64 | [:material-download: scmclient-0.10.4-1.x86_64.rpm](https://repo.openscm.io/stable/redhat/scmclient-0.10.4-1.x86_64.rpm) |
     | ARM64 (aarch64) | [:material-download: scmclient-0.10.4-1.aarch64.rpm](https://repo.openscm.io/stable/redhat/scmclient-0.10.4-1.aarch64.rpm) |
-    | ARMv7 (armhf) | [:material-download: scmclient-0.10.4-1.armhf.rpm](https://repo.openscm.io/stable/redhat/scmclient-0.10.4-1.armhf.rpm) |
+    | ARMv6+ (armhf; Raspberry Pi Zero and up) | [:material-download: scmclient-0.10.4-1.armhf.rpm](https://repo.openscm.io/stable/redhat/scmclient-0.10.4-1.armhf.rpm) |
     | i686 (32-bit x86) | [:material-download: scmclient-0.10.4-1.i386.rpm](https://repo.openscm.io/stable/redhat/scmclient-0.10.4-1.i386.rpm) |
     | RISC-V 64 | [:material-download: scmclient-0.10.4-1.riscv64.rpm](https://repo.openscm.io/stable/redhat/scmclient-0.10.4-1.riscv64.rpm) |
     | PowerPC 64 LE | [:material-download: scmclient-0.10.4-1.ppc64le.rpm](https://repo.openscm.io/stable/redhat/scmclient-0.10.4-1.ppc64le.rpm) |
@@ -100,7 +101,7 @@ package for the machine it runs on.
     | :--- | :--- |
     | x86_64 | [:material-download: scmclient-0.10.4-1-x86_64.pkg.tar.zst](https://repo.openscm.io/stable/arch/scmclient-0.10.4-1-x86_64.pkg.tar.zst) |
     | ARM64 (aarch64) | [:material-download: scmclient-0.10.4-1-aarch64.pkg.tar.zst](https://repo.openscm.io/stable/arch/scmclient-0.10.4-1-aarch64.pkg.tar.zst) |
-    | ARMv7 (armhf) | [:material-download: scmclient-0.10.4-1-armhf.pkg.tar.zst](https://repo.openscm.io/stable/arch/scmclient-0.10.4-1-armhf.pkg.tar.zst) |
+    | ARMv6+ (armhf; Raspberry Pi Zero and up) | [:material-download: scmclient-0.10.4-1-armhf.pkg.tar.zst](https://repo.openscm.io/stable/arch/scmclient-0.10.4-1-armhf.pkg.tar.zst) |
     | ppc64le | [:material-download: scmclient-0.10.4-1-ppc64le.pkg.tar.zst](https://repo.openscm.io/stable/arch/scmclient-0.10.4-1-ppc64le.pkg.tar.zst) |
     | RISC-V 64 | [:material-download: scmclient-0.10.4-1-riscv64.pkg.tar.zst](https://repo.openscm.io/stable/arch/scmclient-0.10.4-1-riscv64.pkg.tar.zst) |
 
@@ -143,6 +144,7 @@ package for the machine it runs on.
     | Architecture | Package |
     | :--- | :--- |
     | x86_64 | [:material-download: scmclient-0.10.4-1-x86_64.exe](https://repo.openscm.io/stable/windows/scmclient-0.10.4-1-x86_64.exe) |
+    | ARM64 | [:material-download: scmclient-0.10.4-1-aarch64.exe](https://repo.openscm.io/stable/windows/scmclient-0.10.4-1-aarch64.exe) |
 
     Run the installer. The agent can be configured to run as a Windows Service
     during installation.

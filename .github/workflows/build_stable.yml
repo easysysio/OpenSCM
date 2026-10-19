@@ -19,7 +19,7 @@ jobs:
     uses: ./.github/workflows/test.yml
 
   # ── LINUX CLIENTS ─────────────────────────────────────────────────────────
-  # x86_64 / aarch64 / armv7 / riscv64 / ppc64le  →  deb + rpm + archlinux
+  # x86_64 / aarch64 / armhf (ARMv6) / riscv64 / ppc64le  →  deb + rpm + archlinux
   # s390x / i686 / loongarch64                     →  deb + rpm only
   # Raw binaries for x86_64 and aarch64 are also uploaded for agent bundling.
   build-linux-client:
@@ -219,10 +219,20 @@ jobs:
 
   # ── WINDOWS CLIENT ────────────────────────────────────────────────────────
   build-windows-client:
-    name: Windows · client
+    name: Windows · client · ${{ matrix.arch }}
     needs: test
     runs-on: ubuntu-latest
     timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: x86_64-pc-windows-gnu
+            arch: x86_64
+          # Windows on ARM (Snapdragon laptops, Azure Cobalt). gnullvm is
+          # the ARM64 MinGW ABI that Zig ships a libc for.
+          - target: aarch64-pc-windows-gnullvm
+            arch: aarch64
     steps:
       - uses: actions/checkout@v4
 
@@ -240,7 +250,7 @@ jobs:
             | sudo tar -xJ -C /usr/local/bin --strip-components=1 \
                   cargo-zigbuild-x86_64-unknown-linux-musl/cargo-zigbuild
           cargo-zigbuild --version
-          rustup target add x86_64-pc-windows-gnu
+          rustup target add ${{ matrix.target }}
 
       - name: Install Zig
         uses: mlugg/setup-zig@v2
@@ -250,17 +260,18 @@ jobs:
         timeout-minutes: 20
         with:
           version: 0.16.0
+          cache-key: ${{ matrix.target }}
 
       - name: Build and Package
         run: |
           mkdir -p dist build/bin
           VERSION=$(grep -m1 '^version =' scmclient/Cargo.toml | sed 's/.*"\(.*\)".*/\1/')
           RELEASE=1
-          cargo zigbuild --release --target x86_64-pc-windows-gnu -p scmclient
-          cp target/x86_64-pc-windows-gnu/release/scmclient.exe build/bin/scmclient.exe
-          cp target/x86_64-pc-windows-gnu/release/scmclient.exe \
+          cargo zigbuild --release --target ${{ matrix.target }} -p scmclient
+          cp target/${{ matrix.target }}/release/scmclient.exe build/bin/scmclient.exe
+          cp target/${{ matrix.target }}/release/scmclient.exe \
              scmclient/package/windows/scmclient.exe
-          INSTALLER="scmclient-${VERSION}-${RELEASE}-x86_64.exe"
+          INSTALLER="scmclient-${VERSION}-${RELEASE}-${{ matrix.arch }}.exe"
           makensis -DVERSION="$VERSION" -DRELEASE="$RELEASE" \
             "-DINSTALLER_NAME=${INSTALLER}" \
             scmclient/package/windows/scmclient.nsi
@@ -268,23 +279,33 @@ jobs:
 
       - uses: actions/upload-artifact@v4
         with:
-          name: windows-client
+          name: windows-client-${{ matrix.arch }}
           path: dist/*
           retention-days: 1
 
       - name: Upload Raw Binary for Agent Bundle
         uses: actions/upload-artifact@v4
         with:
-          name: raw-client-windows-x86_64
+          name: raw-client-windows-${{ matrix.arch }}
           path: build/bin/scmclient.exe
           retention-days: 1
 
 
   # ── WINDOWS SERVER ────────────────────────────────────────────────────────
   build-windows-server:
-    name: Windows · server
+    name: Windows · server · ${{ matrix.arch }}
     runs-on: ubuntu-latest
     timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: x86_64-pc-windows-gnu
+            arch: x86_64
+          # Windows on ARM (Snapdragon laptops, Azure Cobalt). gnullvm is
+          # the ARM64 MinGW ABI that Zig ships a libc for.
+          - target: aarch64-pc-windows-gnullvm
+            arch: aarch64
     needs: collect-agents
     steps:
       - uses: actions/checkout@v4
@@ -303,7 +324,7 @@ jobs:
             | sudo tar -xJ -C /usr/local/bin --strip-components=1 \
                   cargo-zigbuild-x86_64-unknown-linux-musl/cargo-zigbuild
           cargo-zigbuild --version
-          rustup target add x86_64-pc-windows-gnu
+          rustup target add ${{ matrix.target }}
 
       - name: Install Zig
         uses: mlugg/setup-zig@v2
@@ -313,6 +334,7 @@ jobs:
         timeout-minutes: 20
         with:
           version: 0.16.0
+          cache-key: ${{ matrix.target }}
 
       - name: Stage Embedded Agent Binaries
         uses: actions/download-artifact@v4
@@ -325,10 +347,10 @@ jobs:
           mkdir -p dist build/bin
           VERSION=$(grep -m1 '^version =' scmserver/Cargo.toml | sed 's/.*"\(.*\)".*/\1/')
           RELEASE=1
-          cargo zigbuild --release --target x86_64-pc-windows-gnu -p scmserver
-          cp target/x86_64-pc-windows-gnu/release/scmserver.exe \
+          cargo zigbuild --release --target ${{ matrix.target }} -p scmserver
+          cp target/${{ matrix.target }}/release/scmserver.exe \
              scmserver/package/windows/scmserver.exe
-          INSTALLER="scmserver-${VERSION}-${RELEASE}-x86_64.exe"
+          INSTALLER="scmserver-${VERSION}-${RELEASE}-${{ matrix.arch }}.exe"
           makensis -DVERSION="$VERSION" -DRELEASE="$RELEASE" \
             "-DINSTALLER_NAME=${INSTALLER}" \
             scmserver/package/windows/scmserver.nsi
@@ -336,7 +358,7 @@ jobs:
 
       - uses: actions/upload-artifact@v4
         with:
-          name: windows-server
+          name: windows-server-${{ matrix.arch }}
           path: dist/*
           retention-days: 1
 
@@ -526,6 +548,8 @@ jobs:
           # Windows
           cp raw-clients/raw-client-windows-x86_64/scmclient.exe \
              build/agents/scmclient-x86_64-windows.exe
+          cp raw-clients/raw-client-windows-aarch64/scmclient.exe \
+             build/agents/scmclient-aarch64-windows.exe
 
           # macOS (thin binaries preserved before lipo in build-macos-client)
           cp raw-clients/raw-client-macos/scmclient-aarch64 \

@@ -8,7 +8,7 @@ from enterprise servers to edge devices.
 | Requirement | Details |
 | :--- | :--- |
 | **Operating System** | Linux, Windows 10+, FreeBSD, macOS, Arch Linux |
-| **Architecture** | x86_64, ARM64, ARMv7, i686, RISC-V 64, PowerPC 64 LE, s390x, LoongArch64 |
+| **Architecture** | x86_64, ARM64 (Linux, Windows, macOS), 32-bit ARM (ARMv6 and up, including Raspberry Pi Zero), i686, RISC-V 64, PowerPC 64 LE, s390x, LoongArch64 |
 | **Privileges** | `sudo` (Linux/macOS) or Administrator (Windows) |
 
 ---
