@@ -6,6 +6,10 @@ All notable changes to OpenSCM are documented here.
 
 ## [Unreleased]
 
+---
+
+## [0.10.5] - 2026-10-19
+
 ### Added
 - **Windows on ARM.** The agent and the server ship as ARM64 installers (`scmclient-…-aarch64.exe`, `scmserver-…-aarch64.exe`) for Snapdragon laptops and ARM cloud machines, next to the x86_64 ones. The server bundles the ARM64 agent, so Windows ARM systems get **Upgrade** like any other. Built and linked in CI; not yet run on Windows ARM hardware.
 
