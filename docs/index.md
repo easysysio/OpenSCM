@@ -33,7 +33,8 @@
 -   :material-devices:{ .lg .middle } __Cross-Platform & Multi-Arch__
     ---
     Run anywhere. Agent supports **Linux, Windows, macOS, and FreeBSD** across
-    **x86, ARM, ARMv7, and PowerPC** architectures.
+    **x86, ARM64, 32-bit ARM, RISC-V, PowerPC, s390x and LoongArch** —
+    from IBM Z to a Raspberry Pi Zero, and Windows on ARM.
 
 -   :material-database:{ .lg .middle } __Zero-Config Database__
     ---

@@ -6,6 +6,9 @@ All notable changes to OpenSCM are documented here.
 
 ## [Unreleased]
 
+### Changed
+- **README and documentation list the new platforms**: Windows on ARM for the agent and the server, and the 32-bit ARM agent's reach down to Raspberry Pi Zero and Pi 1 (ARMv6). Updated in the README's platform table and badges, the FAQ, the home page, the deployment and installation pages.
+
 ---
 
 ## [0.10.5] - 2026-10-19

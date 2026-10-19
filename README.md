@@ -4,7 +4,7 @@
 [![Client License](https://img.shields.io/badge/client-Apache%202.0-green)](https://www.apache.org/licenses/LICENSE-2.0)
 [![Built with Rust](https://img.shields.io/badge/built%20with-Rust-orange)](https://rust-lang.org/)
 ![Platforms](https://img.shields.io/badge/platforms-Linux%20|%20Windows%20|%20FreeBSD%20|%20macOS-lightgrey)
-![Architectures](https://img.shields.io/badge/arch-x86__64%20|%20ARM64%20|%20ARMv7%20|%20i686%20|%20RISC--V%20|%20PowerPC64%20|%20s390x%20|%20LoongArch64-blue)
+![Architectures](https://img.shields.io/badge/arch-x86__64%20|%20ARM64%20|%20ARMv6%2Fv7%20|%20i686%20|%20RISC--V%20|%20PowerPC64%20|%20s390x%20|%20LoongArch64-blue)
 [![Docker](https://img.shields.io/badge/docker-openscm%2Fscmserver-blue)](https://hub.docker.com/r/openscm/scmserver)
 
 A self-hosted, privacy-first security compliance platform built in Rust.
@@ -24,7 +24,7 @@ To check out docs, visit [openscm.io](https://openscm.io).
 - **Mutual Ed25519 Signing** — every payload is cryptographically signed in both directions
 - **UI-Driven Policy Builder** — define compliance tests visually, no scripting required
 - **Evidence-Grade Reports** — archive compliance results as formal audit evidence (PDF)
-- **Universal Platform Support** — Linux, Windows, FreeBSD and macOS on x86_64, ARM64, ARMv7, i686, RISC-V, PowerPC64, s390x and LoongArch64
+- **Universal Platform Support** — Linux, Windows, FreeBSD and macOS on x86_64, ARM64 (including Windows on ARM), 32-bit ARM (ARMv6 and up, Raspberry Pi Zero included), i686, RISC-V, PowerPC64, s390x and LoongArch64
 - **Single Binary Deployment** — server ships with all assets embedded, no setup required
 - **Scheduled Scanning** — automate compliance scans on any schedule
 - **Role-Based Access Control** — Administrator, Editor, Runner, Viewer
@@ -37,13 +37,14 @@ To check out docs, visit [openscm.io](https://openscm.io).
 |:---|:---|:---:|:---:|:---|
 | Linux | x86_64 | ✅ | ✅ | deb, rpm, pkg.tar.zst |
 | Linux | ARM64 (aarch64) | ✅ | ✅ | deb, rpm, pkg.tar.zst |
-| Linux | ARMv7 (armhf) | ❌ | ✅ | deb, rpm, pkg.tar.zst |
+| Linux | 32-bit ARM, ARMv6 and up (armhf; Raspberry Pi Zero / 1 and newer) | ❌ | ✅ | deb, rpm, pkg.tar.zst |
 | Linux | i686 (32-bit x86) | ❌ | ✅ | deb, rpm |
 | Linux | RISC-V 64 | ❌ | ✅ | deb, rpm, pkg.tar.zst |
 | Linux | PowerPC64LE | ❌ | ✅ | deb, rpm, pkg.tar.zst |
 | Linux | s390x (IBM Z) | ❌ | ✅ | deb, rpm |
 | Linux | LoongArch64 | ❌ | ✅ | deb, rpm |
 | Windows | x86_64 | ✅ | ✅ | exe (NSIS) |
+| Windows | ARM64 (Windows on ARM) | ✅ | ✅ | exe (NSIS) |
 | macOS | Universal (ARM64 + x86_64) | ❌ | ✅ | pkg |
 | FreeBSD | x86_64 | ❌ | ✅ | pkg |
 | Docker | amd64, arm64 | ✅ | ❌ | image |

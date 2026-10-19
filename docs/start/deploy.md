@@ -60,7 +60,7 @@ data never leaves your network.
 - :material-check-circle:{ .green } Unlimited systems, users, policies, and reports
 - :material-check-circle:{ .green } Complete data sovereignty — nothing leaves your network
 - :material-check-circle:{ .green } Linux, macOS, Windows, FreeBSD, Docker
-- :material-check-circle:{ .green } x86\_64, ARM64, ARMv7, PowerPC
+- :material-check-circle:{ .green } x86\_64, ARM64 (including Windows on ARM), 32-bit ARM down to Raspberry Pi Zero, RISC-V, PowerPC, s390x, LoongArch64
 - :material-check-circle:{ .green } Open source — inspect, contribute, fork
 
 #### How to start

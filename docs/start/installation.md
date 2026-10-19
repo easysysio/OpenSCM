@@ -109,7 +109,9 @@ The server only needs to be installed once on a central host.
 === "Windows"
 
     Download the installer from the [Downloads](downloads.md) page and run the
-    setup wizard. The server will be registered as a **Windows Service** automatically.
+    setup wizard: `-x86_64.exe` for Intel and AMD machines, `-aarch64.exe` for
+    Windows on ARM (Snapdragon laptops, ARM cloud machines). The server will be
+    registered as a **Windows Service** automatically.
 
     Access the dashboard at **http://localhost:8000** after installation.
 
@@ -201,7 +203,8 @@ stops checking in.
 ### Windows
 
 Download the installer from the [Downloads](downloads.md) page and run the
-setup wizard. The agent is registered as a **Windows Service** automatically,
+setup wizard: `-x86_64.exe` for Intel and AMD machines, `-aarch64.exe` for
+Windows on ARM. The agent is registered as a **Windows Service** automatically,
 and the wizard prompts for the server URL.
 
 ### Installing manually
@@ -250,7 +253,7 @@ building your own automation, or are working offline.
     sudo pacman -U https://repo.openscm.io/stable/arch/scmclient-0.10.5-1-x86_64.pkg.tar.zst
     ```
 
-    Published for `x86_64`, `aarch64`, `armhf`, `ppc64le` and `riscv64`. For
+    Published for `x86_64`, `aarch64`, `armhf` (ARMv6 and up), `ppc64le` and `riscv64`. For
     i686, s390x and LoongArch64 use the Debian or RPM packages.
 
 === "FreeBSD"

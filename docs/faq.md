@@ -20,9 +20,11 @@
 
 ??? question "What operating systems are supported?"
     The agent supports **Linux** (Debian/Ubuntu, RHEL/Fedora, Arch Linux),
-    **Windows**, **macOS**, and **FreeBSD** on x86_64, ARM64, ARMv7,
-    i686 (32-bit x86), RISC-V 64, PowerPC 64 LE, s390x (IBM Z), and LoongArch64
-    architectures. The server runs on Linux (x86_64, ARM64) and Windows (x86_64).
+    **Windows**, **macOS**, and **FreeBSD** on x86_64, ARM64, 32-bit ARM
+    (ARMv6 and up, including Raspberry Pi Zero and Pi 1), i686 (32-bit x86),
+    RISC-V 64, PowerPC 64 LE, s390x (IBM Z), and LoongArch64 architectures. On
+    Windows it runs on x86_64 and ARM64 (Windows on ARM). The server runs on
+    Linux and Windows, each on x86_64 and ARM64.
 
 ??? question "Do I need an internet connection to run OpenSCM?"
     No. OpenSCM is fully self-hosted. The server and agents communicate only with
