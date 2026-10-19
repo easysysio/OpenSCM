@@ -103,7 +103,7 @@ The server only needs to be installed once on a central host.
 
     !!! warning "Volume Backup"
         Always mount the `/etc/openscm` volume. If it is lost, agents from
-        0.10.5 on refuse the server until `scmclient --reset-server-key` is
+        0.10.4 on refuse the server until `scmclient --reset-server-key` is <!-- version-pin -->
         run on each host.
 
 === "Windows"
@@ -509,7 +509,7 @@ pod in rotation while a rolling deploy runs migrations on the new one.
     ```
 
 !!! tip "Let the server compress — don't strip `Accept-Encoding`"
-    Since **0.10.5** OpenSCM compresses its own responses (gzip/brotli) and
+    Since **0.7.10** OpenSCM compresses its own responses (gzip/brotli) and <!-- version-pin -->
     serves static assets with `ETag` + `Cache-Control`, which is most of the
     reason a page costs ~290 KB instead of ~4.8 MB. Both depend on headers
     surviving your reverse proxy:

@@ -136,11 +136,14 @@ ok "CHANGELOG promoted to [$VERSION]"
 
 # Docs carry the version in download links and install commands. Only these
 # three files are touched — feature notes elsewhere ("added in 0.7.5") refer
-# to older versions and must not move.
+# to older versions and must not move. A note INSIDE these files that names a
+# fixed version carries <!-- version-pin --> on its line and is skipped: the
+# installation page's "Since 0.7.10 OpenSCM compresses…" was bumped by every
+# release from 0.7.11 to 0.10.5 before this existed.
 for f in docs/start/downloads.md docs/start/installation.md docs/guide/containers.md; do
     [[ -f "$CE_DIR/$f" ]] || continue
-    n="$(grep -c "$CE_OLD" "$CE_DIR/$f" || true)"
-    perl -pi -e "s/\Q$CE_OLD\E/$VERSION/g" "$CE_DIR/$f"
+    n="$(grep -v 'version-pin' "$CE_DIR/$f" | grep -c "$CE_OLD" || true)"
+    perl -pi -e "s/\Q$CE_OLD\E/$VERSION/g unless /version-pin/" "$CE_DIR/$f"
     ok "$f ($n refs)"
 done
 
