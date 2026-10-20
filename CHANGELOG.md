@@ -6,6 +6,10 @@ All notable changes to OpenSCM are documented here.
 
 ## [Unreleased]
 
+---
+
+## [0.11.0] - 2026-10-20
+
 ### Security
 - **Agent messages can no longer be replayed (agent protocol 1).** Before, a heartbeat or result signed by an agent could be recorded and sent again at any time, since its timestamp was never checked, and a server reply was not tied to the request it answered. That allowed re-running tests that had since been removed (CMD tests included), downgrading agents, or replaying an old PASS to hide a current failure. Now each agent message carries its send time, and the server accepts it only within 5 minutes of its own clock and only if it is newer than the last one from that agent. Each reply carries a random value from its request, and the agent refuses replies that don't. **Keep server and host clocks in sync (NTP).** See *Configuration → Clocks and replayed messages*. Schema v45 → v46.
 - **The agent protocol has a version.** Messages carry `protocol: 1`; a server refuses a version it doesn't speak, with a message saying so. Once an agent has spoken protocol 1, the server refuses messages from it in the old format, so an old recording can't get around the checks. Agents older than 0.11.0 keep working and are marked **legacy protocol** in the Systems list.
