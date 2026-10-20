@@ -6,6 +6,10 @@ All notable changes to OpenSCM are documented here.
 
 ## [Unreleased]
 
+### Security
+- **Certificate-validation dependencies updated** for RUSTSEC-2026-0381, -0382 and -0383: `rustls-webpki` 0.103.16 (distrusted intermediates could be accepted) and `webpki-roots` / `webpki-root-certs` 1.0.10 (bundled roots trusted distrusted emSign intermediates). These check certificates on the server's and agent's outgoing HTTPS: agent ↔ server, SMTP, webhooks, single sign-on, LDAP, the update check.
+- **sqlx no longer builds its TLS support.** It is for connecting to a database server over the network, which SQLite never does, and it kept an old `webpki-roots` 0.26 in the build with no fixed release. `cargo audit` is clean again.
+
 ---
 
 ## [0.11.0] - 2026-10-20
