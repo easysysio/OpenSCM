@@ -252,6 +252,24 @@ The pinned key changes in two ways only:
 Agents also download upgrades only from their own server, and never to an
 older version than the one they run.
 
+### Clocks and replayed messages
+
+Since 0.11.0 every message from an agent carries the time it was sent, and the
+server accepts it only if it is within **5 minutes** of the server's own clock
+and newer than the last message it accepted from that agent. Each reply also
+carries a random value from the request it answers. Together these stop a
+recorded message, in either direction, from being played back later.
+
+Keep the clocks of the server and the hosts in sync (NTP). An agent whose clock
+is more than 5 minutes off is refused, and its log says so:
+
+```
+Server returned error status 401 Unauthorized: Request timestamp is more than 5 minutes from the server's clock. Check the clock on this host (NTP).
+```
+
+Agents older than 0.11.0 keep working without these checks, and are marked
+**legacy protocol** in the Systems list until they are upgraded.
+
 Keys are generated automatically on first run — no manual setup required.
 
 ---

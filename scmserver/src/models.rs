@@ -62,6 +62,10 @@ pub struct System {
     pub upgrade_available: bool,
     /// The newer version available for this system, if any.
     pub upgrade_version: Option<String>,
+    /// Highest agent protocol the system has spoken; None = before protocol
+    /// versions (shown as "legacy protocol").
+    #[serde(default)]
+    pub agent_protocol: Option<i64>,
     // Live telemetry — updated on every heartbeat; None if agent hasn't reported yet.
     pub cpu_usage:    Option<f32>,
     pub mem_used_mb:  Option<i64>,
@@ -329,6 +333,19 @@ pub struct UnsignedPayload {
     /// before 0.10.4. See docs/design/0.11.0-agent-protocol.md, D2.
     #[serde(default)]
     pub server_key: Option<String>,
+    /// Agent protocol version (1 from 0.11.0). None: an agent from before
+    /// protocol versions, accepted on its old terms ("legacy protocol").
+    #[serde(default)]
+    pub protocol: Option<i64>,
+    /// Random value the server repeats inside its signed reply, so the agent
+    /// can tell the reply answers THIS request (protocol 1, design D3).
+    #[serde(default)]
+    pub nonce: Option<String>,
+    /// When the agent sent this, in ms since the epoch; never goes backwards
+    /// on the agent. Must be within 5 minutes of the server's clock and newer
+    /// than the last request accepted from the agent (protocol 1, D3).
+    #[serde(default)]
+    pub sent_at_ms: Option<i64>,
     // Telemetry — all optional; absent from old clients defaults to None.
     #[serde(default)]
     pub cpu_usage:    Option<f32>,
@@ -416,6 +433,12 @@ pub struct ComplianceResult {
     /// pre-0.6.4 agents — stored as NULL, reports just show no detail panel.
     #[serde(default)]
     pub evidence: Option<String>,
+    /// See UnsignedPayload::protocol / sent_at_ms. Results share the agent's
+    /// one increasing timestamp with its heartbeats.
+    #[serde(default)]
+    pub protocol: Option<i64>,
+    #[serde(default)]
+    pub sent_at_ms: Option<i64>,
 }
 
 

@@ -28,6 +28,15 @@ pub struct UnsignedPayload {
     /// docs/design/0.11.0-agent-protocol.md, D2.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub server_key: Option<String>,
+    /// Agent protocol version; see agent::PROTOCOL.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub protocol: Option<i64>,
+    /// Random per request; the server repeats it inside its signed reply.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub nonce: Option<String>,
+    /// Send time in ms since the epoch, never going backwards (agent::next_sent_at_ms).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub sent_at_ms: Option<i64>,
     // Telemetry — optional so old servers ignore unknown fields gracefully.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub cpu_usage:    Option<f32>,
@@ -112,5 +121,10 @@ pub struct ComplianceResult {
     /// note. Omitted when absent so old servers ignore the field.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub evidence: Option<String>,
+    /// See UnsignedPayload. Results share the heartbeat's increasing clock.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub protocol: Option<i64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub sent_at_ms: Option<i64>,
 }
 

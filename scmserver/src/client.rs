@@ -26,6 +26,118 @@ use crate::enrollment::TokenOutcome;
 struct AuthCheck {
     pub key: String,
     pub status: Option<String>,
+    pub agent_protocol: Option<i64>,
+}
+
+// The agent protocol this server speaks. Requests without a version are the
+// agents from before it, accepted on their old terms ("legacy protocol").
+// docs/design/0.11.0-agent-protocol.md, D5.
+pub const PROTOCOL: i64 = 1;
+
+// How far a protocol-1 request's sent_at_ms may be from the server's clock.
+pub const MAX_CLOCK_SKEW_MS: i64 = 5 * 60 * 1000;
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Helper: reject
+// An unsigned JSON error. The agent logs `error`, so it says what to fix.
+// ─────────────────────────────────────────────────────────────────────────────
+fn reject(status: StatusCode, msg: &str) -> axum::response::Response {
+    (status, Json(serde_json::json!({"error": msg}))).into_response()
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Helper: check_protocol
+// A version this server does not speak is refused outright.
+// ─────────────────────────────────────────────────────────────────────────────
+fn check_protocol(protocol: Option<i64>) -> Result<(), axum::response::Response> {
+    match protocol {
+        Some(p) if p > PROTOCOL || p < 1 => Err(reject(
+            StatusCode::BAD_REQUEST,
+            &format!("Unsupported agent protocol {p}; this server speaks protocol {PROTOCOL}. Upgrade the server."),
+        )),
+        _ => Ok(()),
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Helper: within_clock_window
+// sent_at_ms present and within MAX_CLOCK_SKEW_MS of the server's clock.
+// ─────────────────────────────────────────────────────────────────────────────
+fn within_clock_window(sent_at_ms: Option<i64>) -> Result<i64, axum::response::Response> {
+    let ts = sent_at_ms.ok_or_else(|| reject(StatusCode::BAD_REQUEST, "Protocol 1 requires sent_at_ms"))?;
+    let now = chrono::Utc::now().timestamp_millis();
+    if (ts - now).abs() > MAX_CLOCK_SKEW_MS {
+        return Err(reject(
+            StatusCode::UNAUTHORIZED,
+            "Request timestamp is more than 5 minutes from the server's clock. Check the clock on this host (NTP).",
+        ));
+    }
+    Ok(ts)
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Helper: claim_request
+// Freshness for a signed request from an existing system (design D3, D5).
+// Call only after the signature has been verified.
+//
+//   • No version (an agent from before protocol 1): accepted as before —
+//     unless the system has already spoken protocol 1, in which case an
+//     old-format request can only be a recording, and is refused.
+//   • Protocol 1: within 5 minutes of the server's clock, and newer than the
+//     last request accepted from the system. The comparison and the record
+//     are one UPDATE, so two copies of a request cannot both get through.
+// ─────────────────────────────────────────────────────────────────────────────
+async fn claim_request(
+    pool: &SqlitePool,
+    tenant_id: &str,
+    system_id: i64,
+    known_protocol: Option<i64>,
+    protocol: Option<i64>,
+    sent_at_ms: Option<i64>,
+) -> Result<(), axum::response::Response> {
+    let Some(p) = protocol else {
+        if known_protocol.unwrap_or(0) >= 1 {
+            warn!("SECURITY: old-format request for system {} (tenant '{}'), which speaks protocol {} — refused as a replay.",
+                  system_id, tenant_id, known_protocol.unwrap_or(0));
+            return Err(reject(StatusCode::UNAUTHORIZED, "This agent speaks protocol 1; old-format requests are refused"));
+        }
+        return Ok(());
+    };
+    let ts = within_clock_window(sent_at_ms)?;
+    let claimed = sqlx::query(
+        "UPDATE systems
+            SET last_request_ts = ?,
+                agent_protocol = MAX(COALESCE(agent_protocol, 0), ?)
+          WHERE id = ? AND tenant_id = ?
+            AND (last_request_ts IS NULL OR last_request_ts < ?)",
+    )
+    .bind(ts).bind(p).bind(system_id).bind(tenant_id).bind(ts)
+    .execute(pool)
+    .await
+    .map_err(|e| {
+        error!("Failed to record request time for system {}: {}", system_id, e);
+        reject(StatusCode::INTERNAL_SERVER_ERROR, "Database error")
+    })?;
+    if claimed.rows_affected() == 0 {
+        warn!("SECURITY: replayed or out-of-order request for system {} (tenant '{}') refused.", system_id, tenant_id);
+        return Err(reject(StatusCode::UNAUTHORIZED, "Request is not newer than the last one accepted from this agent"));
+    }
+    Ok(())
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Helper: bind_reply
+// A reply to a protocol-1 request repeats its nonce inside the signed
+// payload, so the agent can tell it answers THIS request and is not a
+// recording of an earlier reply (design D3).
+// ─────────────────────────────────────────────────────────────────────────────
+fn bind_reply(reply: &mut serde_json::Value, payload: &UnsignedPayload) {
+    if payload.protocol.is_some() {
+        reply["protocol"] = serde_json::json!(PROTOCOL);
+        if let Some(n) = &payload.nonce {
+            reply["nonce"] = serde_json::json!(n);
+        }
+    }
 }
 
 
@@ -222,6 +334,7 @@ async fn token_blocked_by_plan(
 // ─────────────────────────────────────────────────────────────────────────────
 pub async fn send(
     Extension(pool): Extension<SqlitePool>,
+    ip: crate::handlers::ClientIp,
     Json(signed_req): Json<SignedRequest>,
 ) -> impl IntoResponse {
     // Parse the typed payload from the raw bytes.
@@ -256,6 +369,10 @@ pub async fn send(
                 .into_response();
         }
     };
+
+    if let Err(resp) = check_protocol(payload.protocol) {
+        return resp;
+    }
 
     // =========================================================
     // STEP 1: VALIDATE TENANT EXISTENCE
@@ -296,17 +413,28 @@ pub async fn send(
     // STEP 2: REGISTRATION (ID == 0)
     // =========================================================
     if id == 0 {
-        if let Some(ref pub_key) = payload.public_key {
-            if decode_public_key(pub_key).is_err() {
-                warn!(
-                    "REJECTED: Agent '{}' provided malformed public key during registration.",
-                    payload.hostname
-                );
-                return (
-                    StatusCode::BAD_REQUEST,
-                    Json(serde_json::json!({"error": "Invalid public key format"})),
-                )
-                    .into_response();
+        // A registration presents the agent's public key, and the request is
+        // signed with the matching private key — agents have always done
+        // this, but it was never checked. Now it is, so registering (or
+        // learning an existing system's ID and status) takes possession of
+        // the key, not just knowledge of it (design D6).
+        let Some(ref pub_key) = payload.public_key else {
+            return reject(StatusCode::BAD_REQUEST, "Registration requires a public key");
+        };
+        if decode_public_key(pub_key).is_err() {
+            warn!(
+                "REJECTED: Agent '{}' provided malformed public key during registration.",
+                payload.hostname
+            );
+            return reject(StatusCode::BAD_REQUEST, "Invalid public key format");
+        }
+        if let Err(err) = verify_signature(&signed_req.payload, &signed_req.signature, pub_key) {
+            warn!("REJECTED: registration for '{}' is not signed by the key it presents: {}", payload.hostname, err);
+            return reject(StatusCode::UNAUTHORIZED, "Registration is not signed by the presented key");
+        }
+        if payload.protocol.is_some() {
+            if let Err(resp) = within_clock_window(payload.sent_at_ms) {
+                return resp;
             }
         }
 
@@ -373,6 +501,7 @@ pub async fn send(
                         "tenant_id": tenant_id,
                         "command": "REGISTER"
                     });
+                    bind_reply(&mut rereg_data, &payload);
                     // Include server public key so the client can verify signatures
                     if let Ok(Some(pub_key)) = sqlx::query_scalar::<_, String>(
                         "SELECT public_key FROM tenant_keys WHERE tenant_id = ? AND is_active = 1",
@@ -397,6 +526,18 @@ pub async fn send(
                 Err(e) => {
                     error!("Failed to check existing registration for '{}': {}", payload.hostname, e);
                 }
+            }
+        }
+
+        // Without a token, a new system lands in the pending queue: limit how
+        // many one client address can put there (design D6).
+        if token_opt.is_none() {
+            if let Some(left) = crate::rate_limit::REGISTER_PENDING.locked(ip.as_str()) {
+                warn!("Registration from {} refused: rate limited", ip.as_str());
+                return reject(
+                    StatusCode::TOO_MANY_REQUESTS,
+                    &crate::rate_limit::retry_message("new registrations from this address", left),
+                );
             }
         }
 
@@ -443,6 +584,9 @@ pub async fn send(
         match reg_result {
             Ok((new_id, outcome)) => {
                 let auto_approved = outcome == Some(TokenOutcome::Approved);
+                if !auto_approved {
+                    crate::rate_limit::REGISTER_PENDING.record(ip.as_str());
+                }
                 let status_str = if auto_approved { "active" } else { "pending" };
                 info!(
                     "Agent '{}' registered with ID {} ({}).",
@@ -510,7 +654,7 @@ pub async fn send(
         // STEP 3: HEARTBEAT (ID > 0)
         // =========================================================
         let auth_result = sqlx::query_as::<_, AuthCheck>(
-            "SELECT key, status FROM systems WHERE id = ? AND tenant_id = ?",
+            "SELECT key, status, agent_protocol FROM systems WHERE id = ? AND tenant_id = ?",
         )
         .bind(id)
         .bind(tenant_id)
@@ -563,6 +707,9 @@ pub async fn send(
                 .into_response();
         }
         debug!("Signature verified for Agent ID {}.", id);
+        if let Err(resp) = claim_request(&pool, tenant_id, id, auth.agent_protocol, payload.protocol, payload.sent_at_ms).await {
+            return resp;
+        }
 
         match auth.status.as_deref().unwrap_or("pending") {
             "approved" | "active" => {
@@ -917,7 +1064,9 @@ pub async fn send(
     } // end else (id > 0 heartbeat path)
 
     // Sign and return response — with the key this agent holds while a
-    // rotation's grace period lasts (sign_response_for).
+    // rotation's grace period lasts (sign_response_for), carrying back the
+    // request's nonce (bind_reply).
+    bind_reply(&mut response_data, &payload);
     match sign_response_for(&pool, tenant_id, response_data, payload.server_key.as_deref()).await {
         Ok(signed) => (StatusCode::OK, Json(signed)).into_response(),
         Err(e) => {
@@ -967,7 +1116,7 @@ pub async fn receive_result(
     // H-new-1: Fetch key AND status together — denied/pending agents must not be able
     // to submit results even if they still hold valid signing keys from a prior active period.
     let auth_check = match sqlx::query_as::<_, AuthCheck>(
-        "SELECT key, status FROM systems WHERE id = ? AND tenant_id = ?",
+        "SELECT key, status, agent_protocol FROM systems WHERE id = ? AND tenant_id = ?",
     )
     .bind(payload.client_id)
     .bind(tenant_id)
@@ -1061,6 +1210,14 @@ pub async fn receive_result(
         "Signature verified for Agent ID {} (Tenant: '{}').",
         payload.client_id, tenant_id
     );
+    if let Err(resp) = check_protocol(payload.protocol) {
+        return resp;
+    }
+    if let Err(resp) = claim_request(
+        &pool, tenant_id, payload.client_id, auth_check.agent_protocol, payload.protocol, payload.sent_at_ms,
+    ).await {
+        return resp;
+    }
 
     let now = chrono::Utc::now().format("%Y-%m-%dT%H:%M:%S").to_string();
 

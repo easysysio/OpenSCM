@@ -6,6 +6,14 @@ All notable changes to OpenSCM are documented here.
 
 ## [Unreleased]
 
+### Security
+- **Agent messages can no longer be replayed (agent protocol 1).** Before, a heartbeat or result signed by an agent could be recorded and sent again at any time, since its timestamp was never checked, and a server reply was not tied to the request it answered. That allowed re-running tests that had since been removed (CMD tests included), downgrading agents, or replaying an old PASS to hide a current failure. Now each agent message carries its send time, and the server accepts it only within 5 minutes of its own clock and only if it is newer than the last one from that agent. Each reply carries a random value from its request, and the agent refuses replies that don't. **Keep server and host clocks in sync (NTP).** See *Configuration → Clocks and replayed messages*. Schema v45 → v46.
+- **The agent protocol has a version.** Messages carry `protocol: 1`; a server refuses a version it doesn't speak, with a message saying so. Once an agent has spoken protocol 1, the server refuses messages from it in the old format, so an old recording can't get around the checks. Agents older than 0.11.0 keep working and are marked **legacy protocol** in the Systems list.
+- **Registration checks.** A registering agent must sign the request with the key it presents (agents always did; the server never checked), so knowing a system's public key no longer reveals its ID and status. New registrations without an enrollment token are limited to 100 an hour per address, so nobody can flood the pending queue.
+
+### Changed
+- **The agent logs the server's reason when a request is refused** (clock out of sync, unsupported protocol, rate limit), not just the status code.
+
 ### Changed
 - **README and documentation list the new platforms**: Windows on ARM for the agent and the server, and the 32-bit ARM agent's reach down to Raspberry Pi Zero and Pi 1 (ARMv6). Updated in the README's platform table and badges, the FAQ, the home page, the deployment and installation pages.
 

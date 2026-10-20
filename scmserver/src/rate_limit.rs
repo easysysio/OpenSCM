@@ -124,6 +124,15 @@ pub static LOGIN_ACCOUNT: LazyLock<Limiter> =
 pub static LOGIN_ADDRESS: LazyLock<Limiter> =
     LazyLock::new(|| Limiter::new(LOGIN_ADDRESS_MAX, LOGIN_WINDOW, LOGIN_LOCKOUT));
 
+// New agent registrations that land in the pending queue, per client address.
+// A registration with a valid enrollment token is not counted. Generous,
+// because a whole fleet behind one NAT address may enrol at once; the point
+// is that nobody can fill the queue with thousands of fake systems.
+pub const REGISTER_PENDING_MAX: usize = 100;
+pub static REGISTER_PENDING: LazyLock<Limiter> = LazyLock::new(|| {
+    Limiter::new(REGISTER_PENDING_MAX, Duration::from_secs(3600), Duration::from_secs(3600))
+});
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Helper: login_account_key
 // The organization reduced to the tenant id it names, so spellings that reach

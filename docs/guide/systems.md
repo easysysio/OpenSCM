@@ -177,6 +177,13 @@ until its agent reports the new version, and offline systems count too. The
 number disappears once every agent is current. (The red number beside it on
 **Systems** is the systems waiting for enrollment approval.)
 
+!!! note "Legacy protocol"
+    An active system whose agent is older than 0.11.0 shows a grey
+    **legacy protocol** badge next to its version. Those agents work, but their
+    messages can be recorded and replayed, and agents older than 0.10.4 do not
+    pin the server's key either. Upgrade them; the badge disappears at the
+    first check-in from the new agent.
+
 !!! tip "Per-platform availability"
     The Upgrade button only appears when the server bundles a binary for that
     system's platform (`{arch}-{os}` — for example `x86_64-linux`). If a system

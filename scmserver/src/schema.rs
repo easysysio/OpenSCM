@@ -2918,6 +2918,34 @@ async fn run_migrations_on(pool: &SqlitePool) -> Result<(), sqlx::Error> {
         info!("Schema migration v44 → v45 complete.");
     }
 
+    // ─────────────────────────────────────────────────────────────────────
+    // v45 → v46: agent protocol 1 — freshness and version (0.11.0).
+    //
+    // systems.last_request_ts — the newest request timestamp (ms) accepted
+    //   from the agent. A request must be newer, so a recorded one cannot be
+    //   replayed. NULL: nothing accepted yet under protocol 1.
+    // systems.agent_protocol — the highest protocol the agent has spoken.
+    //   Once it is 1, requests in the old format are refused (a captured old
+    //   request must not get around the freshness check). NULL: an agent from
+    //   before protocol 1, shown as "legacy protocol".
+    // See docs/design/0.11.0-agent-protocol.md, D3 and D5.
+    // ─────────────────────────────────────────────────────────────────────
+    if version < 46 {
+        info!("Running schema migration v45 → v46 (agent protocol 1)...");
+        if table_exists(pool, "systems").await {
+            if !column_exists(pool, "systems", "last_request_ts").await {
+                sqlx::query("ALTER TABLE systems ADD COLUMN last_request_ts INTEGER")
+                    .execute(pool).await?;
+            }
+            if !column_exists(pool, "systems", "agent_protocol").await {
+                sqlx::query("ALTER TABLE systems ADD COLUMN agent_protocol INTEGER")
+                    .execute(pool).await?;
+            }
+        }
+        sqlx::query("UPDATE schema_info SET version = 46").execute(pool).await?;
+        info!("Schema migration v45 → v46 complete.");
+    }
+
     Ok(())
 }
 

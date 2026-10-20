@@ -174,7 +174,11 @@
     		        <span class="text-muted">—</span>
   		      {% endif %}
 		    </td>
-                    <td><span class="badge badge-light">v{{ system.ver }}</span></td>
+                    <td><span class="badge badge-light">v{{ system.ver }}</span>
+                      {% if system.status == "active" and not system.agent_protocol %}
+                      <span class="badge badge-secondary ml-1" title="This agent predates agent protocol 1: its messages can be replayed and it does not pin the server's key. Upgrade it.">legacy protocol</span>
+                      {% endif %}
+                    </td>
                     <td>
                       <span class="datetime" data-utc="{{ system.last_seen }}">{{ system.last_seen }}</span>
                       {% if system.is_offline %}<span class="badge badge-secondary ml-1">Offline</span>{% endif %}

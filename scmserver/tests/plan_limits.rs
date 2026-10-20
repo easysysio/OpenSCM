@@ -15,7 +15,7 @@ use axum::http::{Request, StatusCode};
 use axum::routing::post;
 use axum::{Extension, Router};
 use base64::{engine::general_purpose::STANDARD, Engine as _};
-use ed25519_dalek::SigningKey;
+use ed25519_dalek::{Signer, SigningKey};
 use scmserver::enrollment::{approve_with_token, hash_token, TokenOutcome};
 use scmserver::plan::{limit_reached_pool, notify_admins_once};
 use sqlx::SqlitePool;
@@ -260,7 +260,11 @@ async fn register(pool: &SqlitePool, hostname: &str, token: &str) -> String {
         "os": "Linux", "arch": "x86_64", "timestamp": "2026-10-05T12:00:00Z",
         "public_key": STANDARD.encode(key.verifying_key().to_bytes()), "enrollment_token": token
     });
-    let body = serde_json::json!({ "payload": payload, "signature": "" }).to_string();
+    // Signed with the key it presents, as a real agent does: the server
+    // checks that at registration since 0.11.0 (design D6).
+    let raw = payload.to_string();
+    let sig = STANDARD.encode(key.sign(raw.as_bytes()).to_bytes());
+    let body = format!(r#"{{"payload":{raw},"signature":"{sig}"}}"#);
     let app = Router::new().route("/send", post(scmserver::client::send)).layer(Extension(pool.clone()));
     let resp = app
         .oneshot(Request::post("/send").header("content-type", "application/json").body(Body::from(body)).unwrap())

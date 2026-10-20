@@ -18,6 +18,58 @@ use crate::compliance::{evaluate, EvalResult};
 // HELPERS
 // ============================================================
 
+// The agent protocol this agent speaks (docs/design/0.11.0-agent-protocol.md,
+// D5). 1: requests carry protocol, nonce and sent_at_ms, and replies must
+// repeat the nonce.
+pub(crate) const PROTOCOL: i64 = 1;
+
+static LAST_SENT_AT_MS: std::sync::atomic::AtomicI64 = std::sync::atomic::AtomicI64::new(0);
+
+// ─────────────────────────────────────────────────────────────────────────────
+// next_sent_at_ms — the send time for the next request: now in ms, but always
+// later than the previous one. The server refuses a request that is not newer
+// than the last it accepted (design D3), and heartbeats and results share this
+// clock, so two results in the same millisecond, or a clock stepped back by
+// NTP, must not make the agent send an older time.
+// ─────────────────────────────────────────────────────────────────────────────
+pub(crate) fn next_sent_at_ms() -> i64 {
+    use std::sync::atomic::Ordering;
+    let now = chrono::Utc::now().timestamp_millis();
+    let mut prev = LAST_SENT_AT_MS.load(Ordering::SeqCst);
+    loop {
+        let next = now.max(prev + 1);
+        match LAST_SENT_AT_MS.compare_exchange(prev, next, Ordering::SeqCst, Ordering::SeqCst) {
+            Ok(_) => return next,
+            Err(actual) => prev = actual,
+        }
+    }
+}
+
+// A fresh random nonce (128 bits, hex).
+fn new_nonce() -> String {
+    let bytes: [u8; 16] = rand::random();
+    hex::encode(bytes)
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// check_binding — whether a reply answers the request that carried `nonce`
+// (design D3). A reply that says it speaks a protocol must repeat our nonce.
+// One that does not is from a server older than protocol 1 — acceptable only
+// until this agent has seen its server speak protocol 1 (`ratcheted`); after
+// that, a reply without a protocol can only be a recording of an old one.
+// Ok(true): the server speaks protocol 1.
+// ─────────────────────────────────────────────────────────────────────────────
+pub(crate) fn check_binding(reply: &serde_json::Value, nonce: &str, ratcheted: bool) -> Result<bool, String> {
+    match reply.get("protocol").and_then(|p| p.as_i64()) {
+        Some(_) => match reply.get("nonce").and_then(|n| n.as_str()) {
+            Some(n) if n == nonce => Ok(true),
+            _ => Err("the reply does not carry this request's nonce (a replayed reply?)".into()),
+        },
+        None if ratcheted => Err("the server speaks protocol 1 but this reply has no protocol (a replayed old reply?)".into()),
+        None => Ok(false),
+    }
+}
+
 /// Generate a consistent 8-character hex prefix based on the server URL.
 /// Used to namespace key and identity files per server.
 fn get_url_namespace(url: &str) -> String {
@@ -114,6 +166,8 @@ async fn send_result(
         result: result.to_string(),
         container_runtime_id,
         evidence,
+        protocol: Some(PROTOCOL),
+        sent_at_ms: Some(next_sent_at_ms()),
     };
 
     let signature = match sign_payload(&payload, signing_key) {
@@ -131,10 +185,10 @@ async fn send_result(
             debug!("Test {} result sent successfully.", test_id);
         }
         Ok(resp) => {
+            let status = resp.status();
             error!(
-                "Server rejected result for test {} with status: {}",
-                test_id,
-                resp.status()
+                "Server rejected result for test {} with status {}: {}",
+                test_id, status, server_error(resp).await
             );
         }
         Err(e) => {
@@ -349,6 +403,7 @@ struct AgentIdentity {
     namespace:       String,
     id_path:         PathBuf,
     server_pub_path: PathBuf,
+    protocol_path:   PathBuf,
     signing_key:     SigningKey,
     public_base64:   String,
     current_id:      String,
@@ -383,6 +438,8 @@ fn load_or_create_identity(config: &Config) -> Result<AgentIdentity, Box<dyn std
     let priv_path       = key_dir.join(format!("client_{}.key", namespace));
     let pub_path        = key_dir.join(format!("client_{}.pub", namespace));
     let server_pub_path = key_dir.join(format!("server_{}.pub", namespace));
+    // Present once the server has been seen speaking protocol 1 (check_binding).
+    let protocol_path   = key_dir.join(format!("server_{}.protocol", namespace));
 
     // Generate keys on first run for this namespace.
     if !priv_path.exists() {
@@ -415,6 +472,7 @@ fn load_or_create_identity(config: &Config) -> Result<AgentIdentity, Box<dyn std
         namespace,
         id_path,
         server_pub_path,
+        protocol_path,
         signing_key,
         public_base64,
         current_id,
@@ -517,6 +575,7 @@ async fn post_heartbeat(
     sys:           &SystemInfo,
     send_url:      &str,
     base_url:      &str,
+    nonce:         &str,
 ) -> Result<Option<SignedResponse>, Box<dyn std::error::Error>> {
     let needs_handshake = identity.current_id == "0" || !identity.server_pub_path.exists();
 
@@ -549,6 +608,9 @@ async fn post_heartbeat(
         server_key:   fs::read_to_string(&identity.server_pub_path).ok()
             .map(|k| k.trim().to_string())
             .filter(|k| !k.is_empty()),
+        protocol:     Some(PROTOCOL),
+        nonce:        Some(nonce.to_string()),
+        sent_at_ms:   Some(next_sent_at_ms()),
         cpu_usage:    sys.cpu_usage,
         mem_used_mb:  sys.mem_used_mb,
         mem_total_mb: sys.mem_total_mb,
@@ -575,11 +637,23 @@ async fn post_heartbeat(
         return Ok(None);
     }
     if !response.status().is_success() {
-        error!("Server returned error status: {}", response.status());
+        let status = response.status();
+        error!("Server returned error status {}: {}", status, server_error(response).await);
         return Ok(None);
     }
 
     Ok(Some(response.json::<SignedResponse>().await?))
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// server_error — the server's `{"error": "..."}` message, for the log. The
+// server says what to fix (clock out of sync, unsupported protocol, rate
+// limit), so it is worth showing rather than just the status code.
+// ─────────────────────────────────────────────────────────────────────────────
+async fn server_error(resp: reqwest::Response) -> String {
+    resp.json::<serde_json::Value>().await.ok()
+        .and_then(|v| v.get("error").and_then(|e| e.as_str()).map(str::to_string))
+        .unwrap_or_else(|| "(no detail)".into())
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -659,6 +733,8 @@ fn verify_response(
 // ─────────────────────────────────────────────────────────────────────────────
 pub fn reset_server_key(config: &Config) -> Result<Option<PathBuf>, Box<dyn std::error::Error>> {
     let identity = load_or_create_identity(config)?;
+    // A new server may speak an older protocol; it is learned again too.
+    let _ = fs::remove_file(&identity.protocol_path);
     if identity.server_pub_path.exists() {
         fs::remove_file(&identity.server_pub_path)?;
         Ok(Some(identity.server_pub_path))
@@ -919,7 +995,8 @@ pub async fn send_system_info(
     let send_url   = format!("{}/send",   base_url);
     let result_url = format!("{}/result", base_url);
 
-    let signed_res = match post_heartbeat(http_client, config, &identity, &sys, &send_url, &base_url).await? {
+    let nonce = new_nonce();
+    let signed_res = match post_heartbeat(http_client, config, &identity, &sys, &send_url, &base_url, &nonce).await? {
         Some(r) => r,
         None    => return Ok(()),  // 404 reset or non-2xx — cycle ends here.
     };
@@ -927,6 +1004,22 @@ pub async fn send_system_info(
     let trust = verify_response(&identity, &signed_res, &base_url);
     if trust == Trust::Rejected {
         return Ok(());
+    }
+
+    // The reply must answer THIS request (design D3).
+    match check_binding(&signed_res.payload, &nonce, identity.protocol_path.exists()) {
+        Ok(speaks_protocol) => {
+            // Remember, from a reply signed by the pinned key only, that this
+            // server speaks protocol 1: from then on old-style replies are refused.
+            if speaks_protocol && trust == Trust::Verified && !identity.protocol_path.exists() {
+                let _ = fs::write(&identity.protocol_path, PROTOCOL.to_string());
+                info!("Server '{}' speaks agent protocol {}; replies are now bound to their request.", base_url, PROTOCOL);
+            }
+        }
+        Err(why) => {
+            error!("SECURITY ALERT: reply from '{}' refused: {}.", base_url, why);
+            return Ok(());
+        }
     }
 
     dispatch_server_command(config, &identity, http_client, &result_url, &base_url, &signed_res.payload, &trust).await
@@ -999,6 +1092,38 @@ mod tests {
         ] {
             assert!(upgrade_source(base, evil, "0.10.3", "0.10.4").is_err(), "{evil} accepted");
         }
+    }
+
+    #[test]
+    fn a_reply_must_carry_this_requests_nonce() {
+        let ok = serde_json::json!({"protocol": 1, "nonce": "abc", "command": "TEST"});
+        assert_eq!(check_binding(&ok, "abc", false), Ok(true));
+        assert_eq!(check_binding(&ok, "abc", true), Ok(true));
+        // A recording of a reply to an earlier request.
+        let old = serde_json::json!({"protocol": 1, "nonce": "zzz", "command": "TEST"});
+        assert!(check_binding(&old, "abc", true).is_err());
+        let missing = serde_json::json!({"protocol": 1, "command": "TEST"});
+        assert!(check_binding(&missing, "abc", false).is_err());
+    }
+
+    #[test]
+    fn old_style_replies_are_accepted_only_until_the_server_spoke_protocol_1() {
+        let legacy = serde_json::json!({"command": "TEST"});
+        assert_eq!(check_binding(&legacy, "abc", false), Ok(false), "a server older than protocol 1");
+        assert!(check_binding(&legacy, "abc", true).is_err(), "a replayed pre-upgrade reply");
+    }
+
+    #[test]
+    fn the_send_clock_never_goes_backwards() {
+        let mut prev = next_sent_at_ms();
+        for _ in 0..10_000 {
+            let t = next_sent_at_ms();
+            assert!(t > prev, "{t} is not after {prev}");
+            prev = t;
+        }
+        // Even if the wall clock falls far behind the last value sent.
+        LAST_SENT_AT_MS.store(i64::MAX / 2, std::sync::atomic::Ordering::SeqCst);
+        assert_eq!(next_sent_at_ms(), i64::MAX / 2 + 1);
     }
 
     #[test]
