@@ -6,6 +6,9 @@ All notable changes to OpenSCM are documented here.
 
 ## [Unreleased]
 
+### Fixed
+- **Fresh installs marked systems offline after 1 minute instead of 60.** The installer seeded the offline threshold as 60 minutes, and then a database upgrade step that every new database runs divided it by 60 (it converts the old seconds setting to minutes). With agents checking in every 5 minutes, systems showed offline most of the time, in the Systems list and in the sidebar's update count. New installs now get 60, and an upgrade (schema v46 → v47) resets a default-organization threshold of exactly 1 minute to 60. Set it again under **Settings** if 1 minute was intended. Thresholds above 1440 minutes, which the Settings form can't produce, are reset to 60 too. In SaaS that covers organizations seeded with 3600.
+
 ### Changed
 - **The sidebar's count of systems waiting for an agent update leaves out offline systems.** Nothing can be done for them until they come back, so they only inflated the number. Offline uses the same rule as the Systems list: last check-in older than the offline threshold under Settings (60 minutes by default).
 

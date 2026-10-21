@@ -766,10 +766,13 @@ async fn seed_lookup_data(pool: &SqlitePool) -> Result<(), sqlx::Error> {
     // NOTE: the admin user is NOT seeded here — created by /install with the
     // administrator's chosen password so no default credentials exist on disk.
 
-    // Default settings
+    // Default settings.
+    // offline_threshold is NOT seeded here: a fresh database is marked v13 and
+    // then runs the v15 → v16 step, which divides the value by 60 (seconds →
+    // minutes). Seeded as 60 here, it became 1 minute on every fresh install.
+    // The v16 step adds it, in minutes, after converting.
     sqlx::query(
         "INSERT OR IGNORE INTO settings (tenant_id, skey, value, description) VALUES
-        ('default', 'offline_threshold', '60', 'Minutes without activity before system is marked offline'),
         ('default', 'auto_prune_inactive', '0', 'Minutes without activity before an inactive system is auto-deleted (0 = disabled)'),
         ('default', 'compliance_sat', '80', 'Minimum compliance percentage for SAT status'),
         ('default', 'compliance_marginal', '60', 'Minimum compliance percentage for MARGINAL status'),
@@ -1617,6 +1620,17 @@ async fn run_migrations_on(pool: &SqlitePool) -> Result<(), sqlx::Error> {
               WHERE skey = 'offline_threshold'",
         )
         .execute(pool).await?;
+        // A fresh install reaches this step with no row at all (see
+        // initialize_database): give it the default, already in minutes.
+        if table_exists(pool, "settings").await && table_exists(pool, "tenants").await {
+            sqlx::query(
+                "INSERT OR IGNORE INTO settings (tenant_id, skey, value, description)
+                 SELECT id, 'offline_threshold', '60',
+                        'Minutes without activity before system is marked offline'
+                   FROM tenants WHERE id = 'default'",
+            )
+            .execute(pool).await?;
+        }
         sqlx::query("UPDATE schema_info SET version = 16")
             .execute(pool).await?;
         info!("Schema migration v15 → v16 complete.");
@@ -2944,6 +2958,39 @@ async fn run_migrations_on(pool: &SqlitePool) -> Result<(), sqlx::Error> {
         }
         sqlx::query("UPDATE schema_info SET version = 46").execute(pool).await?;
         info!("Schema migration v45 → v46 complete.");
+    }
+
+    // ─────────────────────────────────────────────────────────────────────
+    // v46 → v47: repair offline_threshold values no administrator set (0.11.2).
+    //
+    //   • 1 minute on the default tenant: every fresh install since v16 was
+    //     seeded with 60 and then divided by 60 by the v15 → v16 step. One
+    //     minute is shorter than the agent's 5-minute check-in, so systems
+    //     showed offline most of the time.
+    //   • Above 1440: SaaS seeded new organizations with 3600, meant as
+    //     seconds, read as minutes — two and a half days before a system
+    //     showed offline. The Settings form only accepts 1 to 1440.
+    // Both become the intended 60 minutes. An administrator who really wants
+    // 1 minute can set it again.
+    // ─────────────────────────────────────────────────────────────────────
+    if version < 47 {
+        info!("Running schema migration v46 → v47 (offline_threshold repair)...");
+        if table_exists(pool, "settings").await {
+            let fixed = sqlx::query(
+                "UPDATE settings
+                    SET value = '60',
+                        description = 'Minutes without activity before system is marked offline'
+                  WHERE skey = 'offline_threshold'
+                    AND ((tenant_id = 'default' AND TRIM(value) = '1')
+                         OR CAST(value AS INTEGER) > 1440)",
+            )
+            .execute(pool).await?;
+            if fixed.rows_affected() > 0 {
+                info!("offline_threshold reset to 60 minutes for {} organization(s)", fixed.rows_affected());
+            }
+        }
+        sqlx::query("UPDATE schema_info SET version = 47").execute(pool).await?;
+        info!("Schema migration v46 → v47 complete.");
     }
 
     Ok(())
