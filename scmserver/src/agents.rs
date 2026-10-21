@@ -70,18 +70,34 @@ pub fn available_upgrade(
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Helper: systems_awaiting_update
-// How many of the tenant's approved systems run an older agent than the one
-// bundled for their platform. A system with an upgrade already queued still
-// counts until its agent reports the new version; offline systems count too.
+// How many of the tenant's approved, ONLINE systems run an older agent than
+// the one bundled for their platform. Offline systems are left out: nothing
+// can be done for them until they come back, and the Upgrade button skips
+// them too. "Offline" is the Systems page's own rule — last check-in older
+// than the tenant's offline_threshold (minutes, default 60); a system that has
+// never checked in is not offline. A system with an upgrade already queued
+// still counts until its agent reports the new version.
 // Drives the sidebar badge, so it runs on every page load: one indexed query
 // over the tenant's active systems plus the (small) package table.
 // ─────────────────────────────────────────────────────────────────────────────
 pub async fn systems_awaiting_update(pool: &SqlitePool, tenant_id: &str) -> i64 {
-    let rows: Vec<(String, String, String)> = match sqlx::query_as(
-        "SELECT COALESCE(ver, ''), COALESCE(arch, ''), COALESCE(os, '')
-           FROM systems WHERE tenant_id = ? AND status = 'active'",
+    let offline_threshold_min: i64 = sqlx::query_scalar(
+        "SELECT CAST(value AS INTEGER) FROM settings WHERE tenant_id = ? AND skey = 'offline_threshold'",
     )
     .bind(tenant_id)
+    .fetch_one(pool)
+    .await
+    .unwrap_or(60);
+    let rows: Vec<(String, String, String)> = match sqlx::query_as(
+        "SELECT COALESCE(ver, ''), COALESCE(arch, ''), COALESCE(os, '')
+           FROM systems
+          WHERE tenant_id = ? AND status = 'active'
+            AND NOT (last_seen IS NOT NULL
+                     AND CAST(strftime('%s','now') AS INTEGER)
+                       - CAST(strftime('%s', last_seen) AS INTEGER) > ?)",
+    )
+    .bind(tenant_id)
+    .bind(offline_threshold_min * 60)
     .fetch_all(pool)
     .await
     {

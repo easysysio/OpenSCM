@@ -6,6 +6,9 @@ All notable changes to OpenSCM are documented here.
 
 ## [Unreleased]
 
+### Changed
+- **The sidebar's count of systems waiting for an agent update leaves out offline systems.** Nothing can be done for them until they come back, so they only inflated the number. Offline uses the same rule as the Systems list: last check-in older than the offline threshold under Settings (60 minutes by default).
+
 ---
 
 ## [0.11.1] - 2026-10-20

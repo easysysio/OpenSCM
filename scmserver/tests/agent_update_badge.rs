@@ -39,7 +39,8 @@ fn nothing_to_offer_is_not_an_upgrade() {
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Helper: db
-// The default tenant has five systems, two of them waiting for an update;
+// The default tenant has seven systems, three of them waiting for an update
+// (one more is outdated but offline);
 // 'acme' has one more that must not leak into the default tenant's count.
 // ─────────────────────────────────────────────────────────────────────────────
 async fn db() -> SqlitePool {
@@ -58,6 +59,12 @@ async fn db() -> SqlitePool {
         "INSERT INTO systems (id, tenant_id, name, status, ver, arch, os) VALUES (3, 'default', 'current', 'active', '0.10.2', 'x86_64', 'Debian 12')",
         "INSERT INTO systems (id, tenant_id, name, status, ver, arch, os) VALUES (4, 'default', 'pending', 'pending', '0.9.6', 'x86_64', 'Debian 12')",
         "INSERT INTO systems (id, tenant_id, name, status, ver, arch, os) VALUES (5, 'default', 'riscv', 'active', '0.9.6', 'riscv64', 'Debian 12')",
+        // Not counted: offline (last check-in two hours ago, threshold 60 min).
+        "INSERT INTO systems (id, tenant_id, name, status, ver, arch, os, last_seen)
+         VALUES (7, 'default', 'gone', 'active', '0.9.6', 'x86_64', 'Debian 12', datetime('now', '-2 hours'))",
+        // Counted: checked in a minute ago.
+        "INSERT INTO systems (id, tenant_id, name, status, ver, arch, os, last_seen)
+         VALUES (8, 'default', 'fresh', 'active', '0.9.6', 'x86_64', 'Debian 12', datetime('now', '-1 minute'))",
         // Another organization's.
         "INSERT INTO systems (id, tenant_id, name, status, ver, arch, os) VALUES (6, 'acme', 'theirs', 'active', '0.9.6', 'x86_64', 'Debian 12')",
     ] {
@@ -67,9 +74,9 @@ async fn db() -> SqlitePool {
 }
 
 #[tokio::test]
-async fn the_count_is_old_approved_agents_in_this_organization_only() {
+async fn the_count_is_old_approved_online_agents_in_this_organization_only() {
     let pool = db().await;
-    assert_eq!(systems_awaiting_update(&pool, "default").await, 2);
+    assert_eq!(systems_awaiting_update(&pool, "default").await, 3, "offline systems are not counted");
     assert_eq!(systems_awaiting_update(&pool, "acme").await, 1);
     assert_eq!(systems_awaiting_update(&pool, "nobody").await, 0);
 }
@@ -93,7 +100,7 @@ async fn sidebar(pool: &SqlitePool, tenant: &str) -> String {
 async fn the_badge_shows_on_systems_and_on_the_inventory_heading() {
     let pool = db().await;
     let html = sidebar(&pool, "default").await;
-    let badge = "<span class=\"badge badge-warning right\" title=\"2 system(s) waiting for an agent update\">2</span>";
+    let badge = "<span class=\"badge badge-warning right\" title=\"3 system(s) waiting for an agent update\">3</span>";
     assert_eq!(html.matches(badge).count(), 2, "expected the badge twice:\n{html}");
 }
 
