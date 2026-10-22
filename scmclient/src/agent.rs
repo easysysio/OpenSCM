@@ -23,6 +23,10 @@ use crate::compliance::{evaluate, EvalResult};
 // repeat the nonce.
 pub(crate) const PROTOCOL: i64 = 1;
 
+// How long an upgrade download may take, start to finish. The 15-second
+// client timeout covers everything else.
+const UPGRADE_DOWNLOAD_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(300);
+
 static LAST_SENT_AT_MS: std::sync::atomic::AtomicI64 = std::sync::atomic::AtomicI64::new(0);
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -646,6 +650,28 @@ async fn post_heartbeat(
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// download_upgrade — fetch an upgrade binary within `limit`. The agent's
+// client allows 15 s per request, right for a check-in but not for an ~10 MB
+// binary over a slow link: the download was cut off, and reported as "error
+// decoding response body" (the body arrives compressed). A per-request
+// timeout replaces the client's for this one request, connect to last byte.
+// ─────────────────────────────────────────────────────────────────────────────
+async fn download_upgrade(
+    http_client: &reqwest::Client,
+    url: &str,
+    limit: std::time::Duration,
+) -> Result<Vec<u8>, String> {
+    let resp = http_client.get(url).timeout(limit).send().await
+        .map_err(|e| format!("Upgrade download request failed: {e}"))?;
+    if !resp.status().is_success() {
+        return Err(format!("Upgrade download failed with HTTP {}", resp.status()));
+    }
+    resp.bytes().await
+        .map(|b| b.to_vec())
+        .map_err(|e| format!("Failed to read upgrade download body: {e} (gave up after {}s)", limit.as_secs()))
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // server_error — the server's `{"error": "..."}` message, for the log. The
 // server says what to fix (clock out of sync, unsupported protocol, rate
 // limit), so it is worth showing rather than just the status code.
@@ -887,22 +913,10 @@ async fn dispatch_server_command(
             };
             info!("Upgrade to v{} requested — downloading from {}", version, full_url);
 
-            let bytes = match http_client.get(&full_url).send().await {
-                Ok(resp) if resp.status().is_success() => {
-                    match resp.bytes().await {
-                        Ok(b) => b,
-                        Err(e) => {
-                            error!("Failed to read upgrade download body: {}", e);
-                            return Ok(());
-                        }
-                    }
-                }
-                Ok(resp) => {
-                    error!("Upgrade download failed with HTTP {}", resp.status());
-                    return Ok(());
-                }
-                Err(e) => {
-                    error!("Upgrade download request failed: {}", e);
+            let bytes = match download_upgrade(http_client, &full_url, UPGRADE_DOWNLOAD_TIMEOUT).await {
+                Ok(b) => b,
+                Err(why) => {
+                    error!("{}", why);
                     return Ok(());
                 }
             };
@@ -1124,6 +1138,33 @@ mod tests {
         // Even if the wall clock falls far behind the last value sent.
         LAST_SENT_AT_MS.store(i64::MAX / 2, std::sync::atomic::Ordering::SeqCst);
         assert_eq!(next_sent_at_ms(), i64::MAX / 2 + 1);
+    }
+
+    // The fix for slow links: a download that takes longer than the agent's
+    // 15-second request timeout still completes. Takes ~17 s to run.
+    #[tokio::test]
+    async fn an_upgrade_download_may_outlast_the_check_in_timeout() {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        tokio::spawn(async move {
+            let (mut s, _) = listener.accept().await.unwrap();
+            let mut buf = [0u8; 1024];
+            let _ = s.read(&mut buf).await;
+            let body = vec![b'x'; 17];
+            s.write_all(format!("HTTP/1.1 200 OK\r\ncontent-length: {}\r\n\r\n", body.len()).as_bytes()).await.unwrap();
+            // One byte a second: 17 s in all.
+            for b in body {
+                s.write_all(&[b]).await.unwrap();
+                tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+            }
+        });
+        // The agent's real client settings (main.rs), which installs the
+        // TLS provider first, as main does.
+        let _ = rustls::crypto::ring::default_provider().install_default();
+        let client = reqwest::Client::builder().timeout(std::time::Duration::from_secs(15)).build().unwrap();
+        let got = download_upgrade(&client, &format!("http://{addr}/agents/x"), UPGRADE_DOWNLOAD_TIMEOUT).await;
+        assert_eq!(got.map(|b| b.len()), Ok(17));
     }
 
     #[test]

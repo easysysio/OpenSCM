@@ -7,6 +7,7 @@ All notable changes to OpenSCM are documented here.
 ## [Unreleased]
 
 ### Fixed
+- **Agent upgrades failed on slow links, and were not retried.** The agent allowed every request 15 seconds, the upgrade download included, so an agent that couldn't fetch the ~10 MB binary in time logged *"Failed to read upgrade download body: error decoding response body"*. And the server had already deleted the queued upgrade when it handed it out, so it was never tried again. The download now gets 5 minutes (check-ins keep 15 seconds). The server keeps the queued upgrade until the agent reports the new version, offers it again an hour after a failed attempt, and gives up after 24 attempts with a warning in the log. Queuing an upgrade again means "try now". Schema v47 → v48. **Agents up to 0.11.2 still have the 15-second limit:** if one keeps failing, install the new agent on that host by hand.
 - **Upgrade All could seem to do nothing.** It asked for confirmation with the browser's own dialog, which browsers sometimes suppress; a suppressed dialog counts as Cancel, so the click was silently ignored until it was tried again. It now opens OpenSCM's own confirmation window, like Rotate Signing Key, which also says how many systems will be queued and how many of them are offline.
 
 ---

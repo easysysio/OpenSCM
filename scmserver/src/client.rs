@@ -37,6 +37,11 @@ pub const PROTOCOL: i64 = 1;
 // How far a protocol-1 request's sent_at_ms may be from the server's clock.
 pub const MAX_CLOCK_SKEW_MS: i64 = 5 * 60 * 1000;
 
+// A queued upgrade the agent has not completed is handed out again after this
+// long (its download may have failed), at most UPGRADE_MAX_ATTEMPTS times.
+pub const UPGRADE_RETRY_SECS: i64 = 60 * 60;
+pub const UPGRADE_MAX_ATTEMPTS: i64 = 24;
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Helper: reject
 // An unsigned JSON error. The agent logs `error`, so it says what to fix.
@@ -800,31 +805,57 @@ pub async fn send(
                     }
                 }
 
-                // Check whether an admin has queued an UPGRADE for this system — that
-                // shows up as a row in the commands table with command_type='UPGRADE'.
-                // The matching agent_packages row gives us the URL / SHA256 / version
-                // to ship in the heartbeat response.
+                // A queued UPGRADE (a commands row, command_type 'UPGRADE') is
+                // handed out with the matching agent_packages row's URL /
+                // SHA256 / version. The row stays until the agent reports a
+                // version that needs no upgrade — deleting it on hand-out meant
+                // a failed download (slow link, timeout) was never retried.
+                // It is handed out again at most once per UPGRADE_RETRY, and
+                // dropped after UPGRADE_MAX_ATTEMPTS so a host that can never
+                // download does not fetch the binary forever.
                 let platform = derive_platform(&payload.arch, &payload.os);
-                let has_upgrade: i64 = sqlx::query_scalar(
-                    "SELECT COUNT(*) FROM commands
-                     WHERE tenant_id = ? AND system_id = ? AND command_type = 'UPGRADE'",
+                let queued: Option<(Option<i64>, i64)> = sqlx::query_as(
+                    "SELECT CAST(strftime('%s', 'now') AS INTEGER)
+                              - CAST(strftime('%s', dispatched_at) AS INTEGER),
+                            attempts
+                       FROM commands
+                      WHERE tenant_id = ? AND system_id = ? AND command_type = 'UPGRADE'",
                 )
                 .bind(tenant_id)
                 .bind(id)
-                .fetch_one(&mut *tx)
+                .fetch_optional(&mut *tx)
                 .await
-                .unwrap_or(0);
+                .unwrap_or(None);
 
-                let upgrade_pkg = if has_upgrade > 0 {
-                    sqlx::query_as::<_, crate::models::AgentPackage>(
-                        "SELECT platform, version, sha256, url FROM agent_packages WHERE platform = ?",
-                    )
-                    .bind(&platform)
-                    .fetch_optional(&pool)
-                    .await
-                    .unwrap_or(None)
-                } else {
-                    None
+                let upgrade_pkg = match queued {
+                    None => None,
+                    Some((since_secs, attempts)) => {
+                        let pkgs = crate::agents::load_packages(&pool).await;
+                        let still_needed = crate::agents::available_upgrade(
+                            &pkgs, &payload.ver, &payload.arch, &payload.os,
+                        ).is_some();
+                        if !still_needed {
+                            sqlx::query("DELETE FROM commands WHERE tenant_id = ? AND system_id = ? AND command_type = 'UPGRADE'")
+                                .bind(tenant_id).bind(id).execute(&mut *tx).await.ok();
+                            if attempts > 0 {
+                                info!("Agent ID {} reports v{}: queued upgrade complete.", id, payload.ver);
+                            }
+                            None
+                        } else if attempts >= UPGRADE_MAX_ATTEMPTS {
+                            warn!(
+                                "Agent ID {} still on v{} after {} upgrade attempts; dropping the queued upgrade. \
+                                 Check the agent's log, then queue it again or install the agent by hand.",
+                                id, payload.ver, attempts
+                            );
+                            sqlx::query("DELETE FROM commands WHERE tenant_id = ? AND system_id = ? AND command_type = 'UPGRADE'")
+                                .bind(tenant_id).bind(id).execute(&mut *tx).await.ok();
+                            None
+                        } else if since_secs.is_some_and(|s| s < UPGRADE_RETRY_SECS) {
+                            None // handed out recently; give that attempt time
+                        } else {
+                            pkgs.get(&platform).cloned()
+                        }
+                    }
                 };
 
                 // Fetch pending test commands. The INNER JOIN on tests.id naturally
@@ -894,7 +925,7 @@ pub async fn send(
                 }
 
                 // Clear only the commands we're about to deliver in this heartbeat:
-                //   • UPGRADE dispatch → wipe the UPGRADE row, KEEP the TEST rows so
+                //   • UPGRADE dispatch → record the hand-out, KEEP the TEST rows so
                 //     they get re-dispatched after the client restarts on the new
                 //     binary. (Without this, an upgrade silently drops in-flight tests.)
                 //   • Otherwise        → wipe TEST rows as before. Any queued UPGRADE
@@ -912,8 +943,11 @@ pub async fn send(
                     .map(|t| t.test.id.unwrap_or(0) as i64)
                     .collect();
                 let clear_result = if upgrade_pkg.is_some() {
+                    // Not deleted: kept until the agent reports the new
+                    // version (see above). Record this hand-out.
                     sqlx::query(
-                        "DELETE FROM commands WHERE system_id = ? AND tenant_id = ? AND command_type = 'UPGRADE'",
+                        "UPDATE commands SET dispatched_at = CURRENT_TIMESTAMP, attempts = attempts + 1
+                          WHERE system_id = ? AND tenant_id = ? AND command_type = 'UPGRADE'",
                     )
                     .bind(id)
                     .bind(tenant_id)

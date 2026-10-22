@@ -1586,6 +1586,26 @@ pub async fn fetch_tenant_tests_metadata(
 
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Helper: retry_queued_upgrade_now
+// Queuing an upgrade for a system that already has one waiting is an admin
+// saying "try now": clear its hand-out time and attempt count, so the next
+// check-in hands it out again (see the retry rules in client::send).
+// ─────────────────────────────────────────────────────────────────────────────
+async fn retry_queued_upgrade_now(pool: &SqlitePool, tenant_id: &str, system_id: i64) {
+    if let Err(e) = sqlx::query(
+        "UPDATE commands SET dispatched_at = NULL, attempts = 0
+          WHERE tenant_id = ? AND system_id = ? AND command_type = 'UPGRADE'",
+    )
+    .bind(tenant_id)
+    .bind(system_id)
+    .execute(pool)
+    .await
+    {
+        error!("Failed to reset the queued upgrade for system {}: {}", system_id, e);
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // POST /systems/upgrade/{id}
 // Queue an upgrade for a single active system. Inserts a row into commands
 // with command_type='UPGRADE'; the next heartbeat from that agent dispatches
@@ -1629,6 +1649,7 @@ pub async fn systems_upgrade(
     .await
     {
         Ok(_) => {
+            retry_queued_upgrade_now(&pool, &auth.tenant_id, id as i64).await;
             info!("Upgrade queued for system ID {} by '{}'.", id, auth.username);
             crate::audit::record(
                 &pool, &auth.tenant_id,
@@ -1701,7 +1722,7 @@ pub async fn systems_bulk_upgrade(
         .await
         {
             Ok(r) if r.rows_affected() > 0 => queued += 1,
-            Ok(_) => {}
+            Ok(_) => retry_queued_upgrade_now(&pool, &auth.tenant_id, *id as i64).await,
             Err(e) => error!("Failed to queue upgrade for system {}: {}", id, e),
         }
     }
@@ -1803,7 +1824,8 @@ pub async fn systems_upgrade_all(
         .await
         {
             Ok(r) if r.rows_affected() > 0 => queued += 1,
-            Ok(_) => {}  // already had a pending UPGRADE row
+            // Already queued: try it again at the next check-in.
+            Ok(_) => retry_queued_upgrade_now(&pool, &auth.tenant_id, *id).await,
             Err(e) => error!("upgrade_all: queue failed for system {}: {}", id, e),
         }
     }

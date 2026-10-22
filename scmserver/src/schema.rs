@@ -2993,6 +2993,31 @@ async fn run_migrations_on(pool: &SqlitePool) -> Result<(), sqlx::Error> {
         info!("Schema migration v46 → v47 complete.");
     }
 
+    // ─────────────────────────────────────────────────────────────────────
+    // v47 → v48: queued upgrades survive a failed download (0.11.3).
+    //
+    // The UPGRADE row used to be deleted the moment it was handed to the
+    // agent, so a download that failed (slow link, timeout) was never
+    // retried and the system stayed on its old agent. It now stays until the
+    // agent reports the new version, and is handed out again at most once an
+    // hour (dispatched_at), giving up after UPGRADE_MAX_ATTEMPTS (attempts).
+    // ─────────────────────────────────────────────────────────────────────
+    if version < 48 {
+        info!("Running schema migration v47 → v48 (upgrade retries)...");
+        if table_exists(pool, "commands").await {
+            if !column_exists(pool, "commands", "dispatched_at").await {
+                sqlx::query("ALTER TABLE commands ADD COLUMN dispatched_at DATETIME")
+                    .execute(pool).await?;
+            }
+            if !column_exists(pool, "commands", "attempts").await {
+                sqlx::query("ALTER TABLE commands ADD COLUMN attempts INTEGER NOT NULL DEFAULT 0")
+                    .execute(pool).await?;
+            }
+        }
+        sqlx::query("UPDATE schema_info SET version = 48").execute(pool).await?;
+        info!("Schema migration v47 → v48 complete.");
+    }
+
     Ok(())
 }
 

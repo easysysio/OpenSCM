@@ -167,8 +167,13 @@ When a registered system reports a version older than the bundled one, an amber
    lost during the upgrade
 
 The button compares versions using semver, so it only appears when the bundled
-version is strictly newer. Re-clicking an already-queued upgrade is a no-op (one
-upgrade per system at a time, enforced by a unique index).
+version is strictly newer.
+
+A queued upgrade stays queued until the agent reports the new version. If the
+download fails (for example on a slow link), the server offers it again an hour
+later, up to 24 times, then drops it and logs a warning. Clicking **Upgrade**
+again for a system that already has one queued means "try now": it goes out at
+the next check-in. The agent allows the download 5 minutes.
 
 A yellow number in the sidebar, on **Inventory** and on **Systems**, shows how
 many approved, online systems are waiting for an agent update: the systems that
