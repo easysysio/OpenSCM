@@ -59,13 +59,14 @@
               <h3 class="card-title">Systems Inventory</h3>
               <div class="card-tools">
                 {% if has_upgradable and is_admin %}
-                <form method="POST" action="/systems/upgrade_all" class="d-inline-block mr-1"
-                      onsubmit="return confirm('Queue an upgrade for every eligible system in this tenant?')">
-                  <button type="submit" class="btn btn-warning btn-sm"
-                          title="Queue upgrade for every system with a newer agent available">
-                    <i class="fas fa-arrow-up mr-1"></i> Upgrade All
-                  </button>
-                </form>
+                {# Confirmed in the page's own window, not the browser's
+                   confirm(): browsers may silently suppress those, which made
+                   the button appear to do nothing until clicked again. #}
+                <button type="button" class="btn btn-warning btn-sm mr-1"
+                        data-toggle="modal" data-target="#upgradeAllModal"
+                        title="Queue upgrade for every system with a newer agent available">
+                  <i class="fas fa-arrow-up mr-1"></i> Upgrade All
+                </button>
                 {% endif %}
                 <a href="https://www.openscm.io/start/downloads/#agent-scmclient" target="_blank" class="btn btn-primary btn-sm mr-1" title="Download Agent">
                   <i class="fas fa-plus mr-1"></i> New System
@@ -315,6 +316,40 @@
     </div>
   </div>
 </div>
+
+{# Upgrade All confirmation #}
+{% if has_upgradable and is_admin %}
+<div class="modal fade" id="upgradeAllModal" tabindex="-1" role="dialog" aria-hidden="true">
+  <div class="modal-dialog modal-dialog-centered" role="document">
+    <div class="modal-content border-warning">
+      <div class="modal-header bg-warning">
+        <h5 class="modal-title"><i class="fas fa-arrow-up mr-2"></i>Upgrade All Agents</h5>
+        <button type="button" class="close" data-dismiss="modal" aria-label="Close">
+          <span aria-hidden="true">&times;</span>
+        </button>
+      </div>
+      <form method="POST" action="/systems/upgrade_all">
+        <div class="modal-body">
+          <p class="mb-2">
+            Queue an agent upgrade for <strong>{{ upgrade_all_count }} system(s)</strong>
+            running an older agent than this server provides.
+          </p>
+          <p class="mb-0 text-muted" style="font-size:0.88rem;">
+            Each agent upgrades at its next check-in{% if upgrade_all_offline > 0 %};
+            the {{ upgrade_all_offline }} offline system(s) upgrade when they come back{% endif %}.
+          </p>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-secondary btn-sm" data-dismiss="modal">Cancel</button>
+          <button type="submit" class="btn btn-warning btn-sm">
+            <i class="fas fa-arrow-up mr-1"></i> Queue Upgrades
+          </button>
+        </div>
+      </form>
+    </div>
+  </div>
+</div>
+{% endif %}
 
 {# Add to Group Modal #}
 <div class="modal fade" id="addToGroupModal" tabindex="-1" role="dialog" aria-hidden="true">

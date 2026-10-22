@@ -6,6 +6,9 @@ All notable changes to OpenSCM are documented here.
 
 ## [Unreleased]
 
+### Fixed
+- **Upgrade All could seem to do nothing.** It asked for confirmation with the browser's own dialog, which browsers sometimes suppress; a suppressed dialog counts as Cancel, so the click was silently ignored until it was tried again. It now opens OpenSCM's own confirmation window, like Rotate Signing Key, which also says how many systems will be queued and how many of them are offline.
+
 ---
 
 ## [0.11.2] - 2026-10-21

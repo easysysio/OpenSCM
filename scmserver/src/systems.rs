@@ -258,6 +258,15 @@ pub async fn systems(
         context.insert("success_message", success_message);
     }
     let has_upgradable = systems.iter().any(|s| s.upgrade_available && !s.is_offline);
+    // What Upgrade All will queue (every approved system with a newer agent,
+    // offline ones included: they upgrade when they come back), for the
+    // confirmation window to state.
+    let upgrade_all_count = systems.iter()
+        .filter(|s| s.upgrade_available && s.status.as_deref() == Some("active"))
+        .count();
+    let upgrade_all_offline = systems.iter()
+        .filter(|s| s.upgrade_available && s.status.as_deref() == Some("active") && s.is_offline)
+        .count();
 
     // Container inventory — one bulk query for every system on the page,
     // grouped by host_system_id, JSON-encoded once and embedded as a script
@@ -326,6 +335,8 @@ pub async fn systems(
 
     context.insert("systems", &systems);
     context.insert("has_upgradable", &has_upgradable);
+    context.insert("upgrade_all_count", &upgrade_all_count);
+    context.insert("upgrade_all_offline", &upgrade_all_offline);
     context.insert("containers_by_system_json", &containers_by_system_json);
     render_template(&tera, Some(&pool), "systems.html", context, Some(auth))
         .await
