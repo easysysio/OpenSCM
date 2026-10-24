@@ -16,8 +16,12 @@ mod containers;
 //
 // This static is a contiguous, self-describing byte string that a plain byte
 // scan can find in any executable format — Mach-O, ELF or PE alike — with no
-// format parsing at all. #[used] and #[no_mangle] keep the linker from
-// discarding it: nothing in the program reads it.
+// format parsing at all. #[used] and #[no_mangle] were meant to keep it: they
+// were enough for ELF, Mach-O and x86_64 Windows, but the aarch64 Windows build
+// (LLVM's linker, MinGW mode) dropped it anyway — 0.11.4's Windows ARM64 agent
+// has no marker. main() therefore reads it once through black_box, so it is
+// genuinely used code on every platform and no linker may drop it. Release
+// builds check every bundled agent for it (collect-agents).
 //
 // The server matches on the prefix and reads the version that follows, so the
 // advertised upgrade version describes the payload instead of asserting it.
@@ -96,6 +100,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // this every HTTPS request fails at runtime with "no process-level
     // CryptoProvider available".
     let _ = rustls::crypto::ring::default_provider().install_default();
+
+    // Keep the version marker in the binary (see OPENSCM_AGENT_VERSION_TAG).
+    std::hint::black_box(OPENSCM_AGENT_VERSION_TAG);
 
 
     // 1. Logging setup

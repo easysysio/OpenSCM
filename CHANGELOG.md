@@ -6,6 +6,9 @@ All notable changes to OpenSCM are documented here.
 
 ## [Unreleased]
 
+### Fixed
+- **The Windows on ARM agent lost its built-in version marker.** Agents carry a `<<OPENSCM_AGENT_VERSION:x.y.z>>` marker, so a build can check the agents it bundles without running them. The ARM64 Windows build's linker discarded it as unused, which stopped the SaaS 0.11.4 build. The agent now reads the marker once at startup, so no linker can drop it. CE's release build now checks the marker on every bundled agent, so a missing one fails the CE release instead of turning up later in SaaS.
+
 ---
 
 ## [0.11.4] - 2026-10-24

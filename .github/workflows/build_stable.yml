@@ -589,6 +589,24 @@ jobs:
           fi
           echo "Verified: bundled agents report v${ACTUAL}"
 
+          # Running the binary proves the version for this platform only. The
+          # marker <<OPENSCM_AGENT_VERSION:x.y.z>> can be read from EVERY
+          # bundled agent without running it, and the SaaS build relies on it:
+          # 0.11.4's Windows ARM64 agent had lost it to the linker and nothing
+          # here noticed. Check all of them.
+          bad=0
+          for f in build/agents/scmclient-*; do
+            got=$( { grep -a -o '<<OPENSCM_AGENT_VERSION:[^>]*>>' "$f" || true; } \
+                  | sed -n '1s/<<OPENSCM_AGENT_VERSION:\(.*\)>>/\1/p')
+            if [ "$got" != "$VERSION" ]; then
+              echo "::error::$(basename "$f") carries version marker '${got:-none}', expected ${VERSION}."
+              bad=1
+            else
+              echo "  ✓ $(basename "$f") marker v${got}"
+            fi
+          done
+          [ "$bad" -eq 0 ] || exit 1
+
           echo "Staged agents for v${VERSION}:"
           ls -lh build/agents/
 
