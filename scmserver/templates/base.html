@@ -531,19 +531,69 @@
 // /systems/delete/42 link in an email could delete a system with nobody
 // clicking it. Routing through a form makes the request a POST, which Lax does
 // not attach cookies to cross-site and which nothing follows speculatively.
+// confirmAction(message, onConfirm, opts) — ask in the page's own window,
+// not the browser's confirm(). Browsers may silently suppress confirm()
+// dialogs, and a suppressed one counts as Cancel, so buttons appeared to do
+// nothing until clicked again. `message` is set as text, never HTML.
+// opts.danger: red confirm button; opts.ok: its label.
+window.confirmAction = function (message, onConfirm, opts) {
+  opts = opts || {};
+  var $m = $('#oscmConfirmModal');
+  $('#oscmConfirmText').text(message);
+  $m.find('.modal-header').toggleClass('bg-danger', !!opts.danger).toggleClass('bg-warning', !opts.danger);
+  $('#oscmConfirmOk')
+    .text(opts.ok || 'Confirm')
+    .toggleClass('btn-danger', !!opts.danger).toggleClass('btn-warning', !opts.danger)
+    .off('click').one('click', function () { $m.modal('hide'); onConfirm(); });
+  $m.modal('show');
+};
+
+// confirmSubmit — for <form onsubmit="return confirmSubmit(this)">: asks with
+// the form's data-confirm text, then submits it. form.submit() does not fire
+// onsubmit again.
+window.confirmSubmit = function (form) {
+  window.confirmAction(form.getAttribute('data-confirm') || 'Are you sure?',
+                       function () { form.submit(); },
+                       { danger: form.getAttribute('data-danger') === '1' });
+  return false;
+};
+
 function postTo(url, confirmMessage) {
   // Templates render '#' as the target when the user lacks the role for the
   // action; posting that would reload the current page as a POST.
   if (!url || url === '#') { return false; }
-  if (confirmMessage && !confirm(confirmMessage)) { return false; }
-  var f = document.createElement('form');
-  f.method = 'POST';
-  f.action = url;
-  document.body.appendChild(f);
-  f.submit();
+  var go = function () {
+    var f = document.createElement('form');
+    f.method = 'POST';
+    f.action = url;
+    document.body.appendChild(f);
+    f.submit();
+  };
+  if (confirmMessage) {
+    window.confirmAction(confirmMessage, go, { danger: /\/delete/.test(url) });
+  } else {
+    go();
+  }
   return false;
 }
 </script>
+
+{# The one confirmation window behind confirmAction / confirmSubmit / postTo. #}
+<div class="modal fade" id="oscmConfirmModal" tabindex="-1" role="dialog" aria-hidden="true">
+  <div class="modal-dialog modal-dialog-centered" role="document">
+    <div class="modal-content">
+      <div class="modal-header bg-warning">
+        <h5 class="modal-title"><i class="fas fa-question-circle mr-2"></i>Please confirm</h5>
+        <button type="button" class="close" data-dismiss="modal" aria-label="Close"><span aria-hidden="true">&times;</span></button>
+      </div>
+      <div class="modal-body"><p class="mb-0" id="oscmConfirmText"></p></div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-secondary btn-sm" data-dismiss="modal">Cancel</button>
+        <button type="button" class="btn btn-warning btn-sm" id="oscmConfirmOk">Confirm</button>
+      </div>
+    </div>
+  </div>
+</div>
 
 {% block scripts %}{% endblock %}
 

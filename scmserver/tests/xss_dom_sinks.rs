@@ -130,3 +130,38 @@ fn base_defines_escape_html() {
     let scripts = base.find("{% block scripts %}").expect("no scripts block");
     assert!(def < scripts, "escapeHtml must be defined before page scripts load");
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Inline event handlers (onclick="…", onsubmit="…") are JavaScript. Tera's
+// autoescape turns ' into &#x27;, but the browser decodes that back to ' in
+// the attribute BEFORE the JavaScript runs — so a value spliced into a quoted
+// JS string there can close the string and run code. The per-row Upgrade
+// confirmation and the report page's Save Report did this with the system
+// name, which is the hostname the agent reports. Text for a confirmation goes
+// in a data-confirm attribute instead, read as text by confirmAction /
+// confirmSubmit (base.html). Only numeric ids, and template constants with no
+// outside input, may appear inside a handler.
+// ─────────────────────────────────────────────────────────────────────────────
+#[test]
+fn inline_handlers_interpolate_nothing_but_ids() {
+    let handler = regex::Regex::new(r#" on[a-z]+="([^"]*)""#).unwrap();
+    let expr = regex::Regex::new(r"\{\{\s*([^}]*?)\s*\}\}").unwrap();
+    // Template-defined constants: fixed strings set with {% set %} in the
+    // template itself.
+    const SAFE_CONSTANTS: &[&str] = &["del_msg"];
+    let mut bad = Vec::new();
+    for (name, src) in templates() {
+        for (n, line) in src.lines().enumerate() {
+            for h in handler.captures_iter(line) {
+                for e in expr.captures_iter(&h[1]) {
+                    let v = e[1].trim();
+                    let is_id = v == "id" || v.ends_with(".id") || v.ends_with("_id");
+                    if !(is_id || SAFE_CONSTANTS.contains(&v)) {
+                        bad.push(format!("{name}:{}: {{{{ {v} }}}}", n + 1));
+                    }
+                }
+            }
+        }
+    }
+    assert!(bad.is_empty(), "values spliced into inline JavaScript:\n{}", bad.join("\n"));
+}

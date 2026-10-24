@@ -44,7 +44,7 @@ async fn rotate(pool: &SqlitePool) {
         username: "alice".into(), userid: 1, tenant_id: "default".into(),
         role: "admin".into(), impersonating: None,
     };
-    scmserver::settings::settings_rotate_keys(admin, Extension(pool.clone()), ClientIp("127.0.0.1".into()))
+    let _ = scmserver::settings::settings_rotate_keys(admin, Extension(pool.clone()), ClientIp("127.0.0.1".into()))
         .await.into_response();
 }
 

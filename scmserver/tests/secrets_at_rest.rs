@@ -141,7 +141,7 @@ async fn new_signing_keys_are_stored_encrypted() {
     let pool = db().await;
     // initialize_database's default-tenant key.
     assert!(raw(&pool, "SELECT private_key FROM tenant_keys WHERE tenant_id = 'default'").await.starts_with(PREFIX));
-    scmserver::settings::settings_rotate_keys(admin(), Extension(pool.clone()), ClientIp("127.0.0.1".into()))
+    let _ = scmserver::settings::settings_rotate_keys(admin(), Extension(pool.clone()), ClientIp("127.0.0.1".into()))
         .await.into_response();
     assert!(raw(&pool, "SELECT private_key FROM tenant_keys WHERE tenant_id = 'default' AND is_active = 1").await
         .starts_with(PREFIX));
@@ -160,7 +160,7 @@ fn dir_form(bind_password: &str) -> DirectoryForm {
 async fn the_ldap_password_is_encrypted_never_sent_back_and_kept_when_left_blank() {
     let pool = db().await;
     let ip = || ClientIp("127.0.0.1".into());
-    directories::add_submit(admin(), Extension(pool.clone()), ip(), Form(dir_form("first-pw"))).await.into_response();
+    let _ = directories::add_submit(admin(), Extension(pool.clone()), ip(), Form(dir_form("first-pw"))).await.into_response();
     let stored = raw(&pool, "SELECT bind_password FROM directories").await;
     assert!(stored.starts_with(PREFIX) && !stored.contains("first-pw"), "{stored}");
     let id: i64 = sqlx::query_scalar("SELECT id FROM directories").fetch_one(&pool).await.unwrap();
@@ -175,10 +175,10 @@ async fn the_ldap_password_is_encrypted_never_sent_back_and_kept_when_left_blank
     assert!(!html.contains("first-pw"), "the password went back to the browser");
     assert!(html.contains("unchanged if left blank"));
 
-    directories::edit_submit(admin(), Path(id), Extension(pool.clone()), ip(), Form(dir_form(""))).await.into_response();
+    let _ = directories::edit_submit(admin(), Path(id), Extension(pool.clone()), ip(), Form(dir_form(""))).await.into_response();
     assert_eq!(directories::get_by_id(&pool, id).await.unwrap().bind_password, "first-pw", "blank keeps it");
 
-    directories::edit_submit(admin(), Path(id), Extension(pool.clone()), ip(), Form(dir_form("second-pw"))).await.into_response();
+    let _ = directories::edit_submit(admin(), Path(id), Extension(pool.clone()), ip(), Form(dir_form("second-pw"))).await.into_response();
     assert_eq!(directories::get_by_id(&pool, id).await.unwrap().bind_password, "second-pw");
     assert!(raw(&pool, "SELECT bind_password FROM directories").await.starts_with(PREFIX));
 }

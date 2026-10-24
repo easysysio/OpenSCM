@@ -438,7 +438,8 @@
           {% if is_runner %}
           <a class="btn btn-success btn-sm ml-2"
              href="/systems/report/{{ report.system_id }}/save"
-             onclick="return confirm('Save a compliance snapshot for {{ report.system_name }}?');">
+             data-confirm="Save a compliance snapshot for {{ report.system_name }}?"
+             onclick="var a = this; confirmAction(a.getAttribute('data-confirm'), function () { window.location = a.href; }, { ok: 'Save Report' }); return false;">
             <i class="fas fa-save mr-1"></i> Save Report
           </a>
           {% endif %}

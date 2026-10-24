@@ -233,8 +233,11 @@
                         </a>
 
                         {% if system.upgrade_available and not system.is_offline and is_admin %}
+                        {# The text is a data attribute, read as text: the system name is the
+                           agent's own hostname, and it used to be spliced into inline JS. #}
                         <form method="POST" action="/systems/upgrade/{{ system.id }}" style="display:inline;"
-                              onsubmit="return confirm('Queue upgrade to v{{ system.upgrade_version }} for {{ system.name }}?')">
+                              data-confirm="Queue upgrade to v{{ system.upgrade_version }} for {{ system.name }}?"
+                              onsubmit="return confirmSubmit(this)">
                           <button type="submit" class="btn btn-warning btn-sm ml-1"
                                   title="Upgrade to v{{ system.upgrade_version }}">
                             <i class="fas fa-arrow-up"></i>
@@ -601,18 +604,20 @@
     $('#bulk-approve-btn').on('click', function() {
       const ids = getSelectedIds();
       if (!ids.length) return;
-      if (!confirm('Approve ' + ids.length + ' system(s)?')) return;
-      buildHiddenIds('bulk-approve-ids', ids);
-      $('#bulk-approve-form').submit();
+      confirmAction('Approve ' + ids.length + ' system(s)?', function () {
+        buildHiddenIds('bulk-approve-ids', ids);
+        $('#bulk-approve-form').submit();
+      }, { ok: 'Approve' });
     });
 
     // Bulk Delete
     $('#bulk-delete-btn').on('click', function() {
       const ids = getSelectedIds();
       if (!ids.length) return;
-      if (!confirm('Delete ' + ids.length + ' system(s)? This cannot be undone.')) return;
-      buildHiddenIds('bulk-delete-ids', ids);
-      $('#bulk-delete-form').submit();
+      confirmAction('Delete ' + ids.length + ' system(s)? This cannot be undone.', function () {
+        buildHiddenIds('bulk-delete-ids', ids);
+        $('#bulk-delete-form').submit();
+      }, { danger: true, ok: 'Delete' });
     });
 
     // Add to Group — open modal
@@ -636,9 +641,10 @@
     $('#bulk-upgrade-btn').on('click', function() {
       const ids = getSelectedIds();
       if (!ids.length) return;
-      if (!confirm('Queue upgrade for ' + ids.length + ' system(s)?')) return;
-      buildHiddenIds('bulk-upgrade-ids', ids);
-      $('#bulk-upgrade-form').submit();
+      confirmAction('Queue upgrade for ' + ids.length + ' system(s)?', function () {
+        buildHiddenIds('bulk-upgrade-ids', ids);
+        $('#bulk-upgrade-form').submit();
+      }, { ok: 'Queue Upgrades' });
     });
 
     // ─────────────────────────────────────────────────────────────────────
