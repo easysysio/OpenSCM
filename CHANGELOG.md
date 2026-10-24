@@ -6,6 +6,10 @@ All notable changes to OpenSCM are documented here.
 
 ## [Unreleased]
 
+---
+
+## [0.11.4] - 2026-10-24
+
 ### Security
 - **An agent's hostname could run script in an admin's browser.** The per-row **Upgrade** confirmation on the Systems page and **Save Report** on a system's report page put the system name inside inline JavaScript. That name is the hostname the agent reports, and the browser decodes the HTML escaping before the script runs, so a host named with a `'` could break out of the string and run code when the button was clicked. The text now goes in a data attribute and is shown as plain text. A new test fails if any template puts anything but a numeric ID into an inline event handler. The LDAP directory delete confirmation had the same pattern with the directory name (admin-set) and is fixed the same way.
 
