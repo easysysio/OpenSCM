@@ -6,6 +6,9 @@ All notable changes to OpenSCM are documented here.
 
 ## [Unreleased]
 
+### Fixed
+- **The last browser confirmations are gone.** Bulk delete on the Tests and Reports pages and the auto-group rule toggle used the browser's `confirm()`, which can be suppressed so the click silently does nothing. They now use OpenSCM's own confirmation window, and a test fails if any template uses `confirm()` again. The shared `confirmSubmit` helper also works on a single submit button now, not only on a whole form.
+
 ---
 
 ## [0.11.5] - 2026-10-24

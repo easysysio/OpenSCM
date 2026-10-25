@@ -548,13 +548,16 @@ window.confirmAction = function (message, onConfirm, opts) {
   $m.modal('show');
 };
 
-// confirmSubmit — for <form onsubmit="return confirmSubmit(this)">: asks with
-// the form's data-confirm text, then submits it. form.submit() does not fire
-// onsubmit again.
-window.confirmSubmit = function (form) {
-  window.confirmAction(form.getAttribute('data-confirm') || 'Are you sure?',
+// confirmSubmit — for <form onsubmit="return confirmSubmit(this)"> or a
+// submit <button onclick="return confirmSubmit(this)">: asks with the
+// element's data-confirm text (data-danger="1" for a red button), then
+// submits the form. form.submit() does not fire onsubmit again.
+window.confirmSubmit = function (el) {
+  var form = el.form || el;
+  var attr = function (name) { return el.getAttribute(name) || form.getAttribute(name); };
+  window.confirmAction(attr('data-confirm') || 'Are you sure?',
                        function () { form.submit(); },
-                       { danger: form.getAttribute('data-danger') === '1' });
+                       { danger: attr('data-danger') === '1' });
   return false;
 };
 

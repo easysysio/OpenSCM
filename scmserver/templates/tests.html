@@ -478,12 +478,13 @@ $(function () {
     $('#bulk-delete-btn').on('click', function() {
         const ids = getSelectedIds();
         if (!ids.length) return;
-        if (!confirm('Delete ' + ids.length + ' test(s)? All historical data will be lost.')) return;
-        const container = $('#bulk-delete-ids').empty();
-        ids.forEach(function(id) {
-            container.append('<input type="hidden" name="ids" value="' + id + '">');
-        });
-        $('#bulk-delete-form').submit();
+        confirmAction('Delete ' + ids.length + ' test(s)? All historical data will be lost.', function () {
+            const container = $('#bulk-delete-ids').empty();
+            ids.forEach(function(id) {
+                container.append('<input type="hidden" name="ids" value="' + id + '">');
+            });
+            $('#bulk-delete-form').submit();
+        }, { danger: true, ok: 'Delete' });
     });
 
     // Add to Policy — open modal

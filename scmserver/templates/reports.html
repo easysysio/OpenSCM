@@ -273,10 +273,11 @@
       $('#' + deleteBtnId).on('click', function() {
         const ids = getIds();
         if (!ids.length) return;
-        if (!confirm('Delete ' + ids.length + ' report(s)? This action is permanent.')) return;
-        const c = $('#' + idsContainerId).empty();
-        ids.forEach(function(id) { c.append('<input type="hidden" name="ids" value="' + id + '">'); });
-        $('#' + formId).submit();
+        confirmAction('Delete ' + ids.length + ' report(s)? This action is permanent.', function () {
+          const c = $('#' + idsContainerId).empty();
+          ids.forEach(function(id) { c.append('<input type="hidden" name="ids" value="' + id + '">'); });
+          $('#' + formId).submit();
+        }, { danger: true, ok: 'Delete' });
       });
     }
 

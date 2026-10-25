@@ -201,7 +201,8 @@
           <form method="POST" action="/system_groups/auto/toggle/{{ group_id }}"
                 class="text-right mt-2">
             <button type="submit" class="btn btn-warning btn-sm"
-                    onclick="return confirm('Toggle this rule\'s enabled state? Matching systems will be re-evaluated.');">
+                    data-confirm="Toggle this rule's enabled state? Matching systems will be re-evaluated."
+                    onclick="return confirmSubmit(this)">
               <i class="fas fa-power-off mr-1"></i>
               {% if enabled %}Disable rule{% else %}Enable rule{% endif %}
             </button>

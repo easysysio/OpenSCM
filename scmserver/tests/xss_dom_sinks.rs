@@ -165,3 +165,26 @@ fn inline_handlers_interpolate_nothing_but_ids() {
     }
     assert!(bad.is_empty(), "values spliced into inline JavaScript:\n{}", bad.join("\n"));
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// The browser's confirm() can be suppressed by the browser, and a suppressed
+// one counts as Cancel: buttons appeared to do nothing until clicked again.
+// Confirmations go through confirmAction / confirmSubmit (base.html).
+// ─────────────────────────────────────────────────────────────────────────────
+#[test]
+fn no_template_uses_the_browser_confirm() {
+    let call = regex::Regex::new(r"(^|[^A-Za-z_.])confirm\(").unwrap();
+    // Tera comments may mention confirm() — blank them, keeping line numbers.
+    let comment = regex::Regex::new(r"(?s)\{#.*?#\}").unwrap();
+    let mut bad = Vec::new();
+    for (name, src) in templates() {
+        let src = comment.replace_all(&src, |c: &regex::Captures| "\n".repeat(c[0].matches('\n').count()));
+        for (n, line) in src.lines().enumerate() {
+            let code = line.split("//").next().unwrap_or("");
+            if call.is_match(code) {
+                bad.push(format!("{name}:{}: {}", n + 1, line.trim()));
+            }
+        }
+    }
+    assert!(bad.is_empty(), "browser confirm() still used:\n{}", bad.join("\n"));
+}
