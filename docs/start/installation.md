@@ -207,6 +207,10 @@ setup wizard: `-x86_64.exe` for Intel and AMD machines, `-aarch64.exe` for
 Windows on ARM. The agent is registered as a **Windows Service** automatically,
 and the wizard prompts for the server URL.
 
+On Windows on ARM the service wrapper runs on the .NET Framework that comes
+with Windows (4.6.1 or later, included in Windows 10 version 1607 and later and
+in Windows 11), so both Windows 10 and Windows 11 on ARM are supported.
+
 ### Installing manually
 
 The one-line installer is a convenience, not a requirement — it does exactly

@@ -7,6 +7,7 @@ All notable changes to OpenSCM are documented here.
 ## [Unreleased]
 
 ### Fixed
+- **The Windows on ARM installers now work on Windows 10 on ARM.** The service wrapper bundled with every Windows installer (WinSW 2.12.0) was the x86-64 build, which Windows 11 on ARM runs through emulation but Windows 10 on ARM cannot run at all, so the agent and server services couldn't be installed there. The ARM64 installers now ship WinSW 2.12.0's .NET Framework 4.6.1 build instead: same version, same configuration, native ARM64 on Windows 11, x86 emulation on Windows 10, and 640 KB instead of 18 MB. The x86-64 installers are unchanged. Built in CI; not yet run on Windows on ARM hardware.
 - **The last browser confirmations are gone.** Bulk delete on the Tests and Reports pages and the auto-group rule toggle used the browser's `confirm()`, which can be suppressed so the click silently does nothing. They now use OpenSCM's own confirmation window, and a test fails if any template uses `confirm()` again. The shared `confirmSubmit` helper also works on a single submit button now, not only on a whole form.
 
 ---

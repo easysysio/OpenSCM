@@ -268,6 +268,14 @@ jobs:
           VERSION=$(grep -m1 '^version =' scmclient/Cargo.toml | sed 's/.*"\(.*\)".*/\1/')
           RELEASE=1
           cargo zigbuild --release --target ${{ matrix.target }} -p scmclient
+          # Windows on ARM: the bundled service wrapper (WinSW 2.12.0, x64
+          # build) cannot run on Windows 10 on ARM, which emulates x86 but not
+          # x64. The ARM64 installer ships WinSW 2.12.0's .NET Framework 4.6.1
+          # build instead (AnyCPU: native ARM64 on Windows 11, x86 emulation
+          # on Windows 10), under the same file name the installer expects.
+          if [ "${{ matrix.arch }}" = "aarch64" ]; then
+            cp scmclient/package/windows/scmclient-service-arm64.exe scmclient/package/windows/scmclient-service.exe
+          fi
           cp target/${{ matrix.target }}/release/scmclient.exe build/bin/scmclient.exe
           cp target/${{ matrix.target }}/release/scmclient.exe \
              scmclient/package/windows/scmclient.exe
@@ -348,6 +356,14 @@ jobs:
           VERSION=$(grep -m1 '^version =' scmserver/Cargo.toml | sed 's/.*"\(.*\)".*/\1/')
           RELEASE=1
           cargo zigbuild --release --target ${{ matrix.target }} -p scmserver
+          # Windows on ARM: the bundled service wrapper (WinSW 2.12.0, x64
+          # build) cannot run on Windows 10 on ARM, which emulates x86 but not
+          # x64. The ARM64 installer ships WinSW 2.12.0's .NET Framework 4.6.1
+          # build instead (AnyCPU: native ARM64 on Windows 11, x86 emulation
+          # on Windows 10), under the same file name the installer expects.
+          if [ "${{ matrix.arch }}" = "aarch64" ]; then
+            cp scmserver/package/windows/scmserver-service-arm64.exe scmserver/package/windows/scmserver-service.exe
+          fi
           cp target/${{ matrix.target }}/release/scmserver.exe \
              scmserver/package/windows/scmserver.exe
           INSTALLER="scmserver-${VERSION}-${RELEASE}-${{ matrix.arch }}.exe"
