@@ -25,6 +25,16 @@ All notable changes to OpenSCM are documented here.
   - **Audit log:** `GET /audit-log` (Admin; filters `since`, `action`).
   - **Paging and isolation:** lists page by cursor (`limit` up to 1000, `cursor` from `next_cursor`). Another organization's records answer 404.
   - **Same numbers as the pages:** compliance comes from the same functions as the report pages, PDFs and saved reports.
+- **REST API write endpoints.** Each does what its page button does, through the same code and with the same role:
+  - **Systems** (Editor): `POST /systems/{id}/approve`, `DELETE /systems/{id}`, and `PUT /systems/{id}/groups` to set its manual groups (automatic groups are rule-driven and left alone).
+  - **Agent upgrade** (Admin): `POST /systems/{id}/upgrade`, which queues it.
+  - **Findings** (Editor): `PUT` and `DELETE /systems/{id}/results/{test_id}/exclusion` exclude a finding with a reason, or restore it.
+  - **Run a policy** (Runner): `POST /policies/{id}/run` queues its tests now.
+  - **Import a policy** (Editor): `POST /policies/import` takes the policy export format; it creates the policy (201) or updates the one with the same external ID (200).
+  - **Save a report** (Runner): `POST /reports/{policy|system}` saves a snapshot and returns its ID.
+  - **Accepted, not done:** work that happens later, like a scan or an upgrade, answers 202.
+  - **Plan limits** (SaaS) apply as on the pages, answering 422 `plan_limit`.
+  - **Audit:** every write is in the audit log with `"via": "api"` and the token's name.
 
 ---
 

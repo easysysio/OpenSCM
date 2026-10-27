@@ -115,6 +115,21 @@ pub async fn save_policy_report_logic(
     tenant_id: &str,
     submitter_name: &str,
 ) -> Result<(), sqlx::Error> {
+    save_policy_report(id, pool, tenant_id, submitter_name).await.map(|_| ())
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// save_policy_report
+// save_policy_report_logic, returning the new report's id — None when the
+// policy does not exist in the tenant. Shared by the Save button, the
+// scheduler (through the wrapper above) and the REST API.
+// ─────────────────────────────────────────────────────────────────────────────
+pub async fn save_policy_report(
+    id: i64,
+    pool: &SqlitePool,
+    tenant_id: &str,
+    submitter_name: &str,
+) -> Result<Option<i64>, sqlx::Error> {
 
     // Fetch policy header
     let policy_row = match sqlx::query(
@@ -128,7 +143,7 @@ pub async fn save_policy_report_logic(
         Some(row) => row,
         None => {
             error!("Policy {} not found for report save.", id);
-            return Ok(());
+            return Ok(None);
         }
     };
 
@@ -231,7 +246,7 @@ pub async fn save_policy_report_logic(
         .map_err(|e| sqlx::Error::Protocol(format!("Failed to serialize results: {}", e)))?;
 
     // Save report
-    sqlx::query(r#"
+    let saved = sqlx::query(r#"
         INSERT INTO reports
             (tenant_id, policy_name, policy_version, policy_description,
              submitter_name, tests_metadata, report_results)
@@ -248,7 +263,7 @@ pub async fn save_policy_report_logic(
     .await?;
 
     info!("Report saved for policy {} by '{}'.", id, submitter_name);
-    Ok(())
+    Ok(Some(saved.last_insert_rowid()))
 }
 
 
@@ -1112,47 +1127,51 @@ pub async fn system_report_save(
         return redir;
     }
 
-    let data = match fetch_system_report_data(system_id, &auth.tenant_id, &pool).await {
-        Ok(d) => d,
-        Err(e) if matches!(e, sqlx::Error::RowNotFound) => {
-            return Redirect::to("/systems?error_message=System+not+found").into_response();
-        }
-        Err(e) => {
-            error!(error = ?e, system_id = %system_id, "Failed to fetch system data for snapshot");
-            return Redirect::to("/reports?error_message=Failed+to+save+report").into_response();
-        }
-    };
-
-    let report_json = match serde_json::to_string(&data) {
-        Ok(j) => j,
-        Err(e) => {
-            error!("Failed to serialize system report data: {}", e);
-            return Redirect::to("/reports?error_message=Failed+to+save+report").into_response();
-        }
-    };
-
-    match sqlx::query(
-        "INSERT INTO system_reports (tenant_id, system_id, system_name, submitter_name, report_data)
-         VALUES (?, ?, ?, ?, ?)",
-    )
-    .bind(&auth.tenant_id)
-    .bind(system_id)
-    .bind(&data.system_name)
-    .bind(&auth.username)
-    .bind(&report_json)
-    .execute(&pool)
-    .await
-    {
-        Ok(_) => {
-            info!("System report snapshot saved for system '{}' by '{}'.", data.system_name, auth.username);
-            let msg = urlencoding::encode(&format!("Report saved for {}.", data.system_name)).to_string();
+    match save_system_report(system_id, &pool, &auth.tenant_id, &auth.username).await {
+        Ok(Some((_, name))) => {
+            let msg = urlencoding::encode(&format!("Report saved for {}.", name)).to_string();
             Redirect::to(&format!("/systems/report/{}?success_message={}", system_id, msg)).into_response()
         }
+        Ok(None) => Redirect::to("/systems?error_message=System+not+found").into_response(),
         Err(e) => {
-            error!("Failed to insert system report snapshot: {}", e);
+            error!(error = ?e, system_id = %system_id, "Failed to save system report snapshot");
             Redirect::to(&format!("/systems/report/{}?error_message=Failed+to+save+report", system_id)).into_response()
         }
     }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// save_system_report
+// Snapshot one system's compliance into system_reports. Returns the new
+// report's id and the system's name, or None when the system does not exist
+// in the tenant. Shared by the Save button and the REST API.
+// ─────────────────────────────────────────────────────────────────────────────
+pub async fn save_system_report(
+    system_id: i32,
+    pool: &SqlitePool,
+    tenant_id: &str,
+    submitter_name: &str,
+) -> Result<Option<(i64, String)>, sqlx::Error> {
+    let data = match fetch_system_report_data(system_id, tenant_id, pool).await {
+        Ok(d) => d,
+        Err(sqlx::Error::RowNotFound) => return Ok(None),
+        Err(e) => return Err(e),
+    };
+    let report_json = serde_json::to_string(&data)
+        .map_err(|e| sqlx::Error::Protocol(format!("Failed to serialize system report: {}", e)))?;
+    let saved = sqlx::query(
+        "INSERT INTO system_reports (tenant_id, system_id, system_name, submitter_name, report_data)
+         VALUES (?, ?, ?, ?, ?)",
+    )
+    .bind(tenant_id)
+    .bind(system_id)
+    .bind(&data.system_name)
+    .bind(submitter_name)
+    .bind(&report_json)
+    .execute(pool)
+    .await?;
+    info!("System report snapshot saved for system '{}' by '{}'.", data.system_name, submitter_name);
+    Ok(Some((saved.last_insert_rowid(), data.system_name)))
 }
 
 

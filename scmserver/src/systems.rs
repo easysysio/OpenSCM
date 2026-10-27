@@ -360,14 +360,7 @@ pub async fn systems_approve(
         return redir;
     }
 
-    if let Err(e) = sqlx::query(
-        "UPDATE systems SET status = 'active' WHERE id = ? AND tenant_id = ?",
-    )
-    .bind(id)
-    .bind(&auth.tenant_id)
-    .execute(&pool)
-    .await
-    {
+    if let Err(e) = approve_system(&pool, &auth.tenant_id, id as i64).await {
         error!("Failed to approve system {}: {}", id, e);
         let encoded = urlencoding::encode(&format!("Error approving system: {}", e)).to_string();
         return Redirect::to(&format!("/systems?error_message={}", encoded)).into_response();
@@ -402,25 +395,11 @@ pub async fn systems_delete(
         return redir;
     }
 
-    // ON DELETE CASCADE handles related records automatically
-    if let Err(e) = sqlx::query("DELETE FROM systems WHERE id = ? AND tenant_id = ?")
-        .bind(id)
-        .bind(&auth.tenant_id)
-        .execute(&pool)
-        .await
-    {
+    if let Err(e) = delete_system(&pool, &auth.tenant_id, id as i64).await {
         error!("Failed to delete system {}: {}", id, e);
         let encoded = urlencoding::encode(&format!("Error deleting system: {}", e)).to_string();
         return Redirect::to(&format!("/systems?error_message={}", encoded)).into_response();
     }
-
-    // Trend history has no FK (deletion must never be blocked by it) — clean
-    // up explicitly; anything missed ages out via entity_trend_retention_days.
-    let _ = sqlx::query(
-        "DELETE FROM entity_compliance_history
-         WHERE tenant_id = ? AND entity_type = 'system' AND entity_id = ?")
-        .bind(&auth.tenant_id).bind(id)
-        .execute(&pool).await;
 
     let _ = sync_tx.send(()).await;
     info!("System ID {} deleted by '{}'. Compliance update signaled.", id, auth.username);
@@ -992,6 +971,53 @@ pub async fn systems_bulk_add_group(
 
 
 // ─────────────────────────────────────────────────────────────────────────────
+// approve_system / delete_system / set_exclusion
+// The data side of Approve, Delete and Exclude/Restore, shared by the pages
+// and the REST API. Each returns how many rows it changed (0: no such
+// system / result in the tenant).
+// ─────────────────────────────────────────────────────────────────────────────
+pub async fn approve_system(pool: &SqlitePool, tenant_id: &str, id: i64) -> Result<u64, sqlx::Error> {
+    Ok(sqlx::query("UPDATE systems SET status = 'active' WHERE id = ? AND tenant_id = ?")
+        .bind(id).bind(tenant_id).execute(pool).await?.rows_affected())
+}
+
+pub async fn delete_system(pool: &SqlitePool, tenant_id: &str, id: i64) -> Result<u64, sqlx::Error> {
+    // ON DELETE CASCADE handles related records automatically
+    let n = sqlx::query("DELETE FROM systems WHERE id = ? AND tenant_id = ?")
+        .bind(id).bind(tenant_id).execute(pool).await?.rows_affected();
+    // Trend history has no FK (deletion must never be blocked by it) — clean
+    // up explicitly; anything missed ages out via entity_trend_retention_days.
+    let _ = sqlx::query(
+        "DELETE FROM entity_compliance_history
+         WHERE tenant_id = ? AND entity_type = 'system' AND entity_id = ?")
+        .bind(tenant_id).bind(id)
+        .execute(pool).await;
+    Ok(n)
+}
+
+// `exclude`: Some((by, reason)) to exclude, None to restore.
+pub async fn set_exclusion(
+    pool: &SqlitePool, tenant_id: &str, system_id: i64, test_id: i64,
+    exclude: Option<(&str, Option<String>)>,
+) -> Result<u64, sqlx::Error> {
+    let r = match exclude {
+        Some((by, reason)) => sqlx::query(
+            "UPDATE results SET excluded = 1, excluded_by = ?, excluded_at = CURRENT_TIMESTAMP,
+                                excluded_reason = ?
+             WHERE tenant_id = ? AND system_id = ? AND test_id = ?")
+            .bind(by).bind(reason).bind(tenant_id).bind(system_id).bind(test_id)
+            .execute(pool).await?,
+        None => sqlx::query(
+            "UPDATE results SET excluded = 0, excluded_by = NULL, excluded_at = NULL,
+                                excluded_reason = NULL
+             WHERE tenant_id = ? AND system_id = ? AND test_id = ?")
+            .bind(tenant_id).bind(system_id).bind(test_id)
+            .execute(pool).await?,
+    };
+    Ok(r.rows_affected())
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // fetch_system_report_data
 // Gather all policy/test compliance results for one system into
 // SystemReportData. Shared by the live report handler and the save handler.
@@ -1474,19 +1500,8 @@ pub async fn system_report_exclude(
     }
 
     let reason = exclusion_reason(&body);
-
-    let res = sqlx::query(
-        "UPDATE results SET excluded = 1, excluded_by = ?, excluded_at = CURRENT_TIMESTAMP,
-                            excluded_reason = ?
-         WHERE tenant_id = ? AND system_id = ? AND test_id = ?",
-    )
-    .bind(&auth.username)
-    .bind(&reason)
-    .bind(&auth.tenant_id)
-    .bind(system_id)
-    .bind(test_id)
-    .execute(&pool)
-    .await;
+    let res = set_exclusion(&pool, &auth.tenant_id, system_id as i64, test_id as i64,
+                            Some((&auth.username, reason))).await;
 
     let back = format!("/systems/report/{}", system_id);
     match res {
@@ -1522,16 +1537,7 @@ pub async fn system_report_unexclude(
         return redir;
     }
 
-    let res = sqlx::query(
-        "UPDATE results SET excluded = 0, excluded_by = NULL, excluded_at = NULL,
-                            excluded_reason = NULL
-         WHERE tenant_id = ? AND system_id = ? AND test_id = ?",
-    )
-    .bind(&auth.tenant_id)
-    .bind(system_id)
-    .bind(test_id)
-    .execute(&pool)
-    .await;
+    let res = set_exclusion(&pool, &auth.tenant_id, system_id as i64, test_id as i64, None).await;
 
     let back = format!("/systems/report/{}", system_id);
     match res {
@@ -1591,7 +1597,7 @@ pub async fn fetch_tenant_tests_metadata(
 // saying "try now": clear its hand-out time and attempt count, so the next
 // check-in hands it out again (see the retry rules in client::send).
 // ─────────────────────────────────────────────────────────────────────────────
-async fn retry_queued_upgrade_now(pool: &SqlitePool, tenant_id: &str, system_id: i64) {
+pub(crate) async fn retry_queued_upgrade_now(pool: &SqlitePool, tenant_id: &str, system_id: i64) {
     if let Err(e) = sqlx::query(
         "UPDATE commands SET dispatched_at = NULL, attempts = 0
           WHERE tenant_id = ? AND system_id = ? AND command_type = 'UPGRADE'",

@@ -21,7 +21,7 @@ use std::time::Duration;
 use axum::extract::FromRequestParts;
 use axum::http::{request::Parts, HeaderValue, StatusCode};
 use axum::response::{IntoResponse, Response};
-use axum::routing::get;
+use axum::routing::{get, post, put};
 use axum::{Json, Router};
 use serde_json::json;
 use sqlx::SqlitePool;
@@ -32,6 +32,7 @@ use crate::models::{AuthSession, UserRole};
 use crate::rate_limit::Limiter;
 
 pub mod read;
+pub mod write;
 
 pub const PREFIX: &str = "/api/v1beta1";
 pub const TOKEN_PREFIX: &str = "oscm_api_";
@@ -350,7 +351,12 @@ pub fn router<S: Clone + Send + Sync + 'static>() -> Router<S> {
     Router::new()
         .route(&p("/me"), get(me))
         .route(&p("/systems"), get(read::systems_list))
-        .route(&p("/systems/{id}"), get(read::systems_get))
+        .route(&p("/systems/{id}"), get(read::systems_get).delete(write::systems_delete))
+        .route(&p("/systems/{id}/approve"), post(write::systems_approve))
+        .route(&p("/systems/{id}/groups"), put(write::systems_set_groups))
+        .route(&p("/systems/{id}/upgrade"), post(write::systems_upgrade))
+        .route(&p("/systems/{system_id}/results/{test_id}/exclusion"),
+               put(write::exclusion_set).delete(write::exclusion_clear))
         .route(&p("/systems/{id}/compliance"), get(read::systems_compliance))
         .route(&p("/groups"), get(read::groups_list))
         .route(&p("/groups/{id}"), get(read::groups_get))
@@ -359,7 +365,9 @@ pub fn router<S: Clone + Send + Sync + 'static>() -> Router<S> {
         .route(&p("/policies"), get(read::policies_list))
         .route(&p("/policies/{id}"), get(read::policies_get))
         .route(&p("/policies/{id}/compliance"), get(read::policies_compliance))
-        .route(&p("/reports/{kind}"), get(read::reports_list))
+        .route(&p("/policies/{id}/run"), post(write::policies_run))
+        .route(&p("/policies/import"), post(write::policies_import))
+        .route(&p("/reports/{kind}"), get(read::reports_list).post(write::reports_save))
         .route(&p("/reports/{kind}/{id}"), get(read::reports_get))
         .route(&p("/reports/{kind}/{id}/pdf"), get(read::reports_pdf))
         .route(&p("/audit-log"), get(read::audit_log))
