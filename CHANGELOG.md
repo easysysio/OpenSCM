@@ -6,6 +6,10 @@ All notable changes to OpenSCM are documented here.
 
 ## [Unreleased]
 
+---
+
+## [0.12.0] - 2026-10-27
+
 ### Added
 - **API tokens, the first piece of the REST API.** A new **API tokens** page (user menu → API tokens) creates tokens for the upcoming REST API at `/api/v1beta1`.
   - Each token has a name and a role of its own (Viewer, Runner, Editor or Admin), at most its creator's. It expires in 30 days, 90 days (the default), a year, or never.

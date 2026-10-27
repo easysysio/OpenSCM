@@ -121,7 +121,7 @@ The server only needs to be installed once on a central host.
 
     ```bash
     # Debian/Ubuntu example
-    sudo dpkg -i scmserver_0.11.6-1_amd64.deb
+    sudo dpkg -i scmserver_0.12.0-1_amd64.deb
     ```
 
 ---
@@ -254,7 +254,7 @@ building your own automation, or are working offline.
     curl -sS https://repo.openscm.io/openscm.gpg -o /tmp/openscm.gpg
     sudo pacman-key --add /tmp/openscm.gpg
     sudo pacman-key --lsign-key 8A39E120F8B52DBB
-    sudo pacman -U https://repo.openscm.io/stable/arch/scmclient-0.11.6-1-x86_64.pkg.tar.zst
+    sudo pacman -U https://repo.openscm.io/stable/arch/scmclient-0.12.0-1-x86_64.pkg.tar.zst
     ```
 
     Published for `x86_64`, `aarch64`, `armhf` (ARMv6 and up), `ppc64le` and `riscv64`. For
@@ -263,14 +263,14 @@ building your own automation, or are working offline.
 === "FreeBSD"
 
     ```bash
-    pkg add https://repo.openscm.io/stable/freebsd/scmclient-0.11.6-1-freebsd-amd64.pkg
+    pkg add https://repo.openscm.io/stable/freebsd/scmclient-0.12.0-1-freebsd-amd64.pkg
     ```
 
 === "macOS"
 
     ```bash
-    curl -LO https://repo.openscm.io/stable/macos/scmclient_0.11.6-1_macos.pkg
-    sudo installer -pkg scmclient_0.11.6-1_macos.pkg -target /
+    curl -LO https://repo.openscm.io/stable/macos/scmclient_0.12.0-1_macos.pkg
+    sudo installer -pkg scmclient_0.12.0-1_macos.pkg -target /
     ```
 
 Every architecture is listed on the [Downloads](downloads.md) page if you need
