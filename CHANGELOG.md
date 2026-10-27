@@ -35,6 +35,7 @@ All notable changes to OpenSCM are documented here.
   - **Accepted, not done:** work that happens later, like a scan or an upgrade, answers 202.
   - **Plan limits** (SaaS) apply as on the pages, answering 422 `plan_limit`.
   - **Audit:** every write is in the audit log with `"via": "api"` and the token's name.
+- **REST API documentation.** A new *User Guide → REST API* page covers tokens, requests, paging, errors, the endpoint table and a CI example. The full reference is an OpenAPI 3.1 file, `docs/api/openapi.yaml`, published with the docs. A test fails if the server's routes and the OpenAPI file ever disagree.
 
 ---
 

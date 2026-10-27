@@ -1,0 +1,325 @@
+openapi: 3.1.0
+info:
+  title: OpenSCM REST API
+  version: v1beta1
+  summary: Read compliance data, trigger scans and onboard systems from your own tools.
+  description: |
+    The API of an OpenSCM server (Community Edition or SaaS), at `/api/v1beta1`.
+    It is a beta: it may still change in 0.x releases, and every change is noted
+    in the CHANGELOG. It becomes `/api/v1`, frozen, once integrations have used it.
+
+    **Authentication.** Every request sends an API token, created under
+    *user menu → API tokens*:
+
+        Authorization: Bearer oscm_api_…
+
+    The browser session cookie is not accepted. A token acts in one
+    organization, with its own role (Viewer, Runner, Editor or Admin), at most
+    its owner's current role.
+
+    **Errors** are `{"error": {"code": "…", "message": "…"}}` with the HTTP
+    status: 400 `invalid_request`, 401 `unauthorized`, 403 `forbidden`,
+    404 `not_found` (also for another organization's ids), 409 `conflict`,
+    422 `plan_limit`, 429 `rate_limited` (with `Retry-After`),
+    503 `not_installed`.
+
+    **Lists** return `{"data": […], "next_cursor": "…" | null}`. Pass
+    `cursor=<next_cursor>` for the next page; `limit` is 1–1000 (default 100).
+
+    **Rate limit:** 600 requests a minute per token.
+  license:
+    name: AGPL-3.0
+servers:
+  - url: https://your-openscm-server/api/v1beta1
+security:
+  - bearer: []
+
+# Layout convention (checked by scmserver/tests/api_spec.rs): each path at two
+# spaces of indentation under `paths:`, each method at four.
+paths:
+  /me:
+    get:
+      summary: Who this token acts as
+      description: The token's owner, organization, effective role and expiry. Any role.
+      responses:
+        "200": {description: The caller., content: {application/json: {schema: {$ref: "#/components/schemas/Me"}}}}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+
+  /systems:
+    get:
+      summary: List systems
+      description: Viewer.
+      parameters:
+        - {$ref: "#/components/parameters/limit"}
+        - {$ref: "#/components/parameters/cursor"}
+        - {name: status, in: query, schema: {type: string, enum: [active, pending]}}
+        - {name: group, in: query, description: Only systems in this group., schema: {type: integer}}
+      responses:
+        "200": {description: A page of systems., content: {application/json: {schema: {$ref: "#/components/schemas/SystemPage"}}}}
+  /systems/{id}:
+    parameters: [{$ref: "#/components/parameters/id"}]
+    get:
+      summary: Get a system
+      description: Viewer.
+      responses:
+        "200": {description: The system., content: {application/json: {schema: {$ref: "#/components/schemas/System"}}}}
+        "404": {$ref: "#/components/responses/NotFound"}
+    delete:
+      summary: Delete a system
+      description: Editor. Its results and history go with it.
+      responses:
+        "204": {description: Deleted.}
+        "404": {$ref: "#/components/responses/NotFound"}
+  /systems/{id}/approve:
+    parameters: [{$ref: "#/components/parameters/id"}]
+    post:
+      summary: Approve a pending system
+      description: Editor. Already active is not an error. In SaaS, 422 when the plan's system limit is reached.
+      responses:
+        "200": {description: Active., content: {application/json: {schema: {type: object, properties: {id: {type: integer}, status: {type: string}}}}}}
+        "404": {$ref: "#/components/responses/NotFound"}
+        "422": {$ref: "#/components/responses/PlanLimit"}
+  /systems/{id}/groups:
+    parameters: [{$ref: "#/components/parameters/id"}]
+    put:
+      summary: Set a system's manual groups
+      description: Editor. Replaces its membership of manual groups; automatic groups are rule-driven and cannot be named here (400).
+      requestBody:
+        required: true
+        content: {application/json: {schema: {type: object, required: [groups], properties: {groups: {type: array, items: {type: integer}}}}}}
+      responses:
+        "200": {description: The manual groups now set., content: {application/json: {schema: {type: object}}}}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "404": {$ref: "#/components/responses/NotFound"}
+  /systems/{id}/upgrade:
+    parameters: [{$ref: "#/components/parameters/id"}]
+    post:
+      summary: Queue an agent upgrade
+      description: Admin. The agent upgrades at its next check-in; a failed download is retried hourly. 409 when no newer agent is bundled for the system's platform, or the system is not approved.
+      responses:
+        "202": {description: Queued., content: {application/json: {schema: {type: object, properties: {id: {type: integer}, upgrade_to: {type: string}}}}}}
+        "404": {$ref: "#/components/responses/NotFound"}
+        "409": {$ref: "#/components/responses/Conflict"}
+  /systems/{id}/compliance:
+    parameters: [{$ref: "#/components/parameters/id"}]
+    get:
+      summary: A system's compliance
+      description: Viewer. Every policy linked to the system, each test's latest result, evidence and exclusion — the same data as the system report page and a saved system report.
+      responses:
+        "200": {description: The system report., content: {application/json: {schema: {type: object}}}}
+        "404": {$ref: "#/components/responses/NotFound"}
+  /systems/{system_id}/results/{test_id}/exclusion:
+    parameters:
+      - {name: system_id, in: path, required: true, schema: {type: integer}}
+      - {name: test_id, in: path, required: true, schema: {type: integer}}
+    put:
+      summary: Exclude a finding
+      description: Editor. The result stops counting against the system.
+      requestBody:
+        content: {application/json: {schema: {type: object, properties: {reason: {type: string, maxLength: 500}}}}}
+      responses:
+        "200": {description: Excluded., content: {application/json: {schema: {type: object}}}}
+        "404": {$ref: "#/components/responses/NotFound"}
+    delete:
+      summary: Restore an excluded finding
+      description: Editor.
+      responses:
+        "204": {description: Restored.}
+        "404": {$ref: "#/components/responses/NotFound"}
+
+  /groups:
+    get:
+      summary: List groups
+      description: Viewer.
+      parameters: [{$ref: "#/components/parameters/limit"}, {$ref: "#/components/parameters/cursor"}]
+      responses:
+        "200": {description: A page of groups., content: {application/json: {schema: {$ref: "#/components/schemas/Page"}}}}
+  /groups/{id}:
+    parameters: [{$ref: "#/components/parameters/id"}]
+    get:
+      summary: Get a group, with its systems and linked policies
+      description: Viewer.
+      responses:
+        "200": {description: The group., content: {application/json: {schema: {type: object}}}}
+        "404": {$ref: "#/components/responses/NotFound"}
+
+  /tests:
+    get:
+      summary: List tests
+      description: Viewer.
+      parameters: [{$ref: "#/components/parameters/limit"}, {$ref: "#/components/parameters/cursor"}]
+      responses:
+        "200": {description: A page of tests., content: {application/json: {schema: {$ref: "#/components/schemas/Page"}}}}
+  /tests/{id}:
+    parameters: [{$ref: "#/components/parameters/id"}]
+    get:
+      summary: Get a test, with its conditions
+      description: Viewer.
+      responses:
+        "200": {description: The test., content: {application/json: {schema: {type: object}}}}
+        "404": {$ref: "#/components/responses/NotFound"}
+
+  /policies:
+    get:
+      summary: List policies
+      description: Viewer.
+      parameters: [{$ref: "#/components/parameters/limit"}, {$ref: "#/components/parameters/cursor"}]
+      responses:
+        "200": {description: A page of policies., content: {application/json: {schema: {$ref: "#/components/schemas/Page"}}}}
+  /policies/import:
+    post:
+      summary: Import a policy
+      description: Editor. The body is a policy export (Policies → Export, or the Policy Store's format). Creates the policy (201) or updates the one with the same external id (200). In SaaS, 422 when the plan's policy limit is reached.
+      requestBody:
+        required: true
+        content: {application/json: {schema: {type: object, required: [format_version, policy, tests]}}}
+      responses:
+        "200": {description: Updated., content: {application/json: {schema: {$ref: "#/components/schemas/ImportSummary"}}}}
+        "201": {description: Imported., content: {application/json: {schema: {$ref: "#/components/schemas/ImportSummary"}}}}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "422": {$ref: "#/components/responses/PlanLimit"}
+  /policies/{id}:
+    parameters: [{$ref: "#/components/parameters/id"}]
+    get:
+      summary: Get a policy, with its tests and groups
+      description: Viewer.
+      responses:
+        "200": {description: The policy., content: {application/json: {schema: {type: object}}}}
+        "404": {$ref: "#/components/responses/NotFound"}
+  /policies/{id}/compliance:
+    parameters: [{$ref: "#/components/parameters/id"}]
+    get:
+      summary: A policy's compliance
+      description: Viewer. Every system in scope and each test's result — the live policy report, as on the policy report page.
+      responses:
+        "200": {description: The policy report., content: {application/json: {schema: {type: object}}}}
+        "404": {$ref: "#/components/responses/NotFound"}
+  /policies/{id}/run:
+    parameters: [{$ref: "#/components/parameters/id"}]
+    post:
+      summary: Run a policy now
+      description: Runner. Queues the policy's tests on every system in scope; results arrive as agents report.
+      responses:
+        "202": {description: Queued., content: {application/json: {schema: {type: object}}}}
+        "404": {$ref: "#/components/responses/NotFound"}
+
+  /reports/{kind}:
+    parameters: [{$ref: "#/components/parameters/kind"}]
+    get:
+      summary: List saved reports
+      description: Viewer.
+      parameters: [{$ref: "#/components/parameters/limit"}, {$ref: "#/components/parameters/cursor"}]
+      responses:
+        "200": {description: A page of saved reports., content: {application/json: {schema: {$ref: "#/components/schemas/Page"}}}}
+    post:
+      summary: Save a report now
+      description: 'Runner. Body: {"policy_id": N} for a policy report, {"system_id": N} for a system report. In SaaS, 422 when the plan''s report limit is reached.'
+      requestBody:
+        required: true
+        content: {application/json: {schema: {type: object, properties: {policy_id: {type: integer}, system_id: {type: integer}}}}}
+      responses:
+        "201": {description: Saved., content: {application/json: {schema: {type: object, properties: {id: {type: integer}, kind: {type: string}}}}}}
+        "404": {$ref: "#/components/responses/NotFound"}
+        "422": {$ref: "#/components/responses/PlanLimit"}
+  /reports/{kind}/{id}:
+    parameters: [{$ref: "#/components/parameters/kind"}, {$ref: "#/components/parameters/id"}]
+    get:
+      summary: Get a saved report
+      description: Viewer. The snapshot exactly as saved.
+      responses:
+        "200": {description: The report., content: {application/json: {schema: {type: object}}}}
+        "404": {$ref: "#/components/responses/NotFound"}
+  /reports/{kind}/{id}/pdf:
+    parameters: [{$ref: "#/components/parameters/kind"}, {$ref: "#/components/parameters/id"}]
+    get:
+      summary: Download a saved report as PDF
+      description: Viewer. The same PDF as the Download button.
+      responses:
+        "200": {description: The PDF., content: {application/pdf: {schema: {type: string, format: binary}}}}
+        "404": {$ref: "#/components/responses/NotFound"}
+
+  /audit-log:
+    get:
+      summary: Read the audit log
+      description: Admin. Oldest first from the cursor.
+      parameters:
+        - {$ref: "#/components/parameters/limit"}
+        - {$ref: "#/components/parameters/cursor"}
+        - {name: since, in: query, description: "ISO 8601 UTC; entries at or after it.", schema: {type: string, format: date-time}}
+        - {name: action, in: query, description: "Actions starting with this, e.g. system. or auth.login_failure.", schema: {type: string}}
+      responses:
+        "200": {description: A page of entries., content: {application/json: {schema: {$ref: "#/components/schemas/Page"}}}}
+        "403": {$ref: "#/components/responses/Forbidden"}
+
+components:
+  securitySchemes:
+    bearer: {type: http, scheme: bearer, description: "An API token: oscm_api_…"}
+  parameters:
+    id: {name: id, in: path, required: true, schema: {type: integer}}
+    kind: {name: kind, in: path, required: true, schema: {type: string, enum: [policy, system]}}
+    limit: {name: limit, in: query, schema: {type: integer, minimum: 1, maximum: 1000, default: 100}}
+    cursor: {name: cursor, in: query, description: The next_cursor of the previous page., schema: {type: string}}
+  responses:
+    BadRequest: {description: Invalid request., content: {application/json: {schema: {$ref: "#/components/schemas/Error"}}}}
+    Unauthorized: {description: Missing, unknown, expired or revoked token., content: {application/json: {schema: {$ref: "#/components/schemas/Error"}}}}
+    Forbidden: {description: The token's role is too low., content: {application/json: {schema: {$ref: "#/components/schemas/Error"}}}}
+    NotFound: {description: No such record in this organization., content: {application/json: {schema: {$ref: "#/components/schemas/Error"}}}}
+    Conflict: {description: Not possible in the record's current state., content: {application/json: {schema: {$ref: "#/components/schemas/Error"}}}}
+    PlanLimit: {description: The organization's plan has no room (SaaS)., content: {application/json: {schema: {$ref: "#/components/schemas/Error"}}}}
+  schemas:
+    Error:
+      type: object
+      properties:
+        error: {type: object, properties: {code: {type: string}, message: {type: string}}}
+    Page:
+      type: object
+      properties:
+        data: {type: array, items: {type: object}}
+        next_cursor: {type: [string, "null"]}
+    Me:
+      type: object
+      properties:
+        user: {type: object, properties: {id: {type: integer}, username: {type: string}}}
+        organization: {type: string}
+        role: {type: string, enum: [viewer, runner, editor, admin]}
+        token: {type: object, properties: {name: {type: string}, expires_at: {type: [string, "null"], format: date-time}}}
+    System:
+      type: object
+      properties:
+        id: {type: integer}
+        name: {type: string}
+        status: {type: string, enum: [active, pending]}
+        online: {type: boolean, description: "Checked in within the organization's offline threshold (never checked in: true)."}
+        agent:
+          type: object
+          properties:
+            version: {type: string}
+            protocol: {type: [integer, "null"], description: "1, or null for agents before agent protocol 1."}
+            upgrade_available: {type: [string, "null"], description: "The newer agent version this server offers, if any."}
+        os: {type: string}
+        arch: {type: string}
+        ip: {type: string}
+        groups: {type: array, items: {type: object, properties: {id: {type: integer}, name: {type: string}}}}
+        compliance:
+          type: object
+          properties:
+            score: {type: [number, "null"]}
+            tests_passed: {type: [integer, "null"]}
+            tests_failed: {type: [integer, "null"]}
+            tests_total: {type: [integer, "null"]}
+        telemetry: {type: object}
+        created_at: {type: [string, "null"], format: date-time}
+        last_seen: {type: [string, "null"], format: date-time}
+    SystemPage:
+      type: object
+      properties:
+        data: {type: array, items: {$ref: "#/components/schemas/System"}}
+        next_cursor: {type: [string, "null"]}
+    ImportSummary:
+      type: object
+      properties:
+        policy_id: {type: integer}
+        action: {type: string, enum: [imported, updated]}
+        inserted_tests: {type: integer}
+        updated_tests: {type: integer}
+        unlinked_tests: {type: integer}
