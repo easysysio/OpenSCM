@@ -43,6 +43,8 @@ pub mod directories;
 pub mod security_headers;
 pub mod rate_limit;
 pub mod secrets;
+pub mod api;
+pub mod api_tokens;
 
 // 2. Imports needed for the public API
 use std::{sync::{Arc, atomic::{AtomicBool, Ordering}, OnceLock}, path::PathBuf, error::Error};
@@ -331,6 +333,13 @@ async fn init_guard(
         return next.run(request).await;
     }
 
+    // The API answers in JSON, never with the install page's redirect.
+    if !initialized && path.starts_with("/api/") {
+        return api::ApiError::new(
+            StatusCode::SERVICE_UNAVAILABLE, "not_installed",
+            "OpenSCM has not been set up yet; finish the installation first",
+        ).into_response();
+    }
     if !initialized && !path.starts_with("/install") {
         return axum::response::Redirect::to("/install").into_response();
     }
@@ -474,6 +483,12 @@ pub fn create_core_router(state: AppState, cookie_key: axum_extra::extract::cook
         .route("/systems/upgrade/{id}", post(systems::systems_upgrade))
         .route("/systems/bulk/upgrade", post(systems::systems_bulk_upgrade))
         .route("/systems/upgrade_all",  post(systems::systems_upgrade_all))
+        // API tokens (any signed-in user; Admins see the whole organization)
+        // and the REST API itself, which authenticates with those tokens.
+        .route("/api-tokens",             get(api_tokens::tokens_page))
+        .route("/api-tokens/create",      post(api_tokens::tokens_create))
+        .route("/api-tokens/revoke/{id}", post(api_tokens::tokens_revoke))
+        .merge(api::router())
         .route("/send", post(client::send))
         .route("/result", post(client::receive_result))
         .route("/{*path}", get(|axum::extract::Path(path): axum::extract::Path<String>,

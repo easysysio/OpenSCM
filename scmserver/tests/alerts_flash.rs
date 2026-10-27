@@ -140,8 +140,17 @@ fn no_redirect_target_contains_a_raw_non_ascii_character() {
     let src = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
     let mut bad = Vec::new();
     let mut scanned = 0;
-    for entry in std::fs::read_dir(src).unwrap() {
-        let path = entry.unwrap().path();
+    // Every .rs file, subdirectories included (src/api/ since 0.12.0).
+    fn rust_files(dir: &std::path::Path, out: &mut Vec<std::path::PathBuf>) {
+        for entry in std::fs::read_dir(dir).unwrap() {
+            let p = entry.unwrap().path();
+            if p.is_dir() { rust_files(&p, out); }
+            else if p.extension().is_some_and(|e| e == "rs") { out.push(p); }
+        }
+    }
+    let mut files = Vec::new();
+    rust_files(&src, &mut files);
+    for path in files {
         let text = std::fs::read_to_string(&path).unwrap();
         for (i, line) in text.lines().enumerate() {
             let Some(at) = line.find("Redirect::to(") else { continue };

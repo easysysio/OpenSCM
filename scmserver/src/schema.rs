@@ -3018,6 +3018,42 @@ async fn run_migrations_on(pool: &SqlitePool) -> Result<(), sqlx::Error> {
         info!("Schema migration v47 → v48 complete.");
     }
 
+    // ─────────────────────────────────────────────────────────────────────
+    // v48 → v49: API tokens (0.12.0).
+    //
+    // A token belongs to a user in one organization and carries a role of its
+    // own, at most the owner's (checked on every request against the owner's
+    // CURRENT role). Only the SHA-256 of the token is stored; `prefix` is a
+    // short, non-secret part kept for display. See
+    // docs/design/0.12.0-rest-api.md, D1 and D9.
+    // ─────────────────────────────────────────────────────────────────────
+    if version < 49 {
+        info!("Running schema migration v48 → v49 (api_tokens)...");
+        sqlx::query(
+            "CREATE TABLE IF NOT EXISTS api_tokens (
+                id            INTEGER PRIMARY KEY AUTOINCREMENT,
+                tenant_id     VARCHAR(191) NOT NULL,
+                user_id       INTEGER NOT NULL,
+                name          TEXT NOT NULL,
+                prefix        TEXT NOT NULL,
+                token_hash    TEXT NOT NULL UNIQUE,
+                role          TEXT NOT NULL,
+                created_at    DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                expires_at    DATETIME,
+                last_used_at  DATETIME,
+                last_used_ip  TEXT,
+                revoked_at    DATETIME,
+                FOREIGN KEY (tenant_id) REFERENCES tenants (id) ON DELETE CASCADE,
+                FOREIGN KEY (user_id)   REFERENCES users (id)   ON DELETE CASCADE
+            )",
+        )
+        .execute(pool).await?;
+        sqlx::query("CREATE INDEX IF NOT EXISTS idx_api_tokens_tenant ON api_tokens (tenant_id)")
+            .execute(pool).await?;
+        sqlx::query("UPDATE schema_info SET version = 49").execute(pool).await?;
+        info!("Schema migration v48 → v49 complete.");
+    }
+
     Ok(())
 }
 

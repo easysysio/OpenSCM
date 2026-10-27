@@ -1,0 +1,159 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="content-wrapper">
+  <section class="content-header">
+    <div class="container-fluid">
+      <div class="row mb-2">
+        <div class="col-sm-6">
+          <h1><i class="fas fa-key mr-2 text-primary"></i>API Tokens</h1>
+        </div>
+        <div class="col-sm-6">
+          <ol class="breadcrumb float-sm-right">
+            <li class="breadcrumb-item"><a href="/">Home</a></li>
+            <li class="breadcrumb-item active">API Tokens</li>
+          </ol>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="content">
+    <div class="container-fluid">
+
+      {% if error_message %}
+      <div class="alert alert-danger alert-dismissible shadow-sm">
+        <button type="button" class="close" data-dismiss="alert" aria-hidden="true">&times;</button>
+        <h5><i class="icon fas fa-ban"></i> Error</h5>{{ error_message }}
+      </div>
+      {% endif %}
+      {% if success_message %}
+      <div class="alert alert-success alert-dismissible shadow-sm">
+        <button type="button" class="close" data-dismiss="alert" aria-hidden="true">&times;</button>
+        {{ success_message }}
+      </div>
+      {% endif %}
+
+      {# Shown ONCE, right after creating a token #}
+      {% if new_token %}
+      <div class="alert alert-success shadow-sm">
+        <h5><i class="icon fas fa-check"></i> Token "{{ new_token_name }}" created</h5>
+        <p class="mb-2">Copy it now — <strong>it will not be shown again.</strong>
+          Send it with every request as <code>Authorization: Bearer &lt;token&gt;</code>.</p>
+        <div class="input-group">
+          <input type="text" id="newTokenValue" class="form-control text-monospace" readonly value="{{ new_token }}">
+          <div class="input-group-append">
+            <button class="btn btn-outline-secondary" type="button" id="copyTokenBtn">
+              <i class="fas fa-copy mr-1"></i> Copy
+            </button>
+          </div>
+        </div>
+      </div>
+      {% endif %}
+
+      <div class="row">
+        <div class="col-lg-4">
+          <div class="card card-primary card-outline shadow-sm">
+            <div class="card-header"><h3 class="card-title">Create Token</h3></div>
+            <form method="POST" action="/api-tokens/create">
+              <div class="card-body">
+                <div class="form-group">
+                  <label for="name">Name *</label>
+                  <input type="text" name="name" id="name" required maxlength="100"
+                         class="form-control" placeholder="e.g. ci-pipeline">
+                </div>
+                <div class="form-group">
+                  <label for="role">Role</label>
+                  <select name="role" id="role" class="form-control">
+                    {% for r in roles %}
+                    <option value="{{ r }}" {% if r == "viewer" %}selected{% endif %}>{{ r | capitalize }}</option>
+                    {% endfor %}
+                  </select>
+                  <small class="form-text text-muted">What the token may do. At most your own role;
+                    if your role is lowered later, the token's is too.</small>
+                </div>
+                <div class="form-group mb-0">
+                  <label for="expiry">Expires</label>
+                  <select name="expiry" id="expiry" class="form-control">
+                    <option value="30">In 30 days</option>
+                    <option value="90" selected>In 90 days</option>
+                    <option value="365">In a year</option>
+                    <option value="never">Never</option>
+                  </select>
+                </div>
+              </div>
+              <div class="card-footer text-right">
+                <button type="submit" class="btn btn-primary">
+                  <i class="fas fa-plus mr-1"></i> Create
+                </button>
+              </div>
+            </form>
+          </div>
+
+          <div class="card card-outline card-info shadow-sm">
+            <div class="card-body" style="font-size: 0.85rem;">
+              <p class="mb-2"><i class="fas fa-plug mr-1 text-info"></i><strong>Using the API.</strong>
+                Tokens work only with the REST API, not to sign in. Try one:</p>
+<pre class="bg-light p-2 mb-0" style="font-size: 0.78rem; white-space: pre-wrap;">curl -H "Authorization: Bearer oscm_api_…" \
+  {{ app_url | default(value="https://your-openscm-server") }}/api/v1beta1/me</pre>
+            </div>
+          </div>
+        </div>
+
+        <div class="col-lg-8">
+          <div class="card card-outline card-secondary shadow-sm">
+            <div class="card-header"><h3 class="card-title">{% if show_owner %}Tokens in this organization{% else %}Your tokens{% endif %}</h3></div>
+            <div class="card-body p-0">
+              <table class="table table-striped table-hover mb-0">
+                <thead>
+                  <tr>
+                    <th>Name</th><th>Token</th><th>Role</th><th>Status</th><th>Expires</th><th>Last used</th>
+                    <th class="text-right">Actions</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {% for t in tokens %}
+                  <tr {% if t.status != "Active" %}class="text-muted"{% endif %}>
+                    <td><strong>{{ t.name }}</strong>{% if show_owner %}<br><small class="text-muted">by {{ t.owner }}</small>{% endif %}</td>
+                    <td><code>{{ t.prefix }}…</code></td>
+                    <td>{{ t.role | capitalize }}</td>
+                    <td>
+                      {% if t.status == "Active" %}<span class="badge badge-success">Active</span>
+                      {% elif t.status == "Expired" %}<span class="badge badge-warning">Expired</span>
+                      {% else %}<span class="badge badge-secondary">Revoked</span>{% endif %}
+                    </td>
+                    <td>{% if t.expires_at %}<span class="datetime" data-utc="{{ t.expires_at }}">{{ t.expires_at }}</span>{% else %}never{% endif %}</td>
+                    <td>{% if t.last_used_at %}<span class="datetime" data-utc="{{ t.last_used_at }}">{{ t.last_used_at }}</span>{% if t.last_used_ip %}<br><small>{{ t.last_used_ip }}</small>{% endif %}{% else %}—{% endif %}</td>
+                    <td class="text-right">
+                      {% if t.status == "Active" %}
+                      <a href="#" class="btn btn-sm btn-outline-danger"
+                         onclick="return postTo('/api-tokens/revoke/{{ t.id }}', 'Revoke this token? Anything using it stops working at once.')"
+                         title="Revoke"><i class="fas fa-ban"></i></a>
+                      {% endif %}
+                    </td>
+                  </tr>
+                  {% endfor %}
+                  {% if not tokens %}
+                  <tr><td colspan="7" class="text-center text-muted p-4">
+                    No API tokens yet.
+                  </td></tr>
+                  {% endif %}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+  $('#copyTokenBtn').on('click', function () {
+    const el = document.getElementById('newTokenValue');
+    el.select(); el.setSelectionRange(0, 99999);
+    navigator.clipboard.writeText(el.value);
+  });
+</script>
+{% endblock %}

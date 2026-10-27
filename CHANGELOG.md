@@ -6,6 +6,17 @@ All notable changes to OpenSCM are documented here.
 
 ## [Unreleased]
 
+### Added
+- **API tokens, the first piece of the REST API.** A new **API tokens** page (user menu → API tokens) creates tokens for the upcoming REST API at `/api/v1beta1`.
+  - Each token has a name and a role of its own (Viewer, Runner, Editor or Admin), at most its creator's. It expires in 30 days, 90 days (the default), a year, or never.
+  - The token is shown once and stored only as a hash.
+  - It's checked on every request against its owner's current role and account and the organization's status, so lowering a role, deleting a user or suspending an organization takes effect immediately.
+  - Each token may make 600 requests a minute.
+  - Users manage their own tokens; Admins see and can revoke every token in the organization. Creating and revoking are recorded in the audit log.
+  - `GET /api/v1beta1/me` says who a token acts as.
+  - Errors come back as JSON (`{"error": {"code", "message"}}`), and the API never accepts the browser session cookie.
+  - Schema v48 → v49. More endpoints follow before 0.12.0 is released; design in `docs/design/0.12.0-rest-api.md`.
+
 ---
 
 ## [0.11.6] - 2026-10-25
