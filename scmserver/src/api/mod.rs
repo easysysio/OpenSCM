@@ -31,6 +31,8 @@ use crate::handlers::ClientIp;
 use crate::models::{AuthSession, UserRole};
 use crate::rate_limit::Limiter;
 
+pub mod read;
+
 pub const PREFIX: &str = "/api/v1beta1";
 pub const TOKEN_PREFIX: &str = "oscm_api_";
 
@@ -290,6 +292,51 @@ pub fn iso(sqlite_ts: &str) -> String {
     format!("{}Z", t.replacen(' ', "T", 1))
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Page — cursor pagination for list endpoints (design D4).
+//   ?limit=N (default 100, at most 1000) & ?cursor=… (from the last page's
+//   next_cursor). The cursor is the last row's id, base64url — opaque to
+//   callers, and stable while rows are added, unlike an offset.
+// ─────────────────────────────────────────────────────────────────────────────
+#[derive(Debug, Default, serde::Deserialize)]
+pub struct Page {
+    pub limit: Option<i64>,
+    pub cursor: Option<String>,
+}
+
+impl Page {
+    pub fn limit(&self) -> i64 {
+        self.limit.unwrap_or(100).clamp(1, 1000)
+    }
+    // The id rows must be greater than; 0 for the first page.
+    pub fn after(&self) -> Result<i64, ApiError> {
+        use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine as _};
+        match self.cursor.as_deref().filter(|c| !c.is_empty()) {
+            None => Ok(0),
+            Some(c) => URL_SAFE_NO_PAD.decode(c).ok()
+                .and_then(|b| String::from_utf8(b).ok())
+                .and_then(|s| s.parse::<i64>().ok())
+                .ok_or_else(|| ApiError::bad_request("Invalid cursor")),
+        }
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Helper: page_of — {"data": [...], "next_cursor": …} from up to limit+1 rows
+// fetched in id order: the extra row only says whether there is a next page.
+// ─────────────────────────────────────────────────────────────────────────────
+pub fn page_of(mut rows: Vec<serde_json::Value>, ids: Vec<i64>, limit: i64) -> Json<serde_json::Value> {
+    use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine as _};
+    let more = rows.len() as i64 > limit;
+    rows.truncate(limit as usize);
+    let next = if more {
+        ids.get(limit as usize - 1).map(|id| URL_SAFE_NO_PAD.encode(id.to_string()))
+    } else {
+        None
+    };
+    Json(json!({"data": rows, "next_cursor": next}))
+}
+
 // Any other path under /api: a JSON 404 rather than the HTML one.
 async fn not_found() -> ApiError {
     ApiError::not_found("No such API endpoint. See /docs for the API reference.")
@@ -299,8 +346,23 @@ async fn not_found() -> ApiError {
 // router — every API route, merged into create_core_router.
 // ─────────────────────────────────────────────────────────────────────────────
 pub fn router<S: Clone + Send + Sync + 'static>() -> Router<S> {
+    let p = |path: &str| format!("{PREFIX}{path}");
     Router::new()
-        .route(&format!("{PREFIX}/me"), get(me))
+        .route(&p("/me"), get(me))
+        .route(&p("/systems"), get(read::systems_list))
+        .route(&p("/systems/{id}"), get(read::systems_get))
+        .route(&p("/systems/{id}/compliance"), get(read::systems_compliance))
+        .route(&p("/groups"), get(read::groups_list))
+        .route(&p("/groups/{id}"), get(read::groups_get))
+        .route(&p("/tests"), get(read::tests_list))
+        .route(&p("/tests/{id}"), get(read::tests_get))
+        .route(&p("/policies"), get(read::policies_list))
+        .route(&p("/policies/{id}"), get(read::policies_get))
+        .route(&p("/policies/{id}/compliance"), get(read::policies_compliance))
+        .route(&p("/reports/{kind}"), get(read::reports_list))
+        .route(&p("/reports/{kind}/{id}"), get(read::reports_get))
+        .route(&p("/reports/{kind}/{id}/pdf"), get(read::reports_pdf))
+        .route(&p("/audit-log"), get(read::audit_log))
         .route("/api/{*rest}", axum::routing::any(not_found))
 }
 

@@ -16,6 +16,15 @@ All notable changes to OpenSCM are documented here.
   - `GET /api/v1beta1/me` says who a token acts as.
   - Errors come back as JSON (`{"error": {"code", "message"}}`), and the API never accepts the browser session cookie.
   - Schema v48 → v49. More endpoints follow before 0.12.0 is released; design in `docs/design/0.12.0-rest-api.md`.
+- **REST API read endpoints** (`/api/v1beta1`, any role unless noted):
+  - **Systems:** `GET /systems` (filters `status`, `group`) and `/systems/{id}`, with groups, online state, agent version and available upgrade, compliance scores and telemetry.
+  - **System compliance:** `GET /systems/{id}/compliance`, every linked policy and each test's latest result with evidence and exclusions.
+  - **Groups, tests and policies:** `GET /groups` and `/groups/{id}` (members, linked policies); `GET /tests` and `/tests/{id}` (conditions, applicability); `GET /policies` and `/policies/{id}` (tests, groups).
+  - **Policy compliance:** `GET /policies/{id}/compliance`, the live policy report.
+  - **Saved reports:** `GET /reports/{policy|system}`, `/reports/{kind}/{id}` and `/reports/{kind}/{id}/pdf`.
+  - **Audit log:** `GET /audit-log` (Admin; filters `since`, `action`).
+  - **Paging and isolation:** lists page by cursor (`limit` up to 1000, `cursor` from `next_cursor`). Another organization's records answer 404.
+  - **Same numbers as the pages:** compliance comes from the same functions as the report pages, PDFs and saved reports.
 
 ---
 

@@ -736,7 +736,7 @@ and should be treated as such.</p>"#
 // the caller's tenant. Shared by reports_download and reports_email so the
 // fetch path stays in one place.
 // ─────────────────────────────────────────────────────────────────────────────
-async fn fetch_archive_policy_report(
+pub(crate) async fn fetch_archive_policy_report(
     pool: &SqlitePool,
     tenant_id: &str,
     id: i64,

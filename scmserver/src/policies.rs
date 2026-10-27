@@ -1446,7 +1446,7 @@ pub(crate) async fn fetch_policy_container_groups(
 // policies_report_email handler so both flows always reflect current state.
 // Returns Ok(None) for missing policy / wrong tenant; an Err for DB errors.
 // ─────────────────────────────────────────────────────────────────────────────
-async fn fetch_live_policy_report_data(
+pub(crate) async fn fetch_live_policy_report_data(
     pool: &SqlitePool,
     tenant_id: &str,
     submitter_name: &str,
