@@ -6,6 +6,10 @@ All notable changes to OpenSCM are documented here.
 
 ## [Unreleased]
 
+---
+
+## [0.12.1] - 2026-10-28
+
 ### Security
 - tokio updated to 1.54.1 (RUSTSEC-2026-0386, `AsyncFd` constructors). OpenSCM never calls the affected functions; this clears the `cargo audit` warning.
 
