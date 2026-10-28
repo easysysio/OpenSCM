@@ -960,6 +960,16 @@ pub async fn seed_plan_limits(pool: &SqlitePool) -> Result<(), sqlx::Error> {
 
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Constant: SCHEMA_VERSION
+// The newest schema this build knows: the version the last migration in
+// run_migrations_on stamps. Bump it with every new migration (the
+// schema_migration tests fail if the two disagree). A database stamped with
+// a higher version was migrated by a newer OpenSCM, and this build refuses
+// to run on it rather than write to tables it does not understand.
+// ─────────────────────────────────────────────────────────────────────────────
+pub const SCHEMA_VERSION: i64 = 49;
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Helper: run_migrations
 // Applies incremental schema migrations to existing installations. Each step
 // is guarded by a version check so it runs exactly once.
@@ -1016,6 +1026,20 @@ pub async fn run_migrations(pool: &SqlitePool) -> Result<(), sqlx::Error> {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Helper: newer_schema_message
+// The startup error for a database newer than this build (see SCHEMA_VERSION).
+// ─────────────────────────────────────────────────────────────────────────────
+pub fn newer_schema_message(found: i64) -> String {
+    format!(
+        "The database is at schema version {found}, but this OpenSCM {ver} only \
+         knows up to version {SCHEMA_VERSION}. It was upgraded by a newer \
+         OpenSCM. Install that version or later again; the database has not \
+         been changed.",
+        ver = env!("CARGO_PKG_VERSION"),
+    )
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Helper: run_migrations_on
 // The migration chain itself. Only ever called by run_migrations, with a
 // single-connection pool.
@@ -1037,6 +1061,15 @@ async fn run_migrations_on(pool: &SqlitePool) -> Result<(), sqlx::Error> {
     )
     .execute(pool)
     .await?;
+
+    // A database from a newer OpenSCM (after a package downgrade, or a
+    // newer backup copied in by hand): stop before changing anything.
+    let found: i64 = sqlx::query_scalar("SELECT version FROM schema_info")
+        .fetch_one(pool)
+        .await?;
+    if found > SCHEMA_VERSION {
+        return Err(sqlx::Error::Configuration(newer_schema_message(found).into()));
+    }
 
     // ── Pre-migration: rename settings.key → settings.skey ────────────────────
     // `key` is a MySQL/MariaDB reserved word.  The rename was applied to the

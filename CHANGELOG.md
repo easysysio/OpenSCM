@@ -6,6 +6,10 @@ All notable changes to OpenSCM are documented here.
 
 ## [Unreleased]
 
+### Added
+- The server refuses to start on a database upgraded by a newer OpenSCM (after a package downgrade, or a newer database copied in), names the version it needs, and leaves the database unchanged. Before, it ran against tables it did not know.
+- One server per database: the server locks `scmserver.lock` next to the database while it runs, and a second server on the same database stops at startup. First step of backup and restore (`docs/design/1.0.0-backup-restore.md`).
+
 ---
 
 ## [0.12.1] - 2026-10-28

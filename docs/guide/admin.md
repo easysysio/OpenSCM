@@ -292,6 +292,21 @@ Back up the database file regularly to prevent data loss:
     Start-Service OpenSCMServer
     ```
 
+### One Server per Database
+
+The server locks `scmserver.lock`, next to the database, while it runs. A
+second server started on the same database (a second service, or a second
+container on the same volume) stops at startup with a message saying another
+server is using it. The lock is released when the server exits, even after a
+crash, so the file never needs deleting by hand.
+
+### Downgrading
+
+A database upgraded by a newer OpenSCM can't be used by an older one. If you
+install an older version, or copy in a database from a newer server, the
+server refuses to start and names the version it needs. The database is not
+changed; install that version or a later one.
+
 ### Key Backup
 
 !!! warning "Since 0.10.4, agents pin the server's key"

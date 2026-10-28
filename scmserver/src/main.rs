@@ -117,6 +117,9 @@ async fn main() -> Result<(), Box<dyn Error>> {
     // 5. Database — SQLite only.
     // Pre-create the file so SqlitePool can open it with mode=rwc.
     let db_file = db_path();
+    // One server per database: a second one stops here (instance_lock.rs).
+    // Held until the process exits.
+    let _instance_lock = scmserver::instance_lock::acquire(&db_file)?;
     if !std::path::Path::new(&db_file).exists() {
         fs::File::create(&db_file)
             .map_err(|e| format!("Cannot create database file '{}': {}", db_file, e))?;

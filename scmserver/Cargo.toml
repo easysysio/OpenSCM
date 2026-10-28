@@ -25,6 +25,7 @@ axum-server = "0.7"
 tower-http = { version = "0.6", features = ["compression-gzip", "compression-br"] }
 axum-extra = { version = "0.10", features = ["cookie", "cookie-signed"] }
 tokio = { version = "1.34", features = ["full"] }
+fs2 = "0.4"
 # SQLite only: the MySQL and Postgres drivers stay disabled. They pulled in
 # `rsa`, carrying RUSTSEC-2023-0071 (Marvin timing sidechannel) with no
 # upstream fix — for a driver this product never loads. (sqlx-macros is still

@@ -3145,6 +3145,7 @@ dependencies = [
  "cfg-if",
  "chrono",
  "ed25519-dalek",
+ "fs2",
  "hkdf",
  "include_dir",
  "ipnet",
