@@ -48,6 +48,11 @@ cfg_if! {
 pub fn db_path() -> &'static str { DB_PATH }
 pub fn private_key_path() -> &'static str { PRIVATE_KEY_PATH }
 pub fn public_key_path() -> &'static str { PUBLIC_KEY_PATH }
+/// The passphrase for scheduled backups and "Back up now": a file beside the
+/// config, written by `scmserver backup set-passphrase`, never by the web UI.
+pub fn backup_passphrase_path() -> std::path::PathBuf {
+    Path::new(CONFIG_PATH).parent().unwrap_or_else(|| Path::new(".")).join("backup.passphrase")
+}
 pub fn config_path() -> &'static str { CONFIG_PATH }
 
 // --- Structs ---

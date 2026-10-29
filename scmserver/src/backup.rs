@@ -139,7 +139,7 @@ pub fn default_file_name(host: &str, now: chrono::DateTime<chrono::Utc>) -> Stri
 // ─────────────────────────────────────────────────────────────────────────────
 // Helper: this_host
 // ─────────────────────────────────────────────────────────────────────────────
-fn this_host() -> String {
+pub(crate) fn this_host() -> String {
     hostname::get()
         .ok()
         .and_then(|h| h.into_string().ok())
@@ -169,7 +169,7 @@ pub fn resolve_out(out: Option<&Path>, db: &Path) -> Result<PathBuf, String> {
 // Helper: create_private_dir
 // mkdir -p, readable by the owner only on Unix.
 // ─────────────────────────────────────────────────────────────────────────────
-fn create_private_dir(dir: &Path) -> Result<(), String> {
+pub(crate) fn create_private_dir(dir: &Path) -> Result<(), String> {
     let mut b = fs::DirBuilder::new();
     b.recursive(true);
     #[cfg(unix)]
@@ -680,7 +680,7 @@ fn move_file(from: &Path, to: &Path) -> io::Result<()> {
 // must not leave root-owned files the service account cannot read.
 // ─────────────────────────────────────────────────────────────────────────────
 #[cfg(unix)]
-fn owner_template(existing: Option<&fs::Metadata>, dir: &Path, default_mode: u32) -> io::Result<(u32, u32, u32)> {
+pub(crate) fn owner_template(existing: Option<&fs::Metadata>, dir: &Path, default_mode: u32) -> io::Result<(u32, u32, u32)> {
     use std::os::unix::fs::MetadataExt;
     match existing {
         Some(m) => Ok((m.uid(), m.gid(), m.mode() & 0o7777)),
@@ -696,7 +696,7 @@ fn owner_template(existing: Option<&fs::Metadata>, dir: &Path, default_mode: u32
 // chown + chmod. A chown that fails is an error only when it was needed.
 // ─────────────────────────────────────────────────────────────────────────────
 #[cfg(unix)]
-fn apply_owner(path: &Path, (uid, gid, mode): (u32, u32, u32)) -> io::Result<()> {
+pub(crate) fn apply_owner(path: &Path, (uid, gid, mode): (u32, u32, u32)) -> io::Result<()> {
     use std::os::unix::fs::{MetadataExt, PermissionsExt};
     let m = fs::metadata(path)?;
     if (m.uid(), m.gid()) != (uid, gid) {
@@ -898,20 +898,28 @@ fn print_usage() {
 USAGE:
     scmserver backup [--out PATH] [--passphrase-file FILE]
     scmserver backup verify FILE [--passphrase-file FILE]
+    scmserver backup set-passphrase
 
 Writes an encrypted backup of the database, the server key pair and the
 config while the server runs. --out is a file, or a directory to write a
 dated file into (default: {}).
 
 The passphrase is read from --passphrase-file, then the
-{} variable, then asked for. It must be at least {} characters. Without it a backup
-cannot be restored: keep it somewhere other than the backups.
+{} variable, then the server's passphrase file
+({}), then asked for. It must be at least {} characters.
+Without it a backup cannot be restored: keep a copy somewhere other than the
+backups.
+
+`set-passphrase` sets the server's passphrase file, used by scheduled
+backups and Settings → Backup. Only from the server's shell: the web
+interface never sets it.
 
 `verify` decrypts a backup, checks every file and the database copy, and
 prints what it holds. It does not touch the running server.
 "#,
         default_dir(Path::new(crate::config::db_path())).display(),
         PASSPHRASE_ENV,
+        crate::config::backup_passphrase_path().display(),
         MIN_PASSPHRASE_LEN
     );
 }
@@ -935,6 +943,11 @@ fn read_passphrase(file: Option<&Path>, confirm: bool) -> Result<String, String>
             return Ok(s);
         }
     }
+    // The server's own passphrase file (set-passphrase), when there is one.
+    let server_file = crate::config::backup_passphrase_path();
+    if server_file.exists() {
+        return crate::backup_jobs::read_passphrase_file(&server_file);
+    }
     let p = rpassword::prompt_password("Backup passphrase: ")
         .map_err(|e| format!("Cannot ask for the passphrase ({e}); use --passphrase-file or {PASSPHRASE_ENV}."))?;
     if confirm {
@@ -949,7 +962,7 @@ fn read_passphrase(file: Option<&Path>, confirm: bool) -> Result<String, String>
     Ok(p)
 }
 
-fn human_size(n: u64) -> String {
+pub(crate) fn human_size(n: u64) -> String {
     let units = ["B", "KiB", "MiB", "GiB", "TiB"];
     let mut v = n as f64;
     let mut i = 0;
@@ -1005,6 +1018,16 @@ async fn run_cli_inner(args: &[String]) -> Result<(), String> {
     let mut verify_file: Option<PathBuf> = None;
     let mut out: Option<PathBuf> = None;
     let mut pass_file: Option<PathBuf> = None;
+    if args.first().map(|a| a == "set-passphrase").unwrap_or(false) {
+        if let Some(a) = args.get(1) {
+            if a == "-h" || a == "--help" {
+                print_usage();
+                return Ok(());
+            }
+            return Err(format!("unknown argument '{a}' (see scmserver backup --help)"));
+        }
+        return set_passphrase().await;
+    }
     let mut it = args.iter();
     let is_verify = args.first().map(|a| a == "verify").unwrap_or(false);
     if is_verify {
@@ -1040,6 +1063,7 @@ async fn run_cli_inner(args: &[String]) -> Result<(), String> {
     let target = resolve_out(out.as_deref(), &paths.db)?;
     let pass = read_passphrase(pass_file.as_deref(), true)?;
     let c = create(&paths, &target, &pass, None).await?;
+    crate::backup_jobs::record_cli_backup(&paths.db, &c.path, c.size).await;
     println!("Backup written: {} ({})", c.path.display(), human_size(c.size));
     println!(
         "  OpenSCM {} ({}), schema {}{}",
@@ -1050,6 +1074,32 @@ async fn run_cli_inner(args: &[String]) -> Result<(), String> {
     );
     println!("Check it with: scmserver backup verify {}", c.path.display());
     println!("Without the passphrase it cannot be restored. Copy it off this server.");
+    Ok(())
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Helper: set_passphrase
+// `scmserver backup set-passphrase`: asks twice, writes the server's
+// passphrase file owner-only, owned like the server key.
+// ─────────────────────────────────────────────────────────────────────────────
+async fn set_passphrase() -> Result<(), String> {
+    let path = crate::config::backup_passphrase_path();
+    let replacing = path.exists();
+    let p = rpassword::prompt_password("New backup passphrase: ")
+        .map_err(|e| format!("Cannot ask for the passphrase: {e}"))?;
+    if p.chars().count() < MIN_PASSPHRASE_LEN {
+        return Err(format!("The passphrase must be at least {MIN_PASSPHRASE_LEN} characters."));
+    }
+    let again = rpassword::prompt_password("Again: ").map_err(|e| e.to_string())?;
+    if again != p {
+        return Err("The passphrases do not match.".into());
+    }
+    crate::backup_jobs::write_passphrase_file(&path, &p, Path::new(crate::config::private_key_path()))?;
+    println!("Backup passphrase saved to {}.", path.display());
+    if replacing {
+        println!("Backups made before now still need the old passphrase.");
+    }
+    println!("Keep a copy somewhere other than this server: without it, no backup can be restored.");
     Ok(())
 }
 

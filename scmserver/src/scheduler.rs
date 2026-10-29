@@ -830,6 +830,10 @@ pub async fn start_background_scheduler(pool: SqlitePool) {
             // --- TASK A: POLICY SCHEDULER (scan + report) ---
             run_due_schedules(&loop_pool, now).await;
 
+            // --- TASK H: SCHEDULED BACKUP ---
+            // Starts in the background when due (backup_jobs.rs); never waits.
+            let _ = crate::backup_jobs::global().tick(&loop_pool, now.naive_utc()).await;
+
             // --- TASK G: DRAIN THE ALERT OUTBOX ---
             // Deliveries are queued by the evaluator and sent here, so a slow
             // webhook never delays a recalculation and a restart mid-delivery

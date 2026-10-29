@@ -326,6 +326,56 @@ Copy backups off the server with your own tools (rsync, your backup agent,
 `docker cp`): a backup on the same disk does not survive the disk. The
 OpenSCM web interface never offers backups for download.
 
+### Scheduled Backups
+
+Scheduled backups are set up in **Settings → Backup**, which only
+superusers see. They are off until you turn them on, and until then
+superusers see a reminder on the dashboard.
+
+1. On the server, set the backup passphrase once:
+
+    === "Linux"
+        ```bash
+        sudo scmserver backup set-passphrase
+        ```
+
+    === "Docker"
+        ```bash
+        docker exec -it openscm scmserver backup set-passphrase
+        ```
+
+    === "Windows"
+        ```powershell
+        .\scmserver.exe backup set-passphrase
+        ```
+
+    It is stored in `backup.passphrase` beside the config
+    (`/etc/openscm/backup.passphrase` on Linux), readable by the service
+    account only. The web interface never sets or shows it, so a stolen
+    session cannot choose the key to your backups. Changing it later does
+    not change backups already made: they keep the passphrase they were made
+    with.
+
+2. In **Settings → Backup**, turn on **Back up on a schedule**, set the
+   schedule (a cron expression in UTC; `0 2 * * *` is 02:00 every day) and
+   how many backups to keep, and save.
+
+Each backup is verified right after it is written. Only then are the oldest
+backups in the folder deleted down to the number to keep; a failed backup
+never deletes anything. Backups are written to `backups/` next to the
+database, the same folder as `scmserver backup`.
+
+**Back up now** on the same page starts a backup straight away. The page
+shows the last result, the next scheduled run and the backups in the folder.
+
+When a backup fails, superusers get a notification and a dashboard banner,
+and the audit log records `backup.failed`. Successful backups are recorded as
+`backup.create`, including ones made on the command line.
+
+`scmserver backup` on the command line also uses the passphrase file when
+no other passphrase is given, which makes it easy to call from your own
+scripts.
+
 ### Restoring a Backup
 
 `scmserver restore` puts a backup back: the database and the server key pair,

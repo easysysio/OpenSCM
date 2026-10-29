@@ -63,6 +63,14 @@
             </a>
           </li>
           {% endif %}
+          {% if backup %}
+          <li class="nav-item">
+            <a class="nav-link" id="backup-tab" data-toggle="tab" href="#backup" role="tab">
+              <i class="fas fa-archive mr-1"></i> Backup
+              {% if backup.last_result == "failed" or not backup.settings.enabled or backup.passphrase_problem %}<i class="fas fa-exclamation-circle text-warning ml-1"></i>{% endif %}
+            </a>
+          </li>
+          {% endif %}
           {% if is_admin %}
           <li class="nav-item">
             <a class="nav-link text-danger" id="danger-tab" data-toggle="tab" href="#danger" role="tab">
@@ -621,6 +629,118 @@
           </div>
           {% endif %}
 
+          <!-- Backup Tab (superuser: a backup holds every organization and the server key).
+               Its fields belong to the forms after the main form (form= attribute). -->
+          {% if backup %}
+          <div class="tab-pane fade" id="backup" role="tabpanel">
+            {% if backup.passphrase_problem %}
+            <div class="alert alert-warning">
+              <i class="fas fa-key mr-1"></i> {{ backup.passphrase_problem }}
+            </div>
+            {% endif %}
+
+            <div class="card card-outline card-primary">
+              <div class="card-header">
+                <h3 class="card-title"><i class="fas fa-history mr-1"></i> Last Backup</h3>
+                {% if backup.running %}<span class="badge badge-info float-right"><i class="fas fa-spinner fa-spin mr-1"></i> Running</span>{% endif %}
+              </div>
+              <div class="card-body">
+                {% if backup.last_at %}
+                <dl class="row mb-0">
+                  <dt class="col-sm-3">Result</dt>
+                  <dd class="col-sm-9">
+                    {% if backup.last_result == "ok" %}<span class="badge badge-success">Verified</span>
+                    {% else %}<span class="badge badge-danger">Failed</span>{% endif %}
+                    <span class="text-muted ml-1">{{ backup.last_at }} UTC ({{ backup.last_trigger }})</span>
+                  </dd>
+                  {% if backup.last_result == "ok" %}
+                  <dt class="col-sm-3">File</dt>
+                  <dd class="col-sm-9"><code>{{ backup.last_file }}</code> ({{ backup.last_size }})</dd>
+                  {% else %}
+                  <dt class="col-sm-3">Error</dt>
+                  <dd class="col-sm-9 text-danger">{{ backup.last_error }}</dd>
+                  {% if backup.last_ok_at %}
+                  <dt class="col-sm-3">Last good backup</dt>
+                  <dd class="col-sm-9">{{ backup.last_ok_at }} UTC</dd>
+                  {% endif %}
+                  {% endif %}
+                  <dt class="col-sm-3">Next scheduled</dt>
+                  <dd class="col-sm-9">{% if backup.next_run %}{{ backup.next_run }}{% else %}<span class="text-muted">none (scheduled backups are off)</span>{% endif %}</dd>
+                </dl>
+                {% else %}
+                <p class="text-muted mb-0">No backup has been made from this server yet.</p>
+                {% endif %}
+                <button type="submit" form="backupRunForm" class="btn btn-primary mt-3"
+                  {% if backup.running or backup.passphrase_problem %}disabled{% endif %}>
+                  <i class="fas fa-play mr-1"></i> Back up now
+                </button>
+              </div>
+            </div>
+
+            <div class="card card-outline card-primary">
+              <div class="card-header">
+                <h3 class="card-title"><i class="fas fa-clock mr-1"></i> Scheduled Backups</h3>
+              </div>
+              <div class="card-body">
+                <div class="custom-control custom-switch mb-3">
+                  <input type="checkbox" class="custom-control-input" id="backup_enabled" name="backup_enabled"
+                    value="1" form="backupSaveForm" {% if backup.settings.enabled %}checked{% endif %}>
+                  <label class="custom-control-label" for="backup_enabled">Back up on a schedule</label>
+                </div>
+                <div class="row">
+                  <div class="col-md-6">
+                    <div class="form-group">
+                      <label for="backup_schedule">Schedule (cron, UTC)</label>
+                      <input type="text" class="form-control" id="backup_schedule" name="backup_schedule"
+                        form="backupSaveForm" value="{{ backup.settings.schedule }}" placeholder="0 2 * * *">
+                      <small class="form-text text-muted">Five fields: minute hour day month weekday. <code>0 2 * * *</code> is every day at 02:00 UTC.</small>
+                      {% if backup.schedule_problem %}<small class="form-text text-danger">{{ backup.schedule_problem }}</small>{% endif %}
+                    </div>
+                  </div>
+                  <div class="col-md-3">
+                    <div class="form-group">
+                      <label for="backup_keep">Keep</label>
+                      <input type="number" min="1" max="365" class="form-control" id="backup_keep" name="backup_keep"
+                        form="backupSaveForm" value="{{ backup.settings.keep }}">
+                      <small class="form-text text-muted">Newest backups kept in the folder; older ones are deleted after each verified backup.</small>
+                    </div>
+                  </div>
+                </div>
+                <button type="submit" form="backupSaveForm" class="btn btn-primary">
+                  <i class="fas fa-save mr-1"></i> Save Backup Settings
+                </button>
+              </div>
+            </div>
+
+            <div class="card card-outline card-secondary">
+              <div class="card-header">
+                <h3 class="card-title"><i class="fas fa-folder-open mr-1"></i> Backups on This Server</h3>
+              </div>
+              <div class="card-body">
+                <p class="text-muted" style="font-size:0.88rem;">
+                  Folder: <code>{{ backup.dir }}</code>. Backups are encrypted with the passphrase in
+                  <code>{{ backup.passphrase_path }}</code>, set on the server with
+                  <code>scmserver backup set-passphrase</code>; it is never set or shown here.
+                  Copy backups off this server with your own tools; they are not downloadable here.
+                  Restore with <code>scmserver restore</code>, with the server stopped.
+                </p>
+                {% if backup.files | length > 0 %}
+                <table class="table table-sm mb-0">
+                  <thead><tr><th>File</th><th>Size</th><th>Written</th></tr></thead>
+                  <tbody>
+                  {% for f in backup.files %}
+                    <tr><td><code>{{ f.name }}</code></td><td>{{ f.size }}</td><td>{{ f.modified }}</td></tr>
+                  {% endfor %}
+                  </tbody>
+                </table>
+                {% else %}
+                <p class="mb-0 text-muted">No backups in the folder.</p>
+                {% endif %}
+              </div>
+            </div>
+          </div>
+          {% endif %}
+
           <!-- Danger Zone Tab (Admin or higher; scoped to caller's tenant) -->
           {% if is_admin %}
           <div class="tab-pane fade" id="danger" role="tabpanel">
@@ -687,7 +807,7 @@
 
         </div>
 
-        <div class="row mt-3">
+        <div class="row mt-3" id="mainSaveRow">
           <div class="col-12 text-right">
             <a href="/" class="btn btn-secondary btn-sm mr-2">
               <i class="fas fa-times mr-1"></i> Cancel
@@ -699,6 +819,10 @@
         </div>
 
       </form>
+      {% if backup %}
+      <form id="backupSaveForm" method="post" action="/settings/backup/save"></form>
+      <form id="backupRunForm" method="post" action="/settings/backup/run"></form>
+      {% endif %}
 
       {% if is_admin %}
       <!-- Rotate Key confirmation modal -->
@@ -787,6 +911,16 @@
     var marginalVal = Math.round((marginal + sat) / 2);
     $('#preview-marginal-bar').css('width', marginalVal + '%');
     $('#preview-marginal-label').text(marginalVal + '% — MARGINAL (≥' + marginal + '%)');
+  }
+
+  // The Backup tab has its own buttons; the page-wide Save does not save it.
+  $('#settingsTabs a').on('shown.bs.tab', function (e) {
+    $('#mainSaveRow').toggle($(e.target).attr('href') !== '#backup');
+  });
+
+  // Open the tab named in the URL (#backup after saving backup settings).
+  if (location.hash && $('#settingsTabs a[href="' + location.hash + '"]').length) {
+    $('#settingsTabs a[href="' + location.hash + '"]').tab('show');
   }
 
   $('#compliance_sat, #compliance_marginal').on('input', updatePreview);

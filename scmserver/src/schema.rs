@@ -967,7 +967,7 @@ pub async fn seed_plan_limits(pool: &SqlitePool) -> Result<(), sqlx::Error> {
 // a higher version was migrated by a newer OpenSCM, and this build refuses
 // to run on it rather than write to tables it does not understand.
 // ─────────────────────────────────────────────────────────────────────────────
-pub const SCHEMA_VERSION: i64 = 49;
+pub const SCHEMA_VERSION: i64 = 50;
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Helper: run_migrations
@@ -3085,6 +3085,34 @@ async fn run_migrations_on(pool: &SqlitePool) -> Result<(), sqlx::Error> {
             .execute(pool).await?;
         sqlx::query("UPDATE schema_info SET version = 49").execute(pool).await?;
         info!("Schema migration v48 → v49 complete.");
+    }
+
+    if version < 50 {
+        info!("Running schema migration v49 → v50 (scheduled backups)...");
+        // Platform-wide backup settings (backup_jobs.rs), off until a
+        // superuser turns them on. The passphrase is never stored here.
+        for (k, v, d) in [
+            ("backup_enabled",  "0",         "Scheduled backups on (1) or off (0)"),
+            ("backup_schedule", "0 2 * * *", "Scheduled backup time, cron expression in UTC"),
+            ("backup_keep",     "7",         "Number of newest scheduled backups to keep"),
+        ] {
+            sqlx::query("INSERT OR IGNORE INTO settings (tenant_id, skey, value, description) VALUES ('default', ?, ?, ?)")
+                .bind(k).bind(v).bind(d).execute(pool).await?;
+        }
+        // Alert deliveries that are not about a policy score (backup.failed)
+        // carry their event name and their own text.
+        if table_exists(pool, "alert_deliveries").await {
+            if !column_exists(pool, "alert_deliveries", "event").await {
+                sqlx::query("ALTER TABLE alert_deliveries ADD COLUMN event TEXT NOT NULL DEFAULT 'compliance.alert'")
+                    .execute(pool).await?;
+            }
+            if !column_exists(pool, "alert_deliveries", "summary").await {
+                sqlx::query("ALTER TABLE alert_deliveries ADD COLUMN summary TEXT")
+                    .execute(pool).await?;
+            }
+        }
+        sqlx::query("UPDATE schema_info SET version = 50").execute(pool).await?;
+        info!("Schema migration v49 → v50 complete.");
     }
 
     Ok(())

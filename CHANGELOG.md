@@ -6,10 +6,15 @@ All notable changes to OpenSCM are documented here.
 
 ## [Unreleased]
 
+### Changed
+- Database schema v50: backup settings (off by default) and two columns on `alert_deliveries` for alerts not about a policy score.
+
 ### Added
 - **`scmserver backup`**: one command writes an encrypted backup of the database, the server key pair and the config, while the server runs (a consistent SQLite `VACUUM INTO` snapshot, checked with `integrity_check`). The file is an [age](https://age-encryption.org) file with a passphrase of at least 12 characters, from `--passphrase-file`, `OPENSCM_BACKUP_PASSPHRASE` or a prompt. By default it goes to `backups/` next to the database, readable by its owner only; it appears only once complete.
 - **`scmserver backup verify FILE`** decrypts a backup, checks every file against the manifest inside it, checks the key pair and the database copy, and prints the version, schema, counts and whether the key is this server's. It never touches the running server. Step 2 of backup and restore (`docs/design/1.0.0-backup-restore.md`).
 - **`scmserver restore FILE`** puts a backup back, with the server stopped (it takes the server's lock and refuses while the server runs). It checks the backup as `verify` does, refuses one from a newer OpenSCM or from the other edition (SaaS vs Community/Enterprise), shows what it holds and asks before changing anything (`--yes` for scripts). The current database, key pair and (with `--include-config`) config are moved to `pre-restore-<time>/` next to the database, so a restore can be undone; restored files keep the owner and mode of the files they replace; a failure partway puts the old files back. A backup from an older OpenSCM is upgraded on the next start, and that start records a `backup.restored` audit entry. Step 3 of backup and restore.
+- **Scheduled backups and Settings → Backup** (superusers only). Turn backups on, set the schedule (cron, UTC) and how many to keep; changes apply without a restart. Each backup is verified after it is written, and only then are the oldest deleted; a failed backup deletes nothing. The tab shows the last result, the next run and the backups in the folder, and has **Back up now**. Superusers get a notification and a dashboard banner when a backup fails, and a dashboard reminder while scheduled backups are off. The audit log records `backup.create`, `backup.failed` and `backup.settings`. Off by default.
+- **`scmserver backup set-passphrase`** sets the passphrase scheduled backups use, in `backup.passphrase` beside the config, readable by the service account only. It is never set or shown in the web interface. `scmserver backup` uses it too when no other passphrase is given.
 
 ---
 

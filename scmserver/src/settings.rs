@@ -209,6 +209,11 @@ pub async fn settings(
     }
     context.insert("key_grace_days", &KEY_GRACE_DAYS);
     context.insert("key_created_at", &key_created_at);
+    // Settings → Backup: superusers only (a backup holds every organization
+    // and the server key).
+    if UserRole::from(auth.role.as_str()) >= UserRole::Superuser {
+        context.insert("backup", &crate::backup_jobs::global().status(&pool).await);
+    }
 
     render_template(&tera, Some(&pool), "settings.html", context, Some(auth))
         .await
@@ -738,4 +743,71 @@ pub async fn settings_rotate_keys(
             Redirect::to(&format!("/settings?error_message={}", msg)).into_response()
         }
     }
+}
+
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Helper: backup_redirect
+// Back to Settings → Backup with a message.
+// ─────────────────────────────────────────────────────────────────────────────
+fn backup_redirect(kind: &str, msg: &str) -> axum::response::Response {
+    Redirect::to(&format!("/settings?{}={}#backup", kind, urlencoding::encode(msg))).into_response()
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// POST /settings/backup/save
+// Turn scheduled backups on or off, set the schedule and how many to keep.
+// Role: Superuser. The passphrase and folder are not settable here
+// (backup_jobs.rs).
+// ─────────────────────────────────────────────────────────────────────────────
+pub async fn settings_backup_save(
+    auth: AuthSession,
+    Extension(pool): Extension<SqlitePool>,
+    ip: crate::handlers::ClientIp,
+    Form(form): Form<std::collections::HashMap<String, String>>,
+) -> impl IntoResponse {
+    if UserRole::from(auth.role.as_str()) < UserRole::Superuser {
+        return Redirect::to("/settings?error_message=Access+denied").into_response();
+    }
+    let keep = match form.get("backup_keep").map(|k| k.trim().parse::<u32>()) {
+        Some(Ok(k)) => k,
+        _ => return backup_redirect("error_message", "Keep must be a whole number."),
+    };
+    let new = crate::backup_jobs::BackupSettings {
+        enabled: form.get("backup_enabled").map(|v| v == "1").unwrap_or(false),
+        schedule: form.get("backup_schedule").cloned().unwrap_or_default().trim().to_string(),
+        keep,
+    };
+    if let Err(e) = crate::backup_jobs::save_settings(&pool, &new).await {
+        return backup_redirect("error_message", &e);
+    }
+    crate::audit::record(
+        &pool, "default", Some(&auth), Some(&ip.0), "backup.settings", Some("backup"), None,
+        Some(&format!("scheduled backups {}, schedule '{}' (UTC), keep {}",
+                      if new.enabled { "on" } else { "off" }, new.schedule, new.keep)),
+    ).await;
+    backup_redirect("success_message", "Backup settings saved.")
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// POST /settings/backup/run
+// "Back up now": starts a backup in the background and returns at once.
+// Role: Superuser.
+// ─────────────────────────────────────────────────────────────────────────────
+pub async fn settings_backup_run(
+    auth: AuthSession,
+    Extension(pool): Extension<SqlitePool>,
+) -> impl IntoResponse {
+    if UserRole::from(auth.role.as_str()) < UserRole::Superuser {
+        return Redirect::to("/settings?error_message=Access+denied").into_response();
+    }
+    let jobs = crate::backup_jobs::global();
+    if jobs.is_running() {
+        return backup_redirect("error_message", "A backup is already running.");
+    }
+    let trigger = crate::backup_jobs::Trigger::Manual { user_id: auth.userid, username: auth.username.clone() };
+    tokio::spawn(async move {
+        let _ = jobs.run(&pool, trigger).await;
+    });
+    backup_redirect("success_message", "Backup started. Refresh this page in a minute to see the result.")
 }

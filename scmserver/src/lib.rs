@@ -45,6 +45,7 @@ pub mod rate_limit;
 pub mod secrets;
 pub mod instance_lock;
 pub mod backup;
+pub mod backup_jobs;
 pub mod api;
 pub mod api_tokens;
 
@@ -465,6 +466,8 @@ pub fn create_core_router(state: AppState, cookie_key: axum_extra::extract::cook
         .route("/settings/test-email", post(settings::settings_test_email))
         .route("/settings/reset", post(settings::settings_reset))
         .route("/settings/rotate-keys", post(settings::settings_rotate_keys))
+        .route("/settings/backup/save", post(settings::settings_backup_save))
+        .route("/settings/backup/run", post(settings::settings_backup_run))
         .route("/admin/directories",              get(directories::list_view))
         .route("/admin/directories/add",          get(directories::add_form).post(directories::add_submit))
         .route("/admin/directories/edit/{id}",    get(directories::edit_form).post(directories::edit_submit))

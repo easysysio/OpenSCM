@@ -52,6 +52,13 @@
       </div>
       {% endif %}
 
+      {% if backup_notice %}
+      <div class="alert alert-warning shadow-sm d-flex align-items-center justify-content-between" id="backupNotice">
+        <span><i class="fas fa-archive mr-2"></i>{{ backup_notice }}</span>
+        <a href="/settings#backup" class="btn btn-sm btn-outline-dark ml-3 text-nowrap">Settings → Backup</a>
+      </div>
+      {% endif %}
+
       <div class="row">
         <div class="col-lg-3 col-6">
           <div class="small-box bg-info shadow-sm">
