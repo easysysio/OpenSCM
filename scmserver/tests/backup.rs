@@ -297,3 +297,215 @@ fn default_names_are_dated_and_safe() {
     assert_eq!(backup::default_file_name("web 1/prod", t), "openscm-web_1_prod-20261029T080509Z.oscm-backup");
     assert_eq!(backup::default_dir(Path::new("/var/lib/openscm/scm.db")), PathBuf::from("/var/lib/openscm/backups"));
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Restore
+// ─────────────────────────────────────────────────────────────────────────────
+
+async fn count_systems(db: &Path) -> i64 {
+    let pool = SqlitePoolOptions::new()
+        .connect(&format!("sqlite://{}?mode=ro", db.display())).await.unwrap();
+    let n = sqlx::query_scalar("SELECT COUNT(*) FROM systems").fetch_one(&pool).await.unwrap();
+    pool.close().await;
+    n
+}
+
+fn pre_restore_dirs(db: &Path) -> Vec<PathBuf> {
+    std::fs::read_dir(db.parent().unwrap()).unwrap()
+        .map(|e| e.unwrap().path())
+        .filter(|p| p.file_name().unwrap().to_string_lossy().starts_with("pre-restore-"))
+        .collect()
+}
+
+/// A backup of a 25-system server, and a second, different server (2 systems,
+/// another key, another config) stopped and ready to restore onto.
+async fn source_and_target() -> (Server, PathBuf, Server) {
+    let a = server(25).await;
+    let file = a.out_dir.join("a.oscm-backup");
+    backup::create(&a.paths, &file, PASS, WF).await.unwrap();
+    let b = server(2).await;
+    let osk = ed25519_dalek::SigningKey::from_bytes(&[9u8; 32]);
+    std::fs::write(&b.paths.private_key, general_purpose::STANDARD.encode(osk.to_bytes())).unwrap();
+    std::fs::write(&b.paths.public_key, general_purpose::STANDARD.encode(osk.verifying_key().to_bytes())).unwrap();
+    std::fs::write(&b.paths.config, "[server]\nport = 9999\n").unwrap();
+    b.pool.close().await; // the server is stopped
+    (a, file, b)
+}
+
+// The whole restore: data and key are the backup's, the config is untouched,
+// the old files are kept, and the next start records it in the audit log once.
+#[tokio::test]
+async fn a_restore_brings_back_the_backup_and_keeps_the_old_files() {
+    let (a, file, b) = source_and_target().await;
+    let old_key = std::fs::read(&b.paths.private_key).unwrap();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&b.paths.private_key, std::fs::Permissions::from_mode(0o640)).unwrap();
+    }
+
+    let mut asked = false;
+    let r = backup::restore(&b.paths, &file, PASS, false, |v| {
+        asked = true;
+        assert!(v.counts.contains(&("Systems", Some(25))));
+        assert_eq!(v.matches_this_server, Some(false), "a different server's key");
+        true
+    }).await.expect("restore");
+    assert!(asked, "restore must ask before changing anything");
+    assert!(!r.config_restored);
+
+    assert_eq!(count_systems(&b.paths.db).await, 25);
+    assert_eq!(std::fs::read(&b.paths.private_key).unwrap(), std::fs::read(&a.paths.private_key).unwrap());
+    assert_eq!(std::fs::read(&b.paths.public_key).unwrap(), std::fs::read(&a.paths.public_key).unwrap());
+    assert_eq!(std::fs::read_to_string(&b.paths.config).unwrap(), "[server]\nport = 9999\n", "config untouched");
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        assert_eq!(std::fs::metadata(&b.paths.private_key).unwrap().permissions().mode() & 0o777, 0o640,
+                   "the restored key keeps the replaced file's mode");
+    }
+
+    // The replaced files, whole: the old database (with its WAL) and key.
+    assert_eq!(count_systems(&r.pre_restore.join("scm.db")).await, 2);
+    assert_eq!(std::fs::read(r.pre_restore.join("keys/scmserver.key")).unwrap(), old_key);
+    // Nothing else left lying around.
+    let dir = b.paths.db.parent().unwrap();
+    for name in files_in(dir) {
+        assert!(!name.starts_with(".oscm-restore-") && !name.ends_with(".restore-tmp"), "left behind: {name}");
+    }
+
+    // Next start: migrations, then one audit entry, then the note is gone.
+    let pool = SqlitePoolOptions::new()
+        .connect(&format!("sqlite://{}?mode=rwc", b.paths.db.display())).await.unwrap();
+    scmserver::schema::run_migrations(&pool).await.unwrap();
+    let db = b.paths.db.to_string_lossy().to_string();
+    assert!(dir.join(backup::RESTORE_NOTE).exists());
+    backup::record_restore(&pool, &db).await;
+    backup::record_restore(&pool, &db).await;
+    let (n, target, details): (i64, String, String) = sqlx::query_as(
+        "SELECT COUNT(*), MAX(target_id), MAX(details) FROM audit_log WHERE action = 'backup.restored'")
+        .fetch_one(&pool).await.unwrap();
+    assert_eq!(n, 1);
+    assert_eq!(target, "a.oscm-backup");
+    assert!(details.contains("pre-restore-"), "{details}");
+    assert!(!dir.join(backup::RESTORE_NOTE).exists());
+    pool.close().await;
+    a.pool.close().await;
+}
+
+#[tokio::test]
+async fn include_config_restores_the_config() {
+    let (a, file, b) = source_and_target().await;
+    let r = backup::restore(&b.paths, &file, PASS, true, |_| true).await.unwrap();
+    assert!(r.config_restored);
+    assert_eq!(std::fs::read(&b.paths.config).unwrap(), std::fs::read(&a.paths.config).unwrap());
+    assert_eq!(std::fs::read_to_string(r.pre_restore.join("scmserver.config")).unwrap(), "[server]\nport = 9999\n");
+    a.pool.close().await;
+}
+
+// Every refusal leaves the target exactly as it was.
+async fn assert_untouched(b: &Server, key: &[u8]) {
+    assert_eq!(count_systems(&b.paths.db).await, 2);
+    assert_eq!(std::fs::read(&b.paths.private_key).unwrap(), key);
+    assert!(pre_restore_dirs(&b.paths.db).is_empty());
+    assert!(!b.paths.db.parent().unwrap().join(backup::RESTORE_NOTE).exists());
+}
+
+#[tokio::test]
+async fn a_restore_is_refused_while_the_server_runs() {
+    let (a, file, b) = source_and_target().await;
+    let key = std::fs::read(&b.paths.private_key).unwrap();
+    let _running = scmserver::instance_lock::acquire(&b.paths.db.to_string_lossy()).unwrap();
+    let e = backup::restore(&b.paths, &file, PASS, false, |_| true).await.unwrap_err();
+    assert!(e.contains("must be stopped"), "{e}");
+    assert_untouched(&b, &key).await;
+    a.pool.close().await;
+}
+
+#[tokio::test]
+async fn a_restore_of_a_newer_schema_is_refused() {
+    let a = server(1).await;
+    sqlx::query("UPDATE schema_info SET version = version + 1").execute(&a.pool).await.unwrap();
+    let file = a.out_dir.join("new.oscm-backup");
+    backup::create(&a.paths, &file, PASS, WF).await.unwrap();
+    let b = server(2).await;
+    b.pool.close().await;
+    let key = std::fs::read(&b.paths.private_key).unwrap();
+    let e = backup::restore(&b.paths, &file, PASS, false, |_| true).await.unwrap_err();
+    assert!(e.contains("or later first"), "{e}");
+    assert_untouched(&b, &key).await;
+    a.pool.close().await;
+}
+
+// The test binary runs as Community Edition: a SaaS backup is refused.
+#[tokio::test]
+async fn a_restore_across_editions_is_refused() {
+    let (a, file, b) = source_and_target().await;
+    rewrap(&file, |e| {
+        let m = e.iter_mut().find(|(n, _)| n == "manifest.json").unwrap();
+        let mut j: serde_json::Value = serde_json::from_slice(&m.1).unwrap();
+        j["edition"] = "SaaS Edition".into();
+        m.1 = serde_json::to_vec(&j).unwrap();
+    });
+    let key = std::fs::read(&b.paths.private_key).unwrap();
+    let e = backup::restore(&b.paths, &file, PASS, false, |_| true).await.unwrap_err();
+    assert!(e.contains("cannot be restored onto"), "{e}");
+    assert_untouched(&b, &key).await;
+    a.pool.close().await;
+}
+
+#[tokio::test]
+async fn saying_no_changes_nothing() {
+    let (a, file, b) = source_and_target().await;
+    let key = std::fs::read(&b.paths.private_key).unwrap();
+    let e = backup::restore(&b.paths, &file, PASS, false, |_| false).await.unwrap_err();
+    assert!(e.contains("Cancelled"), "{e}");
+    assert_untouched(&b, &key).await;
+    // Nor does a wrong passphrase.
+    assert!(backup::restore(&b.paths, &file, "wrong passphrase", false, |_| true).await.is_err());
+    assert_untouched(&b, &key).await;
+    a.pool.close().await;
+}
+
+// A failure while replacing files puts the old ones back.
+#[tokio::test]
+async fn a_failure_partway_puts_the_old_files_back() {
+    let (a, file, b) = source_and_target().await;
+    let key = std::fs::read(&b.paths.private_key).unwrap();
+    let mut paths = b.paths.clone();
+    // The public key is written last of the key pair; make that impossible.
+    let blocker = b.out_dir.join("not-a-dir");
+    std::fs::write(&blocker, b"x").unwrap();
+    paths.public_key = blocker.join("scmserver.pub");
+    let e = backup::restore(&paths, &file, PASS, false, |_| true).await.unwrap_err();
+    assert!(e.contains("put back"), "{e}");
+    assert_eq!(count_systems(&b.paths.db).await, 2, "the old database is back");
+    assert_eq!(std::fs::read(&b.paths.private_key).unwrap(), key, "the old key is back");
+    assert!(!b.paths.db.parent().unwrap().join(backup::RESTORE_NOTE).exists());
+    a.pool.close().await;
+}
+
+// A backup from an older OpenSCM (schema 48 here) restores, and the next
+// start migrates it forward like an upgrade.
+#[tokio::test]
+async fn an_older_backup_is_migrated_on_the_next_start() {
+    let a = server(3).await;
+    sqlx::query("DROP TABLE api_tokens").execute(&a.pool).await.unwrap();
+    sqlx::query("UPDATE schema_info SET version = 48").execute(&a.pool).await.unwrap();
+    let file = a.out_dir.join("old.oscm-backup");
+    backup::create(&a.paths, &file, PASS, WF).await.unwrap();
+    let b = server(2).await;
+    b.pool.close().await;
+    backup::restore(&b.paths, &file, PASS, false, |v| v.manifest.schema_version == 48).await.unwrap();
+
+    let pool = SqlitePoolOptions::new()
+        .connect(&format!("sqlite://{}?mode=rwc", b.paths.db.display())).await.unwrap();
+    scmserver::schema::run_migrations(&pool).await.unwrap();
+    let v: i64 = sqlx::query_scalar("SELECT version FROM schema_info").fetch_one(&pool).await.unwrap();
+    assert_eq!(v, scmserver::schema::SCHEMA_VERSION);
+    let t: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM sqlite_master WHERE name = 'api_tokens'").fetch_one(&pool).await.unwrap();
+    assert_eq!(t, 1);
+    pool.close().await;
+    assert_eq!(count_systems(&b.paths.db).await, 3);
+    a.pool.close().await;
+}

@@ -532,7 +532,15 @@ pub async fn verify(file: &Path, passphrase: &str, live_public_key: Option<&Path
         .prefix("oscm-verify-")
         .tempdir()
         .map_err(|e| format!("Cannot create a temporary directory: {e}"))?;
-    let (manifest_bytes, hashes) = extract(file, passphrase, tmp.path())?;
+    check(file, passphrase, tmp.path(), live_public_key).await
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Helper: check
+// The work of verify, unpacking into `dir` (left there for restore to use).
+// ─────────────────────────────────────────────────────────────────────────────
+async fn check(file: &Path, passphrase: &str, dir: &Path, live_public_key: Option<&Path>) -> Result<Verified, String> {
+    let (manifest_bytes, hashes) = extract(file, passphrase, dir)?;
 
     let manifest: Manifest = serde_json::from_slice(&manifest_bytes)
         .map_err(|e| format!("The backup's manifest is not readable: {e}"))?;
@@ -558,12 +566,12 @@ pub async fn verify(file: &Path, passphrase: &str, live_public_key: Option<&Path
         return Err(format!("The backup contains '{extra}', which the manifest does not list."));
     }
 
-    let read = |name: &str| fs::read_to_string(tmp.path().join(name)).map_err(|e| format!("{name}: {e}"));
+    let read = |name: &str| fs::read_to_string(dir.join(name)).map_err(|e| format!("{name}: {e}"));
     let pub_b64 = read(PUB_ENTRY)?;
     let key_fingerprint = key_fingerprint(&read(KEY_ENTRY)?, &pub_b64)?;
 
     let (schema, counts) = {
-        let mut conn = open_db(&tmp.path().join(DB_ENTRY)).await?;
+        let mut conn = open_db(&dir.join(DB_ENTRY)).await?;
         let schema = check_snapshot(&mut conn).await;
         let mut counts = Vec::new();
         if schema.is_ok() {
@@ -596,6 +604,288 @@ pub async fn verify(file: &Path, passphrase: &str, live_public_key: Option<&Path
         key_fingerprint,
         matches_this_server,
     })
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Restore
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Written next to the database by restore; the next server start turns it
+/// into a `backup.restored` audit entry and deletes it.
+pub const RESTORE_NOTE: &str = "restored.json";
+
+#[derive(Debug)]
+pub struct Restored {
+    pub verified: Verified,
+    /// Where the replaced files were moved.
+    pub pre_restore: PathBuf,
+    pub config_restored: bool,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+struct RestoreNote {
+    backup_file: String,
+    backup_created_at: String,
+    backup_host: String,
+    backup_version: String,
+    backup_schema: i64,
+    restored_at: String,
+    pre_restore: String,
+    config_restored: bool,
+}
+
+/// One file restore replaces: moved aside to `pre/aside`, then replaced by
+/// `src` (None: only moved aside, e.g. the old database's -wal and -shm).
+struct Swap {
+    target: PathBuf,
+    src: Option<PathBuf>,
+    aside: &'static str,
+    /// Mode for a new file when there was none to copy it from.
+    default_mode: u32,
+}
+
+/// What restore has done so far, to undo it on failure.
+struct Done {
+    target: PathBuf,
+    moved_aside: Option<PathBuf>,
+    placed: bool,
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Helper: is_saas
+// SaaS databases carry tables CE and EE do not have (and the other way round
+// matters as well: a CE database has no plans or tenants to serve SaaS).
+// ─────────────────────────────────────────────────────────────────────────────
+fn is_saas(edition: &str) -> bool {
+    edition.contains("SaaS")
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Helper: move_file
+// rename, or copy + remove when the destination is on another file system
+// (/etc and /var/lib can be).
+// ─────────────────────────────────────────────────────────────────────────────
+fn move_file(from: &Path, to: &Path) -> io::Result<()> {
+    if fs::rename(from, to).is_ok() {
+        return Ok(());
+    }
+    fs::copy(from, to)?;
+    fs::remove_file(from)
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Helper: owner_template
+// Owner, group and mode for a restored file: those of the file it replaces,
+// else the directory's owner with `default_mode`. A restore run with sudo
+// must not leave root-owned files the service account cannot read.
+// ─────────────────────────────────────────────────────────────────────────────
+#[cfg(unix)]
+fn owner_template(existing: Option<&fs::Metadata>, dir: &Path, default_mode: u32) -> io::Result<(u32, u32, u32)> {
+    use std::os::unix::fs::MetadataExt;
+    match existing {
+        Some(m) => Ok((m.uid(), m.gid(), m.mode() & 0o7777)),
+        None => {
+            let d = fs::metadata(dir)?;
+            Ok((d.uid(), d.gid(), default_mode))
+        }
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Helper: apply_owner
+// chown + chmod. A chown that fails is an error only when it was needed.
+// ─────────────────────────────────────────────────────────────────────────────
+#[cfg(unix)]
+fn apply_owner(path: &Path, (uid, gid, mode): (u32, u32, u32)) -> io::Result<()> {
+    use std::os::unix::fs::{MetadataExt, PermissionsExt};
+    let m = fs::metadata(path)?;
+    if (m.uid(), m.gid()) != (uid, gid) {
+        std::os::unix::fs::chown(path, Some(uid), Some(gid))?;
+    }
+    fs::set_permissions(path, fs::Permissions::from_mode(mode))
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Helper: place
+// Copies `src` next to `target` (same directory, so the final rename is
+// atomic), gives it the template's owner and mode, renames it into place.
+// ─────────────────────────────────────────────────────────────────────────────
+fn place(src: &Path, target: &Path, existing: Option<&fs::Metadata>, default_mode: u32) -> io::Result<()> {
+    let dir = target.parent().unwrap_or_else(|| Path::new("."));
+    let name = target.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default();
+    let staging = dir.join(format!(".{name}.restore-tmp"));
+    let result = (|| {
+        fs::copy(src, &staging)?;
+        #[cfg(unix)]
+        apply_owner(&staging, owner_template(existing, dir, default_mode)?)?;
+        #[cfg(not(unix))]
+        let _ = (existing, default_mode);
+        File::open(&staging)?.sync_all()?;
+        fs::rename(&staging, target)
+    })();
+    if result.is_err() {
+        let _ = fs::remove_file(&staging);
+    }
+    result
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Helper: undo
+// Puts back what restore moved aside, newest first.
+// ─────────────────────────────────────────────────────────────────────────────
+fn undo(done: Vec<Done>) {
+    for d in done.into_iter().rev() {
+        if d.placed {
+            let _ = fs::remove_file(&d.target);
+        }
+        if let Some(a) = d.moved_aside {
+            let _ = move_file(&a, &d.target);
+        }
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Function: restore
+// Replaces this server's database and key pair (and config, with
+// `include_config`) with a backup's. Takes the server's instance lock, so it
+// cannot run under a running server. `confirm` sees what will be restored and
+// returns false to stop. Nothing changes until it has said yes and every
+// check has passed; a failure while replacing puts the old files back.
+// ─────────────────────────────────────────────────────────────────────────────
+pub async fn restore(
+    paths: &Paths,
+    file: &Path,
+    passphrase: &str,
+    include_config: bool,
+    confirm: impl FnOnce(&Verified) -> bool,
+) -> Result<Restored, String> {
+    let db_str = paths.db.to_string_lossy().to_string();
+    let _lock = crate::instance_lock::acquire(&db_str).map_err(|e| {
+        format!("{e}\nThe server must be stopped for a restore. Nothing was changed.")
+    })?;
+    let db_dir = paths.db.parent().filter(|d| !d.as_os_str().is_empty()).unwrap_or(Path::new(".")).to_path_buf();
+
+    // Unpack next to the database: same file system as the target.
+    let tmp = tempfile::Builder::new()
+        .prefix(".oscm-restore-")
+        .tempdir_in(&db_dir)
+        .map_err(|e| format!("Cannot create a temporary directory in {}: {}", db_dir.display(), e))?;
+    let v = check(file, passphrase, tmp.path(), Some(&paths.public_key)).await?;
+    let m = &v.manifest;
+
+    if v.newer_than_this_server {
+        return Err(format!(
+            "This backup is from OpenSCM {} (schema {}); this OpenSCM {} knows up to schema {}. Install OpenSCM {} or later first. Nothing was changed.",
+            m.openscm_version, m.schema_version, crate::app_version(), crate::schema::SCHEMA_VERSION, m.openscm_version
+        ));
+    }
+    if is_saas(&m.edition) != is_saas(crate::app_edition()) {
+        return Err(format!(
+            "This is a backup of OpenSCM {}; it cannot be restored onto OpenSCM {}. Nothing was changed.",
+            m.edition, crate::app_edition()
+        ));
+    }
+    if include_config && !m.files.contains_key(CONFIG_ENTRY) {
+        return Err("--include-config: this backup has no config file. Nothing was changed.".into());
+    }
+    if !confirm(&v) {
+        return Err("Cancelled. Nothing was changed.".into());
+    }
+
+    let ts = chrono::Utc::now();
+    let pre = db_dir.join(format!("pre-restore-{}", ts.format("%Y%m%dT%H%M%SZ")));
+    create_private_dir(&pre.join("keys"))?;
+
+    let with_suffix = |p: &Path, s: &str| { let mut o = p.as_os_str().to_owned(); o.push(s); PathBuf::from(o) };
+    let mut swaps = vec![
+        // The old -wal and -shm go first: they must never sit next to the
+        // restored database.
+        Swap { target: with_suffix(&paths.db, "-wal"), src: None, aside: "scm.db-wal", default_mode: 0o600 },
+        Swap { target: with_suffix(&paths.db, "-shm"), src: None, aside: "scm.db-shm", default_mode: 0o600 },
+        Swap { target: paths.db.clone(), src: Some(tmp.path().join(DB_ENTRY)), aside: "scm.db", default_mode: 0o600 },
+        Swap { target: paths.private_key.clone(), src: Some(tmp.path().join(KEY_ENTRY)), aside: KEY_ENTRY, default_mode: 0o600 },
+        Swap { target: paths.public_key.clone(), src: Some(tmp.path().join(PUB_ENTRY)), aside: PUB_ENTRY, default_mode: 0o644 },
+    ];
+    if include_config {
+        swaps.push(Swap { target: paths.config.clone(), src: Some(tmp.path().join(CONFIG_ENTRY)), aside: CONFIG_ENTRY, default_mode: 0o600 });
+    }
+
+    let mut done: Vec<Done> = Vec::new();
+    for s in &swaps {
+        let existing = fs::metadata(&s.target).ok();
+        let mut d = Done { target: s.target.clone(), moved_aside: None, placed: false };
+        if existing.is_some() {
+            let aside = pre.join(s.aside);
+            if let Err(e) = move_file(&s.target, &aside) {
+                undo(done);
+                return Err(format!("Cannot move {} aside: {}. The old files were put back.", s.target.display(), e));
+            }
+            d.moved_aside = Some(aside);
+        }
+        if let Some(src) = &s.src {
+            if let Some(parent) = s.target.parent() {
+                let _ = fs::create_dir_all(parent);
+            }
+            if let Err(e) = place(src, &s.target, existing.as_ref(), s.default_mode) {
+                done.push(d);
+                undo(done);
+                return Err(format!("Cannot write {}: {}. The old files were put back.", s.target.display(), e));
+            }
+            d.placed = true;
+        }
+        done.push(d);
+    }
+
+    // The note for the audit log. Failing to write it does not undo a
+    // restore that has otherwise succeeded.
+    let note = RestoreNote {
+        backup_file: file.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default(),
+        backup_created_at: m.created_at.clone(),
+        backup_host: m.host.clone(),
+        backup_version: m.openscm_version.clone(),
+        backup_schema: m.schema_version,
+        restored_at: ts.to_rfc3339_opts(chrono::SecondsFormat::Secs, true),
+        pre_restore: pre.display().to_string(),
+        config_restored: include_config,
+    };
+    if let Ok(json) = serde_json::to_vec_pretty(&note) {
+        let note_path = db_dir.join(RESTORE_NOTE);
+        if fs::write(&note_path, json).is_ok() {
+            #[cfg(unix)]
+            if let Ok(t) = owner_template(fs::metadata(&paths.db).ok().as_ref(), &db_dir, 0o600) {
+                let _ = apply_owner(&note_path, t);
+            }
+        }
+    }
+
+    Ok(Restored { verified: v, pre_restore: pre, config_restored: include_config })
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Function: record_restore
+// At server start, after migrations: turns the note restore left into a
+// `backup.restored` audit entry, then deletes it, so it is recorded once.
+// ─────────────────────────────────────────────────────────────────────────────
+pub async fn record_restore(pool: &sqlx::SqlitePool, db_path: &str) {
+    let path = Path::new(db_path).parent().unwrap_or(Path::new(".")).join(RESTORE_NOTE);
+    let Ok(raw) = fs::read_to_string(&path) else { return };
+    let (target, details) = match serde_json::from_str::<RestoreNote>(&raw) {
+        Ok(n) => (
+            n.backup_file.clone(),
+            format!(
+                "Restored from {} (made {} on {}, OpenSCM {}, schema {}){}; replaced files kept in {}",
+                n.backup_file, n.backup_created_at, n.backup_host, n.backup_version, n.backup_schema,
+                if n.config_restored { ", config included" } else { "" }, n.pre_restore
+            ),
+        ),
+        Err(_) => (String::new(), format!("Restored from a backup ({})", raw.trim())),
+    };
+    crate::audit::record_raw(pool, "default", None, "system", None, "backup.restored",
+                             Some("backup"), Some(&target), Some(&details)).await;
+    tracing::info!("{details}");
+    if let Err(e) = fs::remove_file(&path) {
+        tracing::warn!("Cannot remove {}: {e}", path.display());
+    }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -671,6 +961,32 @@ fn human_size(n: u64) -> String {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Helper: print_summary
+// What a backup holds, for verify and for restore's confirmation.
+// ─────────────────────────────────────────────────────────────────────────────
+fn print_summary(v: &Verified) {
+    let m = &v.manifest;
+    println!("  Made        {} on {}", m.created_at, m.host);
+    println!("  OpenSCM     {} ({}), schema {}", m.openscm_version, m.edition, m.schema_version);
+    for (label, n) in &v.counts {
+        println!("  {:<12}{}", label, n.map(|n| n.to_string()).unwrap_or_else(|| "-".into()));
+    }
+    println!("  Server key  {}", v.key_fingerprint);
+    match v.matches_this_server {
+        Some(true) => println!("              the same key as this server"),
+        Some(false) => println!("              a different key from this server"),
+        None => {}
+    }
+    println!("  Config      {}", if m.files.contains_key(CONFIG_ENTRY) { "included" } else { "not included" });
+    if v.newer_than_this_server {
+        println!(
+            "\nWarning: this backup's schema ({}) is newer than this OpenSCM {} understands ({}).\nRestoring it needs OpenSCM {} or later.",
+            m.schema_version, crate::app_version(), crate::schema::SCHEMA_VERSION, m.openscm_version
+        );
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Function: run_cli
 // `scmserver backup …`; `args` are the words after "backup". Returns the
 // process exit code.
@@ -716,26 +1032,8 @@ async fn run_cli_inner(args: &[String]) -> Result<(), String> {
         let file = verify_file.ok_or("verify needs the backup file (see scmserver backup --help)")?;
         let pass = read_passphrase(pass_file.as_deref(), false)?;
         let v = verify(&file, &pass, Some(&paths.public_key)).await?;
-        let m = &v.manifest;
         println!("Backup OK: {}", file.display());
-        println!("  Made        {} on {}", m.created_at, m.host);
-        println!("  OpenSCM     {} ({}), schema {}", m.openscm_version, m.edition, m.schema_version);
-        for (label, n) in &v.counts {
-            println!("  {:<12}{}", label, n.map(|n| n.to_string()).unwrap_or_else(|| "-".into()));
-        }
-        println!("  Server key  {}", v.key_fingerprint);
-        match v.matches_this_server {
-            Some(true) => println!("              the same key as this server"),
-            Some(false) => println!("              a different key from this server"),
-            None => {}
-        }
-        println!("  Config      {}", if m.files.contains_key(CONFIG_ENTRY) { "included" } else { "not included" });
-        if v.newer_than_this_server {
-            println!(
-                "\nWarning: this backup's schema ({}) is newer than this OpenSCM {} understands ({}).\nRestoring it needs OpenSCM {} or later.",
-                m.schema_version, crate::app_version(), crate::schema::SCHEMA_VERSION, m.openscm_version
-            );
-        }
+        print_summary(&v);
         return Ok(());
     }
 
@@ -752,5 +1050,103 @@ async fn run_cli_inner(args: &[String]) -> Result<(), String> {
     );
     println!("Check it with: scmserver backup verify {}", c.path.display());
     println!("Without the passphrase it cannot be restored. Copy it off this server.");
+    Ok(())
+}
+
+fn print_restore_usage() {
+    println!(
+        r#"
+USAGE:
+    scmserver restore FILE [--include-config] [--passphrase-file FILE] [--yes]
+
+Replaces this server's database and key pair with those in a backup made by
+`scmserver backup`. The server must be stopped.
+
+The backup is checked first; one from a newer OpenSCM, or from another
+edition (SaaS vs Community/Enterprise), is refused. An older one is fine: the
+next server start upgrades it. The current files are moved to
+pre-restore-<time>/ next to the database, so a restore can be undone.
+
+--include-config   also restore scmserver.config (leave it out when moving
+                   to a machine with other TLS paths or addresses)
+--yes              do not ask for confirmation
+"#
+    );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Function: run_restore_cli
+// `scmserver restore …`; `args` are the words after "restore". Returns the
+// process exit code.
+// ─────────────────────────────────────────────────────────────────────────────
+pub async fn run_restore_cli(args: &[String]) -> i32 {
+    match run_restore_cli_inner(args).await {
+        Ok(()) => 0,
+        Err(e) => {
+            eprintln!("error: {e}");
+            1
+        }
+    }
+}
+
+async fn run_restore_cli_inner(args: &[String]) -> Result<(), String> {
+    let mut file: Option<PathBuf> = None;
+    let mut pass_file: Option<PathBuf> = None;
+    let mut include_config = false;
+    let mut yes = false;
+    let mut it = args.iter();
+    while let Some(a) = it.next() {
+        match a.as_str() {
+            "-h" | "--help" => {
+                print_restore_usage();
+                return Ok(());
+            }
+            "--include-config" => include_config = true,
+            "--yes" | "-y" => yes = true,
+            "--passphrase-file" => pass_file = Some(it.next().ok_or("--passphrase-file needs a path")?.into()),
+            s if file.is_none() && !s.starts_with('-') => file = Some(s.into()),
+            s => return Err(format!("unknown argument '{s}' (see scmserver restore --help)")),
+        }
+    }
+    let file = file.ok_or("restore needs the backup file (see scmserver restore --help)")?;
+    let paths = Paths::installed();
+    let pass = read_passphrase(pass_file.as_deref(), false)?;
+
+    let r = restore(&paths, &file, &pass, include_config, |v| {
+        println!("Restoring {}", file.display());
+        print_summary(v);
+        println!("\nThis replaces the database and server key{} of this server:", if include_config { ", and the config," } else { "" });
+        println!("  {}", paths.db.display());
+        println!("  {}", paths.private_key.display());
+        if include_config {
+            println!("  {}", paths.config.display());
+        }
+        if yes {
+            return true;
+        }
+        print!("The current files are kept. Type 'restore' to continue: ");
+        let _ = io::stdout().flush();
+        let mut line = String::new();
+        io::stdin().read_line(&mut line).is_ok() && line.trim() == "restore"
+    })
+    .await?;
+
+    let m = &r.verified.manifest;
+    println!("\nRestored the backup made {} on {} (OpenSCM {}, schema {}).", m.created_at, m.host, m.openscm_version, m.schema_version);
+    println!("The replaced files are in {}.", r.pre_restore.display());
+    if !r.config_restored {
+        println!("The config was not changed{}.", if m.files.contains_key(CONFIG_ENTRY) { " (use --include-config to restore it too)" } else { "" });
+    }
+    println!("\nNext:");
+    if m.schema_version < crate::schema::SCHEMA_VERSION {
+        println!("  - Start the server. It upgrades the database from schema {} to {} on start.", m.schema_version, crate::schema::SCHEMA_VERSION);
+    } else {
+        println!("  - Start the server.");
+    }
+    match r.verified.matches_this_server {
+        Some(true) => println!("  - The server key is unchanged: agents reconnect on their own."),
+        _ => println!("  - The server key is now the backup's. Agents that were enrolled with this\n    backup's server reconnect on their own; agents that pinned a different key\n    need `scmclient --reset-server-key`."),
+    }
+    println!("  - To undo: stop the server and move the files in {} back.", r.pre_restore.display());
     Ok(())
 }

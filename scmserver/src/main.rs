@@ -31,6 +31,7 @@ OPTIONS:
 COMMANDS:
 backup              Write an encrypted backup (scmserver backup --help)
 backup verify FILE  Check a backup and show what it holds
+restore FILE        Restore a backup, server stopped (scmserver restore --help)
 
 "#);
 }
@@ -49,10 +50,13 @@ async fn main() -> Result<(), Box<dyn Error>> {
     scmserver::set_app_version(env!("CARGO_PKG_VERSION"));
     scmserver::set_app_edition("Community Edition");
 
-    // `scmserver backup …` runs beside the server and exits (backup.rs).
+    // `scmserver backup …` runs beside the server and exits; `restore` needs
+    // it stopped (backup.rs).
     let cli: Vec<String> = std::env::args().skip(1).collect();
-    if cli.first().map(|a| a == "backup").unwrap_or(false) {
-        std::process::exit(scmserver::backup::run_cli(&cli[1..]).await);
+    match cli.first().map(String::as_str) {
+        Some("backup") => std::process::exit(scmserver::backup::run_cli(&cli[1..]).await),
+        Some("restore") => std::process::exit(scmserver::backup::run_restore_cli(&cli[1..]).await),
+        _ => {}
     }
 
 // 0. Usage
@@ -173,6 +177,8 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
     if db_initialized {
         run_migrations(&pool).await?;
+        // After a `scmserver restore`: record it in the audit log, once.
+        scmserver::backup::record_restore(&pool, &db_file).await;
         // Secrets saved before encryption existed are rewritten encrypted.
         scmserver::secrets::init_from_cookie_key(&cookie_key);
         scmserver::secrets::encrypt_existing(&pool).await;

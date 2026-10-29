@@ -326,12 +326,61 @@ Copy backups off the server with your own tools (rsync, your backup agent,
 `docker cp`): a backup on the same disk does not survive the disk. The
 OpenSCM web interface never offers backups for download.
 
-!!! note "Restoring"
-    A `scmserver restore` command is coming in a later release. Until then,
-    a backup is a standard [age](https://age-encryption.org) file holding a
-    tar.gz: `age -d backup.oscm-backup | tar xz` (enter the passphrase)
-    gives `scm.db`, `keys/` and `scmserver.config`. Stop the server, put
-    them in place, and start it.
+### Restoring a Backup
+
+`scmserver restore` puts a backup back: the database and the server key pair,
+and the config with `--include-config`. The server must be stopped; restore
+refuses to run while it is running.
+
+=== "Linux"
+    ```bash
+    sudo systemctl stop scmserver
+    sudo scmserver restore /var/lib/openscm/backups/openscm-web1-20261029T020000Z.oscm-backup
+    sudo systemctl start scmserver
+    ```
+
+=== "Docker"
+    ```bash
+    docker stop openscm
+    docker run --rm -it \
+      -v openscm_data:/var/lib/openscm -v openscm_config:/etc/openscm \
+      openscm/scmserver:latest \
+      scmserver restore /var/lib/openscm/backups/openscm-web1-20261029T020000Z.oscm-backup
+    docker start openscm
+    ```
+
+=== "Windows"
+    ```powershell
+    Stop-Service OpenSCMServer
+    .\scmserver.exe restore C:\ProgramData\OpenSCM\Server\backups\openscm-web1-20261029T020000Z.oscm-backup
+    Start-Service OpenSCMServer
+    ```
+
+Restore checks the backup as `verify` does, shows what it holds, and asks you
+to type `restore` before changing anything (`--yes` skips the question). It
+refuses:
+
+- a backup from a **newer** OpenSCM — install that version or later first.
+  A backup from an **older** OpenSCM is fine: the server upgrades it when it
+  starts, as after a package upgrade.
+- a SaaS backup on a Community or Enterprise server, and the other way round.
+
+The files it replaces are moved to `pre-restore-<time>/` next to the
+database. To undo a restore, stop the server and move them back. Restored
+files keep the owner and permissions of the files they replace, so the
+service account can still read them.
+
+The config is left alone unless you pass `--include-config`: when restoring
+onto a new machine, its TLS paths and addresses usually differ.
+
+After the restore the server key is the backup's. Agents enrolled with that
+server reconnect on their own. Agents that pinned a different key (0.10.4 and
+later) need `scmclient --reset-server-key`. The first start after a restore
+records it in the audit log (`backup.restored`).
+
+!!! tip "Practice a restore"
+    Restore your latest backup onto a spare machine every few months. It is
+    the only proof that the backups and the passphrase work.
 
 ### One Server per Database
 
