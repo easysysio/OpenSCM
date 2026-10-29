@@ -47,6 +47,7 @@ cfg_if! {
 
 pub fn db_path() -> &'static str { DB_PATH }
 pub fn private_key_path() -> &'static str { PRIVATE_KEY_PATH }
+pub fn public_key_path() -> &'static str { PUBLIC_KEY_PATH }
 pub fn config_path() -> &'static str { CONFIG_PATH }
 
 // --- Structs ---

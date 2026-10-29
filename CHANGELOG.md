@@ -6,6 +6,10 @@ All notable changes to OpenSCM are documented here.
 
 ## [Unreleased]
 
+### Added
+- **`scmserver backup`**: one command writes an encrypted backup of the database, the server key pair and the config, while the server runs (a consistent SQLite `VACUUM INTO` snapshot, checked with `integrity_check`). The file is an [age](https://age-encryption.org) file with a passphrase of at least 12 characters, from `--passphrase-file`, `OPENSCM_BACKUP_PASSPHRASE` or a prompt. By default it goes to `backups/` next to the database, readable by its owner only; it appears only once complete.
+- **`scmserver backup verify FILE`** decrypts a backup, checks every file against the manifest inside it, checks the key pair and the database copy, and prints the version, schema, counts and whether the key is this server's. It never touches the running server. Step 2 of backup and restore (`docs/design/1.0.0-backup-restore.md`); restore follows.
+
 ---
 
 ## [0.12.2] - 2026-10-29

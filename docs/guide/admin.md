@@ -273,24 +273,65 @@ The SQLite database is stored at a fixed location:
 - **Linux:** `/var/lib/openscm/scm.db`
 - **Windows:** `C:\ProgramData\OpenSCM\Server\scm.db`
 
-### Database Backup
+### Backups
 
-Back up the database file regularly to prevent data loss:
+`scmserver backup` writes one encrypted file holding everything the server
+needs to come back as it was: the database, the server key pair and the
+config. It runs while the server is running; there is no need to stop it.
 
 === "Linux"
     ```bash
-    # Stop the server before backing up for consistency
-    sudo systemctl stop scmserver
-    sudo cp /var/lib/openscm/scm.db /backup/scm.db.$(date +%Y%m%d)
-    sudo systemctl start scmserver
+    sudo scmserver backup
+    ```
+
+=== "Docker"
+    ```bash
+    docker exec -it openscm scmserver backup
     ```
 
 === "Windows"
     ```powershell
-    Stop-Service OpenSCMServer
-    Copy-Item "C:\ProgramData\OpenSCM\Server\scm.db" "C:\Backup\scm.db_$(Get-Date -Format yyyyMMdd)"
-    Start-Service OpenSCMServer
+    # From the OpenSCM Server installation directory, as Administrator
+    .\scmserver.exe backup
     ```
+
+The file is written to `backups/` next to the database (on Linux
+`/var/lib/openscm/backups/openscm-<host>-<time>.oscm-backup`, readable by
+its owner only; on Docker that is on the data volume). `--out` names another
+file or directory.
+
+The backup is encrypted with a passphrase of at least 12 characters, asked
+for when you run the command. For cron jobs, put it in a file only the
+backup user can read and pass `--passphrase-file`, or set
+`OPENSCM_BACKUP_PASSPHRASE`.
+
+!!! warning "Keep the passphrase"
+    Without the passphrase a backup cannot be opened, by you or anyone
+    else. Store it somewhere other than next to the backups — a password
+    manager or a sealed envelope.
+
+Check a backup:
+
+```bash
+sudo scmserver backup verify /var/lib/openscm/backups/openscm-web1-20261029T020000Z.oscm-backup
+```
+
+`verify` decrypts it, checks every file against the checksums inside it and
+the database copy with SQLite's `integrity_check`, and prints the OpenSCM
+version, the counts of organizations, systems, results and saved reports, and
+whether the server key is this server's. It never touches the running
+server.
+
+Copy backups off the server with your own tools (rsync, your backup agent,
+`docker cp`): a backup on the same disk does not survive the disk. The
+OpenSCM web interface never offers backups for download.
+
+!!! note "Restoring"
+    A `scmserver restore` command is coming in a later release. Until then,
+    a backup is a standard [age](https://age-encryption.org) file holding a
+    tar.gz: `age -d backup.oscm-backup | tar xz` (enter the passphrase)
+    gives `scm.db`, `keys/` and `scmserver.config`. Stop the server, put
+    them in place, and start it.
 
 ### One Server per Database
 
@@ -313,7 +354,8 @@ changed; install that version or a later one.
     Losing the key file now also means visiting every host running a 0.10.4
     or later agent, to run `scmclient --reset-server-key`. Back it up.
 
-Back up the server's key file **together with the database**. The secrets
+`scmserver backup` (above) includes the key pair. If you back up by hand,
+back up the server's key file **together with the database**. The secrets
 OpenSCM has to use are stored in the database encrypted under a key derived
 from it:
 

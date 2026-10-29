@@ -44,6 +44,7 @@ pub mod security_headers;
 pub mod rate_limit;
 pub mod secrets;
 pub mod instance_lock;
+pub mod backup;
 pub mod api;
 pub mod api_tokens;
 

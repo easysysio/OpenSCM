@@ -28,6 +28,10 @@ OPTIONS:
 -h, --help          Print this help message
 -ver, --version     Print version information
 
+COMMANDS:
+backup              Write an encrypted backup (scmserver backup --help)
+backup verify FILE  Check a backup and show what it holds
+
 "#);
 }
 
@@ -44,6 +48,12 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
     scmserver::set_app_version(env!("CARGO_PKG_VERSION"));
     scmserver::set_app_edition("Community Edition");
+
+    // `scmserver backup …` runs beside the server and exits (backup.rs).
+    let cli: Vec<String> = std::env::args().skip(1).collect();
+    if cli.first().map(|a| a == "backup").unwrap_or(false) {
+        std::process::exit(scmserver::backup::run_cli(&cli[1..]).await);
+    }
 
 // 0. Usage
     let version = env!("CARGO_PKG_VERSION");

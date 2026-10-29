@@ -74,6 +74,14 @@ regex = "1.10"
 ipnet = "2.9"
 ldap3 = { version = "0.12", default-features = false, features = ["sync", "tls-rustls-ring"] }
 printpdf = { version = "0.12", default-features = false, features = ["jpeg", "text_layout"] }
+# Backups (backup.rs): one age-encrypted (passphrase/scrypt) tar.gz file,
+# readable with the standalone `age` tool. All pure Rust.
+age = "0.11"
+tar = "0.4"
+flate2 = "1"
+tempfile = "3"
+rpassword = "7"
+hostname = "0.4"
 
 [target.'cfg(windows)'.dependencies]
 winreg = "0.52"
