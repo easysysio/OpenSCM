@@ -6,6 +6,10 @@ All notable changes to OpenSCM are documented here.
 
 ## [Unreleased]
 
+### Fixed
+- `sudo scmserver backup` no longer leaves root-owned backups the server cannot use: the backups folder it creates and every backup file get the database's owner and group, so scheduled backups can still write to the folder and remove old files.
+- `scmserver backup verify` lines up its output; "Organizations" and "Saved reports" ran into their counts.
+
 ### Changed
 - Database schema v50: backup settings (off by default) and two columns on `alert_deliveries` for alerts not about a policy score.
 

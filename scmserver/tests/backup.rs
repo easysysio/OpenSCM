@@ -509,3 +509,46 @@ async fn an_older_backup_is_migrated_on_the_next_start() {
     assert_eq!(count_systems(&b.paths.db).await, 3);
     a.pool.close().await;
 }
+
+// `sudo scmserver backup` must not leave root-owned files the service account
+// cannot use: the backups folder it creates and every backup file get the
+// database's owner and group. Tested with a group change, which needs no root:
+// the database is moved to another of this user's groups, and the folder and
+// file must follow it.
+#[cfg(unix)]
+#[tokio::test]
+async fn backups_are_owned_like_the_database() {
+    use std::os::unix::fs::{MetadataExt, PermissionsExt};
+    let s = server(1).await;
+    let primary = std::fs::metadata(&s.paths.db).unwrap().gid();
+    let out = std::process::Command::new("id").arg("-G").output().unwrap();
+    let Some(other) = String::from_utf8_lossy(&out.stdout).split_whitespace()
+        .filter_map(|g| g.parse::<u32>().ok()).find(|g| *g != primary) else {
+        eprintln!("skipped: this user belongs to only one group");
+        return;
+    };
+    std::os::unix::fs::chown(&s.paths.db, None, Some(other)).unwrap();
+
+    // resolve_out with no --out creates backups/ next to the database.
+    let dir = backup::default_dir(&s.paths.db);
+    std::fs::remove_dir(&dir).unwrap(); // server() made it; start without one
+    assert!(!dir.exists());
+    let target = backup::resolve_out(None, &s.paths.db).unwrap();
+    let d = std::fs::metadata(&dir).unwrap();
+    assert_eq!(d.gid(), other, "the folder takes the database's group");
+    assert_eq!(d.permissions().mode() & 0o777, 0o700);
+
+    let c = backup::create(&s.paths, &target, PASS, WF).await.unwrap();
+    let f = std::fs::metadata(&c.path).unwrap();
+    assert_eq!(f.gid(), other, "the backup takes the database's group");
+    assert_eq!(f.permissions().mode() & 0o777, 0o600);
+
+    // --out into a folder of another group: on BSD/macOS a new file takes
+    // the folder's group, so only the fix gives it the database's.
+    let elsewhere = s.out_dir.parent().unwrap().join("elsewhere");
+    std::fs::create_dir(&elsewhere).unwrap();
+    std::os::unix::fs::chown(&elsewhere, None, Some(primary)).unwrap();
+    let c = backup::create(&s.paths, &elsewhere.join("x.oscm-backup"), PASS, WF).await.unwrap();
+    assert_eq!(std::fs::metadata(&c.path).unwrap().gid(), other);
+    s.pool.close().await;
+}

@@ -157,7 +157,14 @@ pub fn resolve_out(out: Option<&Path>, db: &Path) -> Result<PathBuf, String> {
     match out {
         None => {
             let dir = default_dir(db);
+            let existed = dir.is_dir();
             create_private_dir(&dir)?;
+            // Created by `sudo scmserver backup`, it would be root's alone
+            // and scheduled backups (the service account) could not use it.
+            if !existed {
+                match_owner(db, &dir, 0o700)
+                    .map_err(|e| format!("Cannot give {} the database's owner: {}", dir.display(), e))?;
+            }
             Ok(dir.join(name))
         }
         Some(p) if p.is_dir() => Ok(p.join(name)),
@@ -178,6 +185,24 @@ pub(crate) fn create_private_dir(dir: &Path) -> Result<(), String> {
         b.mode(0o700);
     }
     b.create(dir).map_err(|e| format!("Cannot create backup directory {}: {}", dir.display(), e))
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Helper: match_owner
+// Gives `path` the owner and group of `like` (the database) and `mode`.
+// A no-op when they already match, as for the service account's own runs.
+// Unix only; Windows files inherit the folder's permissions.
+// ─────────────────────────────────────────────────────────────────────────────
+pub(crate) fn match_owner(like: &Path, path: &Path, mode: u32) -> io::Result<()> {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::MetadataExt;
+        let m = fs::metadata(like)?;
+        apply_owner(path, (m.uid(), m.gid(), mode))?;
+    }
+    #[cfg(not(unix))]
+    let _ = (like, path, mode);
+    Ok(())
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -389,6 +414,11 @@ pub async fn create(
     if let Err(e) = fs::rename(&partial, out) {
         let _ = fs::remove_file(&partial);
         return Err(format!("Cannot move the backup into place at {}: {}", out.display(), e));
+    }
+    // Owned like the database, so the service account can prune it later
+    // even when it was written with sudo.
+    if let Err(e) = match_owner(&paths.db, out, 0o600) {
+        tracing::warn!("Cannot give {} the database's owner: {e}", out.display());
     }
     let size = fs::metadata(out).map(|m| m.len()).unwrap_or(0);
     Ok(Created { path: out.to_path_buf(), size, manifest })
@@ -979,18 +1009,18 @@ pub(crate) fn human_size(n: u64) -> String {
 // ─────────────────────────────────────────────────────────────────────────────
 fn print_summary(v: &Verified) {
     let m = &v.manifest;
-    println!("  Made        {} on {}", m.created_at, m.host);
-    println!("  OpenSCM     {} ({}), schema {}", m.openscm_version, m.edition, m.schema_version);
+    println!("  Made           {} on {}", m.created_at, m.host);
+    println!("  OpenSCM        {} ({}), schema {}", m.openscm_version, m.edition, m.schema_version);
     for (label, n) in &v.counts {
-        println!("  {:<12}{}", label, n.map(|n| n.to_string()).unwrap_or_else(|| "-".into()));
+        println!("  {:<15}{}", label, n.map(|n| n.to_string()).unwrap_or_else(|| "-".into()));
     }
-    println!("  Server key  {}", v.key_fingerprint);
+    println!("  Server key     {}", v.key_fingerprint);
     match v.matches_this_server {
-        Some(true) => println!("              the same key as this server"),
-        Some(false) => println!("              a different key from this server"),
+        Some(true) => println!("                 the same key as this server"),
+        Some(false) => println!("                 a different key from this server"),
         None => {}
     }
-    println!("  Config      {}", if m.files.contains_key(CONFIG_ENTRY) { "included" } else { "not included" });
+    println!("  Config         {}", if m.files.contains_key(CONFIG_ENTRY) { "included" } else { "not included" });
     if v.newer_than_this_server {
         println!(
             "\nWarning: this backup's schema ({}) is newer than this OpenSCM {} understands ({}).\nRestoring it needs OpenSCM {} or later.",
