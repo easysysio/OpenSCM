@@ -62,7 +62,9 @@
               <td>{{ d.alert_name }}</td>
               <td class="text-sm">{{ d.policy_name }}</td>
               <td class="text-center text-sm">
+                {% if d.event | default(value="compliance.alert") == "compliance.alert" %}
                 {{ d.old_score | round(precision=2) }}% → <strong>{{ d.new_score | round(precision=2) }}%</strong>
+                {% else %}<span class="text-danger">{{ d.summary }}</span>{% endif %}
               </td>
               <td class="text-sm">
                 {% if d.action == "notify" %}<i class="fas fa-bell fa-fw mr-1"></i>OpenSCM

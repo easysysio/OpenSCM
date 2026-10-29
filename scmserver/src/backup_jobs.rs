@@ -461,6 +461,7 @@ impl Backups {
                 crate::audit::record_raw(pool, "default", actor_id, &actor_name, None, "backup.failed",
                                          Some("backup"), None, Some(&format!("{}: {e}", trigger.label()))).await;
                 notify_superusers(pool, &format!("Backup failed: {e}")).await;
+                crate::alerts::fire_backup_failed(pool, e).await;
             }
         }
     }

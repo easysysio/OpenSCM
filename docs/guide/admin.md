@@ -369,7 +369,9 @@ database, the same folder as `scmserver backup`.
 shows the last result, the next scheduled run and the backups in the folder.
 
 When a backup fails, superusers get a notification and a dashboard banner,
-and the audit log records `backup.failed`. Successful backups are recorded as
+and the audit log records `backup.failed`. To be told by email, webhook or
+syslog as well, create an alert that watches **Server backups**
+([Alerts](alerts.md#alerts-on-failed-backups)). Successful backups are recorded as
 `backup.create`, including ones made on the command line.
 
 `scmserver backup` on the command line also uses the passphrase file when

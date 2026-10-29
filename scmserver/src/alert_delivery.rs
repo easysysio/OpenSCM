@@ -94,6 +94,10 @@ struct Pending {
     target: Option<String>,
     action_id: Option<i64>,
     attempts: i64,
+    /// "compliance.alert", or an event not about a policy score
+    /// ("backup.failed") that carries its own text in `summary`.
+    event: String,
+    summary: Option<String>,
 }
 
 
@@ -104,7 +108,8 @@ struct Pending {
 pub async fn deliver_pending(pool: &SqlitePool) {
     let rows = match sqlx::query(
         "SELECT id, tenant_id, alert_id, action_id, policy_id, alert_name, policy_name,
-                old_score, new_score, action, target, attempts
+                old_score, new_score, action, target, attempts,
+                COALESCE(event, 'compliance.alert') AS event, summary
          FROM alert_deliveries
          WHERE status = 'pending'
            AND (next_retry_at IS NULL OR next_retry_at <= CURRENT_TIMESTAMP)
@@ -135,6 +140,8 @@ pub async fn deliver_pending(pool: &SqlitePool) {
             target: row.try_get("target").ok().flatten(),
             action_id: row.try_get("action_id").ok().flatten(),
             attempts: row.try_get("attempts").unwrap_or(0),
+            event: row.try_get("event").unwrap_or_else(|_| "compliance.alert".into()),
+            summary: row.try_get("summary").ok().flatten(),
         };
 
         match dispatch(pool, &d).await {
@@ -198,7 +205,11 @@ async fn record_failure(pool: &SqlitePool, d: &Pending, err: &str) {
 // ─────────────────────────────────────────────────────────────────────────────
 async fn dispatch(pool: &SqlitePool, d: &Pending) -> Result<(), String> {
     let obs = Observation { previous: d.old_score, current: d.new_score };
-    let summary = summary_line(&d.policy_name, obs);
+    let is_score = d.event == "compliance.alert";
+    let summary = match (&d.summary, is_score) {
+        (Some(s), false) => s.clone(),
+        _ => summary_line(&d.policy_name, obs),
+    };
 
     match d.action.as_str() {
         "notify" => {
@@ -242,18 +253,29 @@ async fn dispatch(pool: &SqlitePool, d: &Pending) -> Result<(), String> {
             // either.
             let target = crate::net_guard::check_url(&url, crate::handlers::is_saas_mode(), "Webhook URL")?;
 
-            let payload = serde_json::json!({
-                "version": 1,
-                "event": "compliance.alert",
-                "tenant": d.tenant_id,
-                "alert":  { "id": d.alert_id, "name": d.alert_name },
-                "policy": { "id": d.policy_id, "name": d.policy_name },
-                "score":  {
-                    "previous": d.old_score,
-                    "current":  d.new_score,
-                    "delta": ((d.new_score - d.old_score) * 100.0).round() / 100.0
-                },
-            });
+            let payload = if is_score {
+                serde_json::json!({
+                    "version": 1,
+                    "event": "compliance.alert",
+                    "tenant": d.tenant_id,
+                    "alert":  { "id": d.alert_id, "name": d.alert_name },
+                    "policy": { "id": d.policy_id, "name": d.policy_name },
+                    "score":  {
+                        "previous": d.old_score,
+                        "current":  d.new_score,
+                        "delta": ((d.new_score - d.old_score) * 100.0).round() / 100.0
+                    },
+                })
+            } else {
+                serde_json::json!({
+                    "version": 1,
+                    "event": d.event,
+                    "tenant": d.tenant_id,
+                    "server": gethostname_string(),
+                    "alert": { "id": d.alert_id, "name": d.alert_name },
+                    "message": summary,
+                })
+            };
 
             // Redirects are off and the host is pinned — see net_guard::client_for.
             let client = crate::net_guard::client_for(
@@ -293,7 +315,11 @@ async fn dispatch(pool: &SqlitePool, d: &Pending) -> Result<(), String> {
             if target.trim().is_empty() {
                 return Err("no syslog server configured".into());
             }
-            send_syslog(&target, &d.alert_name, &d.policy_name, obs).await
+            if is_score {
+                send_syslog(&target, &d.alert_name, &d.policy_name, obs).await
+            } else {
+                send_syslog_event(&target, &d.event, &d.alert_name, &summary).await
+            }
         }
 
         other => Err(format!("unknown action '{other}'")),
@@ -340,6 +366,28 @@ async fn send_syslog(
         escape_sd(alert_name), summary_line(policy_name, obs)
     );
 
+    let sock = tokio::net::UdpSocket::bind("0.0.0.0:0")
+        .await
+        .map_err(|e| format!("syslog socket: {e}"))?;
+    sock.send_to(msg.as_bytes(), &addr)
+        .await
+        .map_err(|e| format!("syslog send to {addr}: {e}"))?;
+    Ok(())
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Helper: send_syslog_event
+// An event that is not a score movement (backup.failed): severity error.
+// ─────────────────────────────────────────────────────────────────────────────
+async fn send_syslog_event(target: &str, event: &str, alert_name: &str, summary: &str) -> Result<(), String> {
+    let addr = if target.contains(':') { target.to_string() } else { format!("{target}:514") };
+    let pri = 13 * 8 + 3;
+    let host = gethostname_string();
+    let ts = chrono::Utc::now().format("%Y-%m-%dT%H:%M:%SZ");
+    let msg = format!(
+        "<{pri}>1 {ts} {host} openscm - BACKUP [openscm@99999 event=\"{}\"] {} — {}",
+        escape_sd(event), escape_sd(alert_name), summary
+    );
     let sock = tokio::net::UdpSocket::bind("0.0.0.0:0")
         .await
         .map_err(|e| format!("syslog socket: {e}"))?;

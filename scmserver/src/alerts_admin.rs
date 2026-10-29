@@ -64,6 +64,9 @@ pub struct DeliveryRow {
     pub status: String,
     pub attempts: i64,
     pub last_error: String,
+    /// "compliance.alert" shows the score change; other events their text.
+    pub event: String,
+    pub summary: String,
 }
 
 
@@ -79,6 +82,7 @@ fn describe(trigger: &str, threshold: f64, axis: &str) -> String {
         "gain"  => format!("{axis_label} rises by {threshold:.0} points or more"),
         "below" => format!("{axis_label} falls below {threshold:.0}%"),
         "above" => format!("{axis_label} rises above {threshold:.0}%"),
+        crate::alerts::TRIGGER_BACKUP_FAILED => "a server backup fails".to_string(),
         other   => format!("{other} {threshold}"),
     }
 }
@@ -117,6 +121,8 @@ async fn load_alerts(pool: &SqlitePool, tenant: &str) -> Vec<AlertRow> {
                 enabled: r.try_get::<i64, _>("enabled").unwrap_or(1) != 0,
                 policy_name: if scope == "all_policies" {
                     "All policies".to_string()
+                } else if scope == "server" {
+                    "Server backups".to_string()
                 } else {
                     r.try_get("policy_name").unwrap_or_default()
                 },
@@ -253,6 +259,23 @@ pub async fn alerts_form(
 
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Helper: guard_server_rule
+// Rules on server backups belong to superusers: an Admin may not change,
+// switch off or delete one. None when the caller may go ahead.
+// ─────────────────────────────────────────────────────────────────────────────
+async fn guard_server_rule(pool: &SqlitePool, auth: &AuthSession, id: i64) -> Option<axum::response::Response> {
+    if UserRole::from(auth.role.as_str()) >= UserRole::Superuser {
+        return None;
+    }
+    let scope: Option<String> = sqlx::query_scalar("SELECT scope_type FROM alerts WHERE id = ? AND tenant_id = ?")
+        .bind(id).bind(&auth.tenant_id)
+        .fetch_optional(pool).await.ok().flatten();
+    (scope.as_deref() == Some("server")).then(|| {
+        Redirect::to("/alerts?error_message=Only+superusers+can+change+alerts+on+server+backups").into_response()
+    })
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Helper: read_form
 // Pulls and validates the rule fields shared by create and update.
 // ─────────────────────────────────────────────────────────────────────────────
@@ -269,7 +292,7 @@ struct FormValues {
     enabled: i64,
 }
 
-fn read_form(raw: &str) -> Result<FormValues, String> {
+fn read_form(raw: &str, superuser: bool) -> Result<FormValues, String> {
     let f = parse_form_data(raw);
     let get = |k: &str| f.get(k).and_then(|v| v.first()).cloned().unwrap_or_default();
 
@@ -280,8 +303,13 @@ fn read_form(raw: &str) -> Result<FormValues, String> {
 
     let scope_type = match get("scope_type").as_str() {
         "all_policies" => "all_policies".to_string(),
+        // Server backups hold every organization: superusers only, as
+        // Settings → Backup.
+        "server" if superuser => "server".to_string(),
+        "server" => return Err("Only superusers can alert on server backups".into()),
         _ => "policy".to_string(),
     };
+    let is_backup = scope_type == "server";
     let policy_id = if scope_type == "policy" {
         match get("policy_id").parse::<i64>() {
             Ok(p) => Some(p),
@@ -291,13 +319,17 @@ fn read_form(raw: &str) -> Result<FormValues, String> {
         None
     };
 
-    let trigger_type = get("trigger_type");
-    if !matches!(trigger_type.as_str(), "drop" | "gain" | "below" | "above") {
+    let trigger_type = if is_backup { crate::alerts::TRIGGER_BACKUP_FAILED.to_string() } else { get("trigger_type") };
+    if !is_backup && !matches!(trigger_type.as_str(), "drop" | "gain" | "below" | "above") {
         return Err("Unknown trigger".into());
     }
 
-    let threshold: f64 = get("threshold").trim().parse().map_err(|_| "Threshold must be a number")?;
-    if threshold <= 0.0 {
+    let threshold: f64 = if is_backup {
+        0.0
+    } else {
+        get("threshold").trim().parse().map_err(|_| "Threshold must be a number")?
+    };
+    if !is_backup && threshold <= 0.0 {
         return Err("Threshold must be greater than zero".into());
     }
     // below/above are percentages; a threshold above 100 can never be crossed.
@@ -421,8 +453,14 @@ pub async fn alerts_save(
     if let Some(redir) = auth::authorize(&auth.role, UserRole::Admin) {
         return redir;
     }
+    if let Some(Path(alert_id)) = &id {
+        if let Some(r) = guard_server_rule(&pool, &auth, *alert_id).await {
+            return r;
+        }
+    }
     let body = String::from_utf8_lossy(&Bytes::from(raw.0)).to_string();
-    let v = match read_form(&body) {
+    let superuser = UserRole::from(auth.role.as_str()) >= UserRole::Superuser;
+    let v = match read_form(&body, superuser) {
         Ok(v) => v,
         Err(e) => {
             let msg = urlencoding::encode(&e).to_string();
@@ -517,6 +555,9 @@ pub async fn alerts_toggle(
     if let Some(redir) = auth::authorize(&auth.role, UserRole::Admin) {
         return redir;
     }
+    if let Some(r) = guard_server_rule(&pool, &auth, id).await {
+        return r;
+    }
     let _ = sqlx::query(
         "UPDATE alerts SET enabled = CASE enabled WHEN 1 THEN 0 ELSE 1 END
          WHERE id = ? AND tenant_id = ?",
@@ -533,6 +574,9 @@ pub async fn alerts_delete(
 ) -> impl IntoResponse {
     if let Some(redir) = auth::authorize(&auth.role, UserRole::Admin) {
         return redir;
+    }
+    if let Some(r) = guard_server_rule(&pool, &auth, id).await {
+        return r;
     }
     // The delivery history deliberately survives: alert_id goes NULL and the
     // rows keep their denormalised names, so the record of what was already
@@ -618,7 +662,8 @@ pub async fn alerts_history(
         "SELECT id, fired_at, COALESCE(alert_name,'(deleted)') AS alert_name,
                 COALESCE(policy_name,'') AS policy_name, old_score, new_score,
                 action, COALESCE(target,'') AS target, status, attempts,
-                COALESCE(last_error,'') AS last_error
+                COALESCE(last_error,'') AS last_error,
+                COALESCE(event,'compliance.alert') AS event, COALESCE(summary,'') AS summary
          FROM alert_deliveries WHERE tenant_id = ?
          ORDER BY fired_at DESC LIMIT 200",
     )
@@ -641,6 +686,8 @@ pub async fn alerts_history(
             status: r.try_get("status").unwrap_or_default(),
             attempts: r.try_get("attempts").unwrap_or(0),
             last_error: r.try_get("last_error").unwrap_or_default(),
+            event: r.try_get("event").unwrap_or_else(|_| "compliance.alert".into()),
+            summary: r.try_get("summary").unwrap_or_default(),
         })
         .collect();
 

@@ -46,10 +46,14 @@
           <h5 class="font-weight-bold">When</h5>
           <div class="form-row">
             <div class="form-group col-md-5">
-              <label for="scope_type">Policy</label>
+              <label for="scope_type">Watch</label>
               <select class="form-control" id="scope_type" name="scope_type">
                 <option value="policy" {% if alert and alert.scope_type == "policy" %}selected{% endif %}>A single policy</option>
                 <option value="all_policies" {% if alert and alert.scope_type == "all_policies" %}selected{% endif %}>All policies</option>
+                {# Superusers only: a backup holds every organization. #}
+                {% if is_superuser %}
+                <option value="server" {% if alert and alert.scope_type == "server" %}selected{% endif %}>Server backups</option>
+                {% endif %}
               </select>
             </div>
             <div class="form-group col-md-7" id="policy-picker">
@@ -63,7 +67,13 @@
             </div>
           </div>
 
-          <div class="form-row">
+          <div class="alert alert-light border small" id="backup-note" style="display:none">
+            <i class="fas fa-archive mr-1"></i>
+            Fires each time a server backup fails, scheduled or started with
+            <strong>Back up now</strong> (Settings → Backup).
+          </div>
+
+          <div class="form-row" id="score-row">
             <div class="form-group col-md-5">
               <label for="trigger_type">Compliance</label>
               <select class="form-control" id="trigger_type" name="trigger_type">
@@ -192,7 +202,7 @@
             </div>
           </div>
 
-          <div class="form-group col-md-4 pl-0">
+          <div class="form-group col-md-4 pl-0" id="cooldown-group">
             <label for="cooldown_minutes">Cooldown</label>
             <div class="input-group">
               <input type="number" min="0" class="form-control" id="cooldown_minutes"
@@ -243,8 +253,13 @@
   }
 
   function syncScope() {
+    var server = scope.value === 'server';
     document.getElementById('policy-picker').style.display =
-      scope.value === 'all_policies' ? 'none' : '';
+      (scope.value === 'all_policies' || server) ? 'none' : '';
+    // A backup rule has no policy, threshold or cooldown: each failure fires.
+    document.getElementById('score-row').style.display = server ? 'none' : '';
+    document.getElementById('cooldown-group').style.display = server ? 'none' : '';
+    document.getElementById('backup-note').style.display = server ? '' : 'none';
   }
 
   var policySel = document.getElementById('policy_id');
@@ -274,7 +289,7 @@
     var th = parseFloat(threshold.value);
     var options = Array.prototype.slice.call(policySel.options);
     show(current, ''); show(warning, '');
-    if (!options.length) { return; }
+    if (scope.value === 'server' || !options.length) { return; }
 
     if (scope.value === 'all_policies') {
       var scanned = options.filter(function (o) { return scoreOf(o, axis) >= 0; });

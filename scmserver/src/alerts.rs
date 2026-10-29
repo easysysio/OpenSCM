@@ -236,6 +236,39 @@ pub fn summary_line(policy_name: &str, obs: Observation) -> String {
 }
 
 
+/// The trigger of an alert rule on server backups (scope "server"). Only
+/// superusers can create one (alerts_admin.rs); backup_jobs.rs fires it.
+pub const TRIGGER_BACKUP_FAILED: &str = "backup_failed";
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Public: fire_backup_failed
+// Queues a delivery for every action of every enabled backup_failed rule.
+// Each failure fires: a failing backup is rare and each one matters, so
+// there is no cooldown and no edge state.
+// ─────────────────────────────────────────────────────────────────────────────
+pub async fn fire_backup_failed(pool: &SqlitePool, error_text: &str) {
+    let summary = format!("Backup failed: {error_text}");
+    for rule in load_rules(pool, None).await.iter().filter(|r| r.trigger_type == TRIGGER_BACKUP_FAILED) {
+        for act in &rule.actions {
+            if let Err(e) = sqlx::query(
+                "INSERT INTO alert_deliveries
+                    (tenant_id, alert_id, action_id, policy_id, alert_name, policy_name,
+                     old_score, new_score, action, target, status, next_retry_at, event, summary)
+                 VALUES (?, ?, ?, NULL, ?, 'Server backup', 0, 0, ?, ?, 'pending', CURRENT_TIMESTAMP,
+                         'backup.failed', ?)",
+            )
+            .bind(&rule.tenant_id).bind(rule.id).bind(act.id).bind(&rule.name)
+            .bind(&act.action).bind(&act.target).bind(&summary)
+            .execute(pool)
+            .await
+            {
+                error!("Failed to queue {} delivery for alert {}: {}", act.action, rule.id, e);
+            }
+        }
+        info!("Alert '{}' fired: {summary}", rule.name);
+    }
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Public: load_rules
 // Enabled rules for a tenant (or every tenant when `tenant` is None).
@@ -466,6 +499,10 @@ pub async fn evaluate_all(
     }
 
     for rule in &rules {
+        // Event rules (backup_failed) are not about scores.
+        if rule.trigger_type == TRIGGER_BACKUP_FAILED {
+            continue;
+        }
         for (policy_id, now) in after {
             if now.tenant_id != rule.tenant_id || !applies_to(rule, *policy_id) {
                 continue;

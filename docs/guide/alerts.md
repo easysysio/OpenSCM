@@ -81,6 +81,32 @@ correctly.
 
 ---
 
+## Alerts on failed backups
+
+Superusers can also choose **Watch: Server backups**. Such a rule fires each
+time a server backup fails, scheduled or started with **Back up now**
+(Settings → Backup), and goes out through the same actions as any other
+alert. It has no policy, threshold or cooldown: every failure is sent. Only
+superusers can create, change, switch off or delete these rules, because a
+backup covers the whole server.
+
+The webhook body for a failed backup:
+
+```json
+{
+  "version": 1,
+  "event": "backup.failed",
+  "tenant": "default",
+  "server": "scm01",
+  "alert":   { "id": 9, "name": "Backups" },
+  "message": "Backup failed: No backup passphrase is set. ..."
+}
+```
+
+Syslog messages for it use severity *error* and the tag `BACKUP`.
+
+---
+
 ## Delivery
 
 === "Notify in OpenSCM"
@@ -142,6 +168,7 @@ OpenSCM — a silently broken webhook is worse than no webhook.
 |---|---|
 | View alerts and delivery history | Viewer |
 | Create, edit, enable, delete, test | Admin |
+| Rules on server backups | Superuser |
 
 Managing alerts is an administrative action: a rule holds a recipient list and
 a webhook secret, and it makes the server send traffic to an address of your
