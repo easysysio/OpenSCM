@@ -51,6 +51,13 @@
     No. OpenSCM uses **SQLite** embedded in the server binary. No PostgreSQL,
     MySQL, or any other database server is required.
 
+??? question "How do I back up OpenSCM?"
+    Run `scmserver backup set-passphrase` once on the server, then turn on
+    **Settings → Backup** (superusers). Each backup is one encrypted file
+    with the database, the server key pair and the config, taken while the
+    server runs and checked after it is written. Copy the backups folder off
+    the server with your own tools. See [Backup & Restore](guide/backup.md).
+
 ??? question "Do I need a web server like Nginx?"
     Not for basic operation — OpenSCM serves its own web interface. However for
     production deployments we strongly recommend running behind a reverse proxy

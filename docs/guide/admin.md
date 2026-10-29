@@ -271,168 +271,18 @@ Configuration changes require a service restart to take effect.
 The SQLite database is stored at a fixed location:
 
 - **Linux:** `/var/lib/openscm/scm.db`
+- **FreeBSD and macOS:** `/var/db/openscm/scm.db`
 - **Windows:** `C:\ProgramData\OpenSCM\Server\scm.db`
 
 ### Backups
 
-`scmserver backup` writes one encrypted file holding everything the server
-needs to come back as it was: the database, the server key pair and the
-config. It runs while the server is running; there is no need to stop it.
+`scmserver backup` writes one encrypted file with the database, the server
+key pair and the config, while the server runs. **Settings → Backup**
+(superusers) runs it on a schedule, keeps the newest backups and says when
+one fails; `scmserver restore` puts a backup back with the server stopped.
 
-=== "Linux"
-    ```bash
-    sudo scmserver backup
-    ```
-
-=== "Docker"
-    ```bash
-    docker exec -it openscm scmserver backup
-    ```
-
-=== "Windows"
-    ```powershell
-    # From the OpenSCM Server installation directory, as Administrator
-    .\scmserver.exe backup
-    ```
-
-The file is written to `backups/` next to the database (on Linux
-`/var/lib/openscm/backups/openscm-<host>-<time>.oscm-backup`, readable by
-its owner only; on Docker that is on the data volume). `--out` names another
-file or directory.
-
-The backup is encrypted with a passphrase of at least 12 characters, asked
-for when you run the command. For cron jobs, put it in a file only the
-backup user can read and pass `--passphrase-file`, or set
-`OPENSCM_BACKUP_PASSPHRASE`.
-
-!!! warning "Keep the passphrase"
-    Without the passphrase a backup cannot be opened, by you or anyone
-    else. Store it somewhere other than next to the backups — a password
-    manager or a sealed envelope.
-
-Check a backup:
-
-```bash
-sudo scmserver backup verify /var/lib/openscm/backups/openscm-web1-20261029T020000Z.oscm-backup
-```
-
-`verify` decrypts it, checks every file against the checksums inside it and
-the database copy with SQLite's `integrity_check`, and prints the OpenSCM
-version, the counts of organizations, systems, results and saved reports, and
-whether the server key is this server's. It never touches the running
-server.
-
-Copy backups off the server with your own tools (rsync, your backup agent,
-`docker cp`): a backup on the same disk does not survive the disk. The
-OpenSCM web interface never offers backups for download.
-
-### Scheduled Backups
-
-Scheduled backups are set up in **Settings → Backup**, which only
-superusers see. They are off until you turn them on, and until then
-superusers see a reminder on the dashboard.
-
-1. On the server, set the backup passphrase once:
-
-    === "Linux"
-        ```bash
-        sudo scmserver backup set-passphrase
-        ```
-
-    === "Docker"
-        ```bash
-        docker exec -it openscm scmserver backup set-passphrase
-        ```
-
-    === "Windows"
-        ```powershell
-        .\scmserver.exe backup set-passphrase
-        ```
-
-    It is stored in `backup.passphrase` beside the config
-    (`/etc/openscm/backup.passphrase` on Linux), readable by the service
-    account only. The web interface never sets or shows it, so a stolen
-    session cannot choose the key to your backups. Changing it later does
-    not change backups already made: they keep the passphrase they were made
-    with.
-
-2. In **Settings → Backup**, turn on **Back up on a schedule**, set the
-   schedule (a cron expression in UTC; `0 2 * * *` is 02:00 every day) and
-   how many backups to keep, and save.
-
-Each backup is verified right after it is written. Only then are the oldest
-backups in the folder deleted down to the number to keep; a failed backup
-never deletes anything. Backups are written to `backups/` next to the
-database, the same folder as `scmserver backup`.
-
-**Back up now** on the same page starts a backup straight away. The page
-shows the last result, the next scheduled run and the backups in the folder.
-
-When a backup fails, superusers get a notification and a dashboard banner,
-and the audit log records `backup.failed`. To be told by email, webhook or
-syslog as well, create an alert that watches **Server backups**
-([Alerts](alerts.md#alerts-on-failed-backups)). Successful backups are recorded as
-`backup.create`, including ones made on the command line.
-
-`scmserver backup` on the command line also uses the passphrase file when
-no other passphrase is given, which makes it easy to call from your own
-scripts.
-
-### Restoring a Backup
-
-`scmserver restore` puts a backup back: the database and the server key pair,
-and the config with `--include-config`. The server must be stopped; restore
-refuses to run while it is running.
-
-=== "Linux"
-    ```bash
-    sudo systemctl stop scmserver
-    sudo scmserver restore /var/lib/openscm/backups/openscm-web1-20261029T020000Z.oscm-backup
-    sudo systemctl start scmserver
-    ```
-
-=== "Docker"
-    ```bash
-    docker stop openscm
-    docker run --rm -it \
-      -v openscm_data:/var/lib/openscm -v openscm_config:/etc/openscm \
-      openscm/scmserver:latest \
-      scmserver restore /var/lib/openscm/backups/openscm-web1-20261029T020000Z.oscm-backup
-    docker start openscm
-    ```
-
-=== "Windows"
-    ```powershell
-    Stop-Service OpenSCMServer
-    .\scmserver.exe restore C:\ProgramData\OpenSCM\Server\backups\openscm-web1-20261029T020000Z.oscm-backup
-    Start-Service OpenSCMServer
-    ```
-
-Restore checks the backup as `verify` does, shows what it holds, and asks you
-to type `restore` before changing anything (`--yes` skips the question). It
-refuses:
-
-- a backup from a **newer** OpenSCM — install that version or later first.
-  A backup from an **older** OpenSCM is fine: the server upgrades it when it
-  starts, as after a package upgrade.
-- a SaaS backup on a Community or Enterprise server, and the other way round.
-
-The files it replaces are moved to `pre-restore-<time>/` next to the
-database. To undo a restore, stop the server and move them back. Restored
-files keep the owner and permissions of the files they replace, so the
-service account can still read them.
-
-The config is left alone unless you pass `--include-config`: when restoring
-onto a new machine, its TLS paths and addresses usually differ.
-
-After the restore the server key is the backup's. Agents enrolled with that
-server reconnect on their own. Agents that pinned a different key (0.10.4 and
-later) need `scmclient --reset-server-key`. The first start after a restore
-records it in the audit log (`backup.restored`).
-
-!!! tip "Practice a restore"
-    Restore your latest backup onto a spare machine every few months. It is
-    the only proof that the backups and the passphrase work.
+See [Backup & Restore](backup.md) for setting it up, copying backups off the
+server, restoring, moving to a new machine, and practising a restore.
 
 ### One Server per Database
 
@@ -481,15 +331,9 @@ replaced:
   secret and webhook secrets. Until you do, they read as not set, and the
   server log names each one it couldn't read.
 
-=== "Linux"
-    ```bash
-    sudo cp -r /etc/openscm/keys/ /backup/openscm-keys-$(date +%Y%m%d)/
-    ```
-
-=== "Windows"
-    ```powershell
-    Copy-Item "C:\ProgramData\OpenSCM\Server\keys\" "C:\Backup\openscm-keys-$(Get-Date -Format yyyyMMdd)\" -Recurse
-    ```
+Every backup made with `scmserver backup` or **Settings → Backup** holds
+the key pair together with the database
+([Backup & Restore](backup.md)).
 
 !!! danger "Protect Your Keys"
     Server key files should be stored securely with restricted permissions.

@@ -41,6 +41,7 @@ nav:
       - Alerts: guide/alerts.md
       - Scheduler: guide/scheduler.md
       - Admin Settings: guide/admin.md
+      - Backup & Restore: guide/backup.md
       - LDAP Directories: guide/directories.md
       - Single Sign-On: guide/sso.md
       - REST API: guide/api.md
