@@ -6,6 +6,22 @@ All notable changes to OpenSCM are documented here.
 
 ## [Unreleased]
 
+### Added
+- **REST API v1 at `/api/v1`**: the same endpoints, tokens and roles as `/api/v1beta1`, with answers fixed where the beta was awkward (`docs/design/1.0.0-api-v1.md`):
+  - Scores are rounded to 2 decimals, and "not scanned" is `null` instead of `-1`.
+  - Every timestamp is ISO 8601 UTC ending in `Z`, in a field whose name ends in `_at` (`last_seen` is now `last_seen_at`, the audit log's `at` is `created_at`).
+  - `evidence` is a JSON array, not JSON inside a string.
+  - Every live result has `checked_at`, when the server last received it. Running a policy answers with `queued_at` and the systems it reached, so a CI job can wait for results newer than its run.
+  - Policies give both kinds of count, whatever the compliance mode: `systems` (compliant/failing) and `tests` (results passed/failed), plus `scoring_mode`. Tests give `systems` the same way.
+  - Audit `details` is always an object; older plain-text entries come as `{"message": "…"}`.
+  - Every list has a `resume_cursor`: pass it as `cursor` later to get only what was added since.
+  - The live policy report drops the submitter fields, which only apply to saved reports, and adds `generated_at`. Each of its systems carries `system_id`, and its test descriptions say `rationale` (it was misspelt `rational`).
+  - Saved policy reports name the policy's `id`.
+- The API tokens page's example call now uses `/api/v1/me`.
+
+### Deprecated
+- `/api/v1beta1` answers as before, with a `Deprecation: true` header and a `Link` to the migration notes. It will be removed in 1.1.0.
+
 ### Changed
 - Database schema v51, the first step of REST API v1 (`docs/design/1.0.0-api-v1.md`):
   - Policies now store both kinds of pass/fail count, whatever the compliance mode: test results passed and failed, and systems compliant and failing. The existing counts the pages show are unchanged.

@@ -1,5 +1,5 @@
 // =============================================================================
-// api/write.rs — write endpoints of /api/v1beta1
+// api/write.rs — write endpoints of /api/v1 and v1beta1
 //
 // Each does what the matching page button does, through the same shared
 // function (approve_system, delete_system, set_exclusion, the upgrade queue,
@@ -8,7 +8,8 @@
 //   • SaaS plan limits, as the pages enforce them (422 plan_limit);
 //   • an audit-log entry naming the token ({"via": "api", "token": …}).
 // Work that runs later (a scan, an agent upgrade) answers 202 Accepted.
-// See docs/design/0.12.0-rest-api.md, D3, D5 and D6.
+// See docs/design/0.12.0-rest-api.md, D3, D5 and D6. v1 differs only in
+// what a policy run answers (docs/design/1.0.0-api-v1.md, D6).
 // =============================================================================
 
 use axum::extract::{rejection::JsonRejection, Extension, FromRequest, Path, Request};
@@ -18,7 +19,7 @@ use axum::Json;
 use serde::de::DeserializeOwned;
 use serde::Deserialize;
 use serde_json::{json, Value};
-use sqlx::SqlitePool;
+use sqlx::{Row, SqlitePool};
 use tokio::sync::mpsc;
 use tracing::error;
 
@@ -233,6 +234,10 @@ pub async fn exclusion_clear(auth: ApiAuth, Extension(pool): Extension<SqlitePoo
 
 // POST /policies/{id}/run — Runner. Queues the policy's tests on every system
 // in scope (202); results arrive as agents report.
+//
+// v1 also answers when the run was queued and which active systems it
+// reached. A result is from this run once its checked_at >= queued_at: both
+// are whole seconds, and queued_at is taken before anything is queued.
 pub async fn policies_run(auth: ApiAuth, Extension(pool): Extension<SqlitePool>, Path(id): Path<i64>)
     -> Result<Response, ApiError>
 {
@@ -242,9 +247,31 @@ pub async fn policies_run(auth: ApiAuth, Extension(pool): Extension<SqlitePool>,
     if n == 0 {
         return Err(ApiError::not_found("No such policy"));
     }
+    let queued_at = super::shape::now();
     crate::policies::execute_policy_run_logic(id as i32, &pool, &auth.tenant_id).await.map_err(db_err)?;
     audit(&pool, &auth, "policy.run", ("policy", id.to_string()), json!({})).await;
-    Ok(accepted(json!({"policy_id": id, "queued": true})))
+    if !auth.v1() {
+        return Ok(accepted(json!({"policy_id": id, "queued": true})));
+    }
+    let offline = super::read::offline_secs(&pool, &auth.tenant_id).await;
+    let systems: Vec<Value> = sqlx::query(
+        "SELECT DISTINCT s.id, s.name,
+                CASE WHEN s.last_seen IS NOT NULL
+                      AND CAST(strftime('%s','now') AS INTEGER) - CAST(strftime('%s', s.last_seen) AS INTEGER) > ?
+                     THEN 0 ELSE 1 END AS online
+           FROM systems_in_policy sip
+           JOIN systems_in_groups sig ON sig.group_id = sip.group_id AND sig.tenant_id = sip.tenant_id
+           JOIN systems s ON s.id = sig.system_id AND s.tenant_id = sig.tenant_id
+          WHERE sip.tenant_id = ? AND sip.policy_id = ? AND s.status = 'active'
+          ORDER BY s.id")
+        .bind(offline).bind(&auth.tenant_id).bind(id)
+        .fetch_all(&pool).await.map_err(db_err)?
+        .iter().map(|r| json!({
+            "id": r.get::<i64, _>("id"),
+            "name": r.get::<Option<String>, _>("name"),
+            "online": r.get::<i64, _>("online") != 0,
+        })).collect();
+    Ok(accepted(json!({"policy_id": id, "queued_at": queued_at, "systems": systems})))
 }
 
 // POST /policies/import — Editor. The body is a policy export (the format of

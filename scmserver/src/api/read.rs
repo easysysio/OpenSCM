@@ -1,12 +1,14 @@
 // =============================================================================
-// api/read.rs — read endpoints of /api/v1beta1 (Viewer, unless noted)
+// api/read.rs — read endpoints of /api/v1 and v1beta1 (Viewer, unless noted)
 //
 // Systems, groups, tests, policies, compliance, saved reports and the audit
 // log of the token's organization. Lists use cursor pagination (api::Page).
 // Compliance comes from the same functions as the pages, PDFs and saved
 // reports — fetch_system_report_data and fetch_live_policy_report_data — so
 // the API can never compute it differently from what people see.
-// See docs/design/0.12.0-rest-api.md, D3 and D4.
+// See docs/design/0.12.0-rest-api.md, D3 and D4. For /api/v1 each endpoint
+// shapes its answer through api::shape (docs/design/1.0.0-api-v1.md); the
+// v1beta1 answers are unchanged.
 // =============================================================================
 
 use std::collections::HashMap;
@@ -20,6 +22,7 @@ use serde_json::{json, Value};
 use sqlx::{QueryBuilder, Row, Sqlite, SqlitePool};
 use tracing::error;
 
+use super::shape::{self, opt_score, When};
 use super::{iso, page_of, ApiAuth, ApiError, Page};
 use crate::models::UserRole;
 
@@ -54,7 +57,7 @@ pub struct SystemFilter {
 // rule: last check-in within the organization's offline threshold; one that
 // has never checked in is not offline) and the agent upgrade on offer.
 // ─────────────────────────────────────────────────────────────────────────────
-async fn systems_json(pool: &SqlitePool, tenant_id: &str, rows: Vec<sqlx::sqlite::SqliteRow>)
+async fn systems_json(auth: &ApiAuth, pool: &SqlitePool, rows: Vec<sqlx::sqlite::SqliteRow>)
     -> Result<(Vec<Value>, Vec<i64>), ApiError>
 {
     let ids: Vec<i64> = rows.iter().map(|r| r.get::<i64, _>("id")).collect();
@@ -64,7 +67,7 @@ async fn systems_json(pool: &SqlitePool, tenant_id: &str, rows: Vec<sqlx::sqlite
             "SELECT sig.system_id, g.id, g.name FROM systems_in_groups sig
                JOIN system_groups g ON g.id = sig.group_id AND g.tenant_id = sig.tenant_id
               WHERE sig.tenant_id = ");
-        qb.push_bind(tenant_id).push(" AND sig.system_id IN (");
+        qb.push_bind(auth.tenant_id.clone()).push(" AND sig.system_id IN (");
         let mut sep = qb.separated(", ");
         for id in &ids { sep.push_bind(*id); }
         qb.push(") ORDER BY g.name");
@@ -83,7 +86,7 @@ async fn systems_json(pool: &SqlitePool, tenant_id: &str, rows: Vec<sqlx::sqlite
             (Some(v), Some(a), Some(o)) => crate::agents::available_upgrade(&pkgs, v, a, o),
             _ => None,
         };
-        json!({
+        let mut v = json!({
             "id": id,
             "name": r.get::<Option<String>, _>("name"),
             "status": r.get::<Option<String>, _>("status"),
@@ -113,12 +116,20 @@ async fn systems_json(pool: &SqlitePool, tenant_id: &str, rows: Vec<sqlx::sqlite
             },
             "created_at": opt_iso(r.get("created_date")),
             "last_seen": opt_iso(r.get("last_seen")),
-        })
+        });
+        if auth.v1() {
+            v["compliance"]["score"] = json!(opt_score(r.get("compliance_score")));
+            if let Some(o) = v.as_object_mut() {
+                let seen = o.remove("last_seen").unwrap_or(Value::Null);
+                o.insert("last_seen_at".into(), seen);
+            }
+        }
+        v
     }).collect();
     Ok((out, ids))
 }
 
-async fn offline_secs(pool: &SqlitePool, tenant_id: &str) -> i64 {
+pub(super) async fn offline_secs(pool: &SqlitePool, tenant_id: &str) -> i64 {
     sqlx::query_scalar::<_, i64>(
         "SELECT CAST(value AS INTEGER) FROM settings WHERE tenant_id = ? AND skey = 'offline_threshold'")
         .bind(tenant_id).fetch_one(pool).await.unwrap_or(60) * 60
@@ -156,8 +167,8 @@ pub async fn systems_list(auth: ApiAuth, Extension(pool): Extension<SqlitePool>,
     }
     qb.push(" ORDER BY s.id LIMIT ").push_bind(limit + 1);
     let rows = qb.build().fetch_all(&pool).await.map_err(db_err)?;
-    let (data, ids) = systems_json(&pool, &auth.tenant_id, rows).await?;
-    Ok(page_of(data, ids, limit))
+    let (data, ids) = systems_json(&auth, &pool, rows).await?;
+    Ok(page_of(&auth, &page, data, ids, limit))
 }
 
 // GET /systems/{id}
@@ -167,7 +178,7 @@ pub async fn systems_get(auth: ApiAuth, Extension(pool): Extension<SqlitePool>, 
     let mut qb = systems_select(offline_secs(&pool, &auth.tenant_id).await);
     qb.push_bind(auth.tenant_id.clone()).push(" AND s.id = ").push_bind(id);
     let rows = qb.build().fetch_all(&pool).await.map_err(db_err)?;
-    let (mut data, _) = systems_json(&pool, &auth.tenant_id, rows).await?;
+    let (mut data, _) = systems_json(&auth, &pool, rows).await?;
     data.pop().map(Json).ok_or_else(|| ApiError::not_found("No such system"))
 }
 
@@ -180,6 +191,11 @@ pub async fn systems_compliance(auth: ApiAuth, Extension(pool): Extension<Sqlite
     exists(&pool, "systems", &auth.tenant_id, id, "No such system").await?;
     let data = crate::systems::fetch_system_report_data(id as i32, &auth.tenant_id, &pool)
         .await.map_err(db_err)?;
+    if auth.v1() {
+        let checked = shape::Checked::for_system(&pool, &auth.tenant_id, id).await.map_err(db_err)?;
+        let body = shape::system_compliance(data, When::Live(&checked), Some(shape::now()));
+        return Ok(Json(serde_json::to_value(body).map_err(|_| ApiError::internal())?));
+    }
     Ok(Json(serde_json::to_value(data).map_err(|_| ApiError::internal())?))
 }
 
@@ -214,7 +230,7 @@ pub async fn groups_list(auth: ApiAuth, Extension(pool): Extension<SqlitePool>, 
         .bind(&auth.tenant_id).bind(after).bind(limit + 1)
         .fetch_all(&pool).await.map_err(db_err)?;
     let ids = rows.iter().map(|r| r.get::<i64, _>("id")).collect();
-    Ok(page_of(rows.iter().map(group_json).collect(), ids, limit))
+    Ok(page_of(&auth, &page, rows.iter().map(group_json).collect(), ids, limit))
 }
 
 // GET /groups/{id} — with its member systems and the policies it is linked to.
@@ -243,7 +259,18 @@ pub async fn groups_get(auth: ApiAuth, Extension(pool): Extension<SqlitePool>, P
 const TEST_SELECT: &str = "SELECT id, name, description, rational, remediation, severity, filter, app_filter,
         external_id, compliance_score, systems_passed, systems_failed FROM tests WHERE tenant_id = ?";
 
-fn test_json(r: &sqlx::sqlite::SqliteRow) -> Value {
+fn test_json(r: &sqlx::sqlite::SqliteRow, v1: bool) -> Value {
+    if v1 {
+        let mut v = test_json(r, false);
+        v["compliance"] = json!({
+            "score": opt_score(r.get("compliance_score")),
+            "systems": {
+                "passed": r.get::<Option<i64>, _>("systems_passed"),
+                "failed": r.get::<Option<i64>, _>("systems_failed"),
+            },
+        });
+        return v;
+    }
     json!({
         "id": r.get::<i64, _>("id"),
         "name": r.get::<String, _>("name"),
@@ -271,7 +298,7 @@ pub async fn tests_list(auth: ApiAuth, Extension(pool): Extension<SqlitePool>, Q
         .bind(&auth.tenant_id).bind(after).bind(limit + 1)
         .fetch_all(&pool).await.map_err(db_err)?;
     let ids = rows.iter().map(|r| r.get::<i64, _>("id")).collect();
-    Ok(page_of(rows.iter().map(test_json).collect(), ids, limit))
+    Ok(page_of(&auth, &page, rows.iter().map(|r| test_json(r, auth.v1())).collect(), ids, limit))
 }
 
 // GET /tests/{id} — with its conditions and applicability conditions.
@@ -281,7 +308,7 @@ pub async fn tests_get(auth: ApiAuth, Extension(pool): Extension<SqlitePool>, Pa
     let row = sqlx::query(&format!("{TEST_SELECT} AND id = ?"))
         .bind(&auth.tenant_id).bind(id).fetch_optional(&pool).await.map_err(db_err)?
         .ok_or_else(|| ApiError::not_found("No such test"))?;
-    let mut t = test_json(&row);
+    let mut t = test_json(&row, auth.v1());
     let conds = sqlx::query(
         "SELECT `type`, element, input, selement, condition, sinput FROM test_conditions
           WHERE tenant_id = ? AND test_id = ? ORDER BY id")
@@ -309,9 +336,38 @@ pub async fn tests_get(auth: ApiAuth, Extension(pool): Extension<SqlitePool>, Pa
 // ── Policies ─────────────────────────────────────────────────────────────────
 
 const POLICY_SELECT: &str = "SELECT id, name, description, version, author, external_id, compliance_score,
-        score_test, score_system, score_container, systems_passed, systems_failed FROM policies WHERE tenant_id = ?";
+        score_test, score_system, score_container, systems_passed, systems_failed,
+        tests_passed, tests_failed, compliant_systems, failing_systems FROM policies WHERE tenant_id = ?";
 
-fn policy_json(r: &sqlx::sqlite::SqliteRow) -> Value {
+// The organization's compliance mode (Settings → Compliance): "test" or "system".
+async fn scoring_mode(pool: &SqlitePool, tenant_id: &str) -> String {
+    let m: Option<String> = sqlx::query_scalar(
+        "SELECT value FROM settings WHERE tenant_id = ? AND skey = 'policy_compliance_mode'")
+        .bind(tenant_id).fetch_optional(pool).await.ok().flatten();
+    if m.as_deref() == Some("system") { "system".into() } else { "test".into() }
+}
+
+// `mode` is Some for v1: both kinds of count, whatever the mode (design D7).
+fn policy_json(r: &sqlx::sqlite::SqliteRow, mode: Option<&str>) -> Value {
+    if let Some(mode) = mode {
+        let mut v = policy_json(r, None);
+        v["compliance"] = json!({
+            "score": opt_score(r.get("compliance_score")),
+            "score_by_test": opt_score(r.get("score_test")),
+            "score_by_system": opt_score(r.get("score_system")),
+            "score_by_container": opt_score(r.get("score_container")),
+            "scoring_mode": mode,
+            "systems": {
+                "passed": r.get::<Option<i64>, _>("compliant_systems"),
+                "failed": r.get::<Option<i64>, _>("failing_systems"),
+            },
+            "tests": {
+                "passed": r.get::<Option<i64>, _>("tests_passed"),
+                "failed": r.get::<Option<i64>, _>("tests_failed"),
+            },
+        });
+        return v;
+    }
     json!({
         "id": r.get::<i64, _>("id"),
         "name": r.get::<String, _>("name"),
@@ -339,7 +395,8 @@ pub async fn policies_list(auth: ApiAuth, Extension(pool): Extension<SqlitePool>
         .bind(&auth.tenant_id).bind(after).bind(limit + 1)
         .fetch_all(&pool).await.map_err(db_err)?;
     let ids = rows.iter().map(|r| r.get::<i64, _>("id")).collect();
-    Ok(page_of(rows.iter().map(policy_json).collect(), ids, limit))
+    let mode = if auth.v1() { Some(scoring_mode(&pool, &auth.tenant_id).await) } else { None };
+    Ok(page_of(&auth, &page, rows.iter().map(|r| policy_json(r, mode.as_deref())).collect(), ids, limit))
 }
 
 // GET /policies/{id} — with its tests and the groups it applies to.
@@ -349,7 +406,8 @@ pub async fn policies_get(auth: ApiAuth, Extension(pool): Extension<SqlitePool>,
     let row = sqlx::query(&format!("{POLICY_SELECT} AND id = ?"))
         .bind(&auth.tenant_id).bind(id).fetch_optional(&pool).await.map_err(db_err)?
         .ok_or_else(|| ApiError::not_found("No such policy"))?;
-    let mut p = policy_json(&row);
+    let mode = if auth.v1() { Some(scoring_mode(&pool, &auth.tenant_id).await) } else { None };
+    let mut p = policy_json(&row, mode.as_deref());
     p["tests"] = json!(sqlx::query(
         "SELECT t.id, t.name, t.severity FROM tests_in_policy tp JOIN tests t ON t.id = tp.test_id AND t.tenant_id = tp.tenant_id
           WHERE tp.tenant_id = ? AND tp.policy_id = ? ORDER BY t.id")
@@ -372,6 +430,11 @@ pub async fn policies_compliance(auth: ApiAuth, Extension(pool): Extension<Sqlit
     let data = crate::policies::fetch_live_policy_report_data(&pool, &auth.tenant_id, &auth.username, id)
         .await.map_err(db_err)?
         .ok_or_else(|| ApiError::not_found("No such policy"))?;
+    if auth.v1() {
+        let checked = shape::Checked::for_policy(&pool, &auth.tenant_id, id).await.map_err(db_err)?;
+        let body = shape::policy_compliance(data, &checked);
+        return Ok(Json(serde_json::to_value(body).map_err(|_| ApiError::internal())?));
+    }
     Ok(Json(serde_json::to_value(data).map_err(|_| ApiError::internal())?))
 }
 
@@ -393,10 +456,10 @@ pub async fn reports_list(auth: ApiAuth, Extension(pool): Extension<SqlitePool>,
     let (after, limit) = (page.after()?, page.limit());
     let (sql, policy) = match kind_of(&kind)? {
         "policy" => ("SELECT id, CAST(submission_date AS TEXT) AS d, policy_name AS name, policy_version AS v,
-                             submitter_name AS who, NULL AS sid
+                             submitter_name AS who, NULL AS sid, policy_id AS pid
                         FROM reports WHERE tenant_id = ? AND id > ? ORDER BY id LIMIT ?", true),
         _ => ("SELECT id, CAST(submission_date AS TEXT) AS d, system_name AS name, NULL AS v,
-                      submitter_name AS who, system_id AS sid
+                      submitter_name AS who, system_id AS sid, NULL AS pid
                  FROM system_reports WHERE tenant_id = ? AND id > ? ORDER BY id LIMIT ?", false),
     };
     let rows = sqlx::query(sql).bind(&auth.tenant_id).bind(after).bind(limit + 1)
@@ -411,12 +474,15 @@ pub async fn reports_list(auth: ApiAuth, Extension(pool): Extension<SqlitePool>,
         });
         if policy {
             v["policy"] = json!({"name": r.get::<Option<String>, _>("name"), "version": r.get::<Option<String>, _>("v")});
+            if auth.v1() {
+                v["policy"]["id"] = json!(r.get::<Option<i64>, _>("pid"));
+            }
         } else {
             v["system"] = json!({"id": r.get::<Option<i64>, _>("sid"), "name": r.get::<Option<String>, _>("name")});
         }
         v
     }).collect();
-    Ok(page_of(data, ids, limit))
+    Ok(page_of(&auth, &page, data, ids, limit))
 }
 
 // GET /reports/{policy|system}/{id} — one saved snapshot, as saved.
@@ -427,6 +493,20 @@ pub async fn reports_get(auth: ApiAuth, Extension(pool): Extension<SqlitePool>, 
         let (report, systems, tests) = crate::reports::fetch_archive_policy_report(&pool, &auth.tenant_id, id)
             .await.map_err(db_err)?
             .ok_or_else(|| ApiError::not_found("No such report"))?;
+        if auth.v1() {
+            let policy_id: Option<i64> = sqlx::query_scalar("SELECT policy_id FROM reports WHERE id = ? AND tenant_id = ?")
+                .bind(id).bind(&auth.tenant_id).fetch_one(&pool).await.map_err(db_err)?;
+            return Ok(Json(json!({
+                "id": report.id,
+                "kind": "policy",
+                "saved_at": iso(&report.submission_date),
+                "saved_by": report.submitter_name,
+                "policy": {"id": policy_id, "name": report.policy_name, "version": report.policy_version,
+                           "description": report.policy_description},
+                "tests": shape::test_meta(tests),
+                "systems": systems.into_iter().map(|s| shape::system_report(s, When::Saved)).collect::<Vec<_>>(),
+            })));
+        }
         return Ok(Json(json!({
             "id": report.id,
             "kind": "policy",
@@ -442,8 +522,17 @@ pub async fn reports_get(auth: ApiAuth, Extension(pool): Extension<SqlitePool>, 
            FROM system_reports WHERE id = ? AND tenant_id = ?")
         .bind(id).bind(&auth.tenant_id).fetch_optional(&pool).await.map_err(db_err)?
         .ok_or_else(|| ApiError::not_found("No such report"))?;
-    let data: Value = serde_json::from_str(row.get::<Option<String>, _>("report_data").as_deref().unwrap_or("{}"))
-        .unwrap_or(Value::Null);
+    let raw = row.get::<Option<String>, _>("report_data");
+    let data: Value = if auth.v1() {
+        // Snapshots from every release deserialise (serde defaults); one that
+        // does not is served as null rather than failing the request.
+        raw.as_deref()
+            .and_then(|r| serde_json::from_str::<crate::models::SystemReportData>(r).ok())
+            .map(|d| json!(shape::system_compliance(d, When::Saved, None)))
+            .unwrap_or(Value::Null)
+    } else {
+        serde_json::from_str(raw.as_deref().unwrap_or("{}")).unwrap_or(Value::Null)
+    };
     Ok(Json(json!({
         "id": row.get::<i64, _>("id"),
         "kind": "system",
@@ -519,6 +608,17 @@ pub async fn audit_log(auth: ApiAuth, Extension(pool): Extension<SqlitePool>, Qu
     let ids = rows.iter().map(|r| r.get::<i64, _>("id")).collect();
     let data = rows.iter().map(|r| {
         let details: Option<String> = r.get("details");
+        if auth.v1() {
+            return json!({
+                "id": r.get::<i64, _>("id"),
+                "created_at": opt_iso(r.get("at")),
+                "actor": {"id": r.get::<Option<i64>, _>("actor_user_id"), "username": r.get::<String, _>("actor_username")},
+                "action": r.get::<String, _>("action"),
+                "target": {"type": r.get::<Option<String>, _>("target_type"), "id": r.get::<Option<String>, _>("target_id")},
+                "details": shape::audit_details(details),
+                "ip": r.get::<Option<String>, _>("ip_address"),
+            });
+        }
         json!({
             "id": r.get::<i64, _>("id"),
             "at": opt_iso(r.get("at")),
@@ -530,5 +630,5 @@ pub async fn audit_log(auth: ApiAuth, Extension(pool): Extension<SqlitePool>, Qu
             "ip": r.get::<Option<String>, _>("ip_address"),
         })
     }).collect();
-    Ok(page_of(data, ids, limit))
+    Ok(page_of(&auth, &page, data, ids, limit))
 }

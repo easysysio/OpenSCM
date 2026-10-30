@@ -1,8 +1,14 @@
 // =============================================================================
-// api/mod.rs — the REST API, /api/v1beta1
+// api/mod.rs — the REST API, /api/v1 (and /api/v1beta1 until 1.1.0)
 //
 // Token-authenticated JSON for integrations: CI jobs, dashboards, SIEMs. The
-// design and its decisions are in docs/design/0.12.0-rest-api.md.
+// design and its decisions are in docs/design/0.12.0-rest-api.md (v1beta1)
+// and docs/design/1.0.0-api-v1.md (v1).
+//
+// Both versions serve the same routes and the same handlers. A handler asks
+// `auth.v1()` and, for v1 only, shapes its answer through api::shape; the
+// v1beta1 answers are left exactly as 0.12.0 shipped them, plus a
+// Deprecation header.
 //
 //   • ApiAuth   — the extractor every endpoint takes. Reads
 //                 `Authorization: Bearer oscm_api_…` (never the session
@@ -32,9 +38,29 @@ use crate::models::{AuthSession, UserRole};
 use crate::rate_limit::Limiter;
 
 pub mod read;
+pub mod shape;
 pub mod write;
 
-pub const PREFIX: &str = "/api/v1beta1";
+pub const PREFIX: &str = "/api/v1";
+pub const PREFIX_BETA: &str = "/api/v1beta1";
+
+// Where v1beta1 responses point (Link header): the migration notes.
+pub const MIGRATION_URL: &str = "https://openscm.io/guide/api/#moving-from-v1beta1";
+
+// ─────────────────────────────────────────────────────────────────────────────
+// ApiVersion — which prefix the request came in on.
+// ─────────────────────────────────────────────────────────────────────────────
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ApiVersion {
+    V1beta1,
+    V1,
+}
+
+impl ApiVersion {
+    pub fn of_path(path: &str) -> Self {
+        if path == PREFIX || path.starts_with(&format!("{PREFIX}/")) { ApiVersion::V1 } else { ApiVersion::V1beta1 }
+    }
+}
 pub const TOKEN_PREFIX: &str = "oscm_api_";
 
 // 600 requests a minute per token; past that, refused for the rest of a minute.
@@ -116,9 +142,15 @@ pub struct ApiAuth {
     /// The token's role, lowered to the owner's current role if that is less.
     pub role: UserRole,
     pub ip: String,
+    pub version: ApiVersion,
 }
 
 impl ApiAuth {
+    // True for /api/v1: the handler answers in the v1 shape.
+    pub fn v1(&self) -> bool {
+        self.version == ApiVersion::V1
+    }
+
     // ─────────────────────────────────────────────────────────────────────────
     // require — 403 unless the effective role reaches `min`.
     // ─────────────────────────────────────────────────────────────────────────
@@ -232,7 +264,7 @@ where
         }
 
         // The effective role: the token's, lowered to the owner's current role,
-        // and never above Admin (no platform-wide API in v1beta1).
+        // and never above Admin (no platform-wide API).
         let owner = UserRole::from(t.user_role.as_deref().unwrap_or("viewer"));
         let token_role = UserRole::from(t.role.as_str());
         let role = token_role.min(owner).min(UserRole::Admin);
@@ -267,12 +299,13 @@ where
             username: t.username,
             role,
             ip,
+            version: ApiVersion::of_path(parts.uri.path()),
         })
     }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// GET /api/v1beta1/me — who this token acts as. The first call to make when
+// GET /api/v1/me — who this token acts as. The first call to make when
 // setting up an integration.
 // ─────────────────────────────────────────────────────────────────────────────
 async fn me(auth: ApiAuth) -> Json<serde_json::Value> {
@@ -325,8 +358,14 @@ impl Page {
 // ─────────────────────────────────────────────────────────────────────────────
 // Helper: page_of — {"data": [...], "next_cursor": …} from up to limit+1 rows
 // fetched in id order: the extra row only says whether there is a next page.
+//
+// v1 adds "resume_cursor" (design D9): always present, the cursor after the
+// last row returned — or the request's own cursor when the page is empty —
+// so a poller saves it and later gets only the rows added since.
 // ─────────────────────────────────────────────────────────────────────────────
-pub fn page_of(mut rows: Vec<serde_json::Value>, ids: Vec<i64>, limit: i64) -> Json<serde_json::Value> {
+pub fn page_of(auth: &ApiAuth, page: &Page, mut rows: Vec<serde_json::Value>, ids: Vec<i64>, limit: i64)
+    -> Json<serde_json::Value>
+{
     use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine as _};
     let more = rows.len() as i64 > limit;
     rows.truncate(limit as usize);
@@ -335,7 +374,15 @@ pub fn page_of(mut rows: Vec<serde_json::Value>, ids: Vec<i64>, limit: i64) -> J
     } else {
         None
     };
-    Json(json!({"data": rows, "next_cursor": next}))
+    if !auth.v1() {
+        return Json(json!({"data": rows, "next_cursor": next}));
+    }
+    let resume = match rows.len().checked_sub(1).and_then(|i| ids.get(i)) {
+        Some(last) => URL_SAFE_NO_PAD.encode(last.to_string()),
+        None => page.cursor.clone().filter(|c| !c.is_empty())
+            .unwrap_or_else(|| URL_SAFE_NO_PAD.encode("0")),
+    };
+    Json(json!({"data": rows, "next_cursor": next, "resume_cursor": resume}))
 }
 
 // Any other path under /api: a JSON 404 rather than the HTML one.
@@ -344,10 +391,36 @@ async fn not_found() -> ApiError {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// router — every API route, merged into create_core_router.
+// Helper: deprecated — marks every v1beta1 response (design D1): a
+// Deprecation header and a Link to the migration notes.
+// ─────────────────────────────────────────────────────────────────────────────
+async fn deprecated(mut resp: Response) -> Response {
+    let h = resp.headers_mut();
+    h.insert("deprecation", HeaderValue::from_static("true"));
+    if let Ok(v) = HeaderValue::from_str(&format!("<{MIGRATION_URL}>; rel=\"deprecation\"")) {
+        h.insert(axum::http::header::LINK, v);
+    }
+    resp
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// router — every API route, merged into create_core_router: the route list
+// below under /api/v1, and again under /api/v1beta1 with the Deprecation
+// header. tests/api_spec.rs reads the `.route(&p(…))` calls in this file
+// after `pub fn router`, so keep routes() below it.
 // ─────────────────────────────────────────────────────────────────────────────
 pub fn router<S: Clone + Send + Sync + 'static>() -> Router<S> {
-    let p = |path: &str| format!("{PREFIX}{path}");
+    Router::new()
+        .merge(routes(PREFIX))
+        .merge(routes(PREFIX_BETA).layer(axum::middleware::map_response(deprecated)))
+        .route("/api/{*rest}", axum::routing::any(not_found))
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// routes — the API's routes under one version prefix.
+// ─────────────────────────────────────────────────────────────────────────────
+fn routes<S: Clone + Send + Sync + 'static>(prefix: &str) -> Router<S> {
+    let p = |path: &str| format!("{prefix}{path}");
     Router::new()
         .route(&p("/me"), get(me))
         .route(&p("/systems"), get(read::systems_list))
@@ -371,7 +444,6 @@ pub fn router<S: Clone + Send + Sync + 'static>() -> Router<S> {
         .route(&p("/reports/{kind}/{id}"), get(read::reports_get))
         .route(&p("/reports/{kind}/{id}/pdf"), get(read::reports_pdf))
         .route(&p("/audit-log"), get(read::audit_log))
-        .route("/api/{*rest}", axum::routing::any(not_found))
 }
 
 #[cfg(test)]
@@ -386,6 +458,13 @@ mod tests {
         assert!(raw.starts_with(&prefix) && prefix.len() < raw.len());
         assert_eq!(hash, hash_token(&raw));
         assert_ne!(generate_token().0, raw);
+    }
+
+    #[test]
+    fn the_version_comes_from_the_prefix() {
+        assert_eq!(ApiVersion::of_path("/api/v1/systems"), ApiVersion::V1);
+        assert_eq!(ApiVersion::of_path("/api/v1"), ApiVersion::V1);
+        assert_eq!(ApiVersion::of_path("/api/v1beta1/systems"), ApiVersion::V1beta1);
     }
 
     #[test]
