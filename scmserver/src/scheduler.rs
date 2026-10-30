@@ -235,6 +235,8 @@ async fn update_system_stats(
 //   • "test"   — % of individual test results that passed
 //                (total PASS / (PASS + FAIL)). systems_passed/_failed = total
 //                PASS / FAIL TESTS. (default)
+//   tests_passed/_failed and compliant_/failing_systems hold both kinds of
+//   count in either mode, for the REST API (schema v51).
 // Both derive from one per-system aggregation (passes/fails per system); the
 // mode is read per policy's tenant via a correlated settings lookup, so a
 // single statement handles a fleet of mixed-mode tenants. Column names retained
@@ -295,6 +297,11 @@ async fn update_policy_stats(
                     ELSE COALESCE(SUM(fails), 0) END
                 FROM ({ps}) sub
             ),
+            -- Both kinds of count, whatever the mode (REST API v1, schema v51).
+            tests_passed      = (SELECT COALESCE(SUM(passes), 0) FROM ({ps}) sub),
+            tests_failed      = (SELECT COALESCE(SUM(fails), 0)  FROM ({ps}) sub),
+            compliant_systems = (SELECT COUNT(CASE WHEN passes > 0 AND fails = 0 THEN 1 END) FROM ({ps}) sub),
+            failing_systems   = (SELECT COUNT(CASE WHEN fails > 0 THEN 1 END) FROM ({ps}) sub),
             score_test = (
                 SELECT CASE WHEN COALESCE(SUM(passes),0) + COALESCE(SUM(fails),0) = 0 THEN -1.0
                             ELSE CAST(SUM(passes) AS REAL) * 100 / (SUM(passes) + SUM(fails)) END

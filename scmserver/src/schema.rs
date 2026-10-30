@@ -302,6 +302,10 @@ async fn create_tables(pool: &SqlitePool) -> Result<(), sqlx::Error> {
             score_container REAL DEFAULT -1.0,
             systems_passed INTEGER DEFAULT 0,
             systems_failed INTEGER DEFAULT 0,
+            tests_passed INTEGER DEFAULT 0,
+            tests_failed INTEGER DEFAULT 0,
+            compliant_systems INTEGER DEFAULT 0,
+            failing_systems INTEGER DEFAULT 0,
             FOREIGN KEY (tenant_id) REFERENCES tenants (id) ON DELETE CASCADE
         )",
     )
@@ -520,6 +524,7 @@ async fn create_tables(pool: &SqlitePool) -> Result<(), sqlx::Error> {
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             tenant_id VARCHAR(191) NOT NULL DEFAULT 'default',
             submission_date DATETIME DEFAULT CURRENT_TIMESTAMP,
+            policy_id INTEGER,
             policy_name TEXT NOT NULL,
             policy_version TEXT,
             policy_description TEXT,
@@ -967,7 +972,7 @@ pub async fn seed_plan_limits(pool: &SqlitePool) -> Result<(), sqlx::Error> {
 // a higher version was migrated by a newer OpenSCM, and this build refuses
 // to run on it rather than write to tables it does not understand.
 // ─────────────────────────────────────────────────────────────────────────────
-pub const SCHEMA_VERSION: i64 = 50;
+pub const SCHEMA_VERSION: i64 = 51;
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Helper: run_migrations
@@ -3113,6 +3118,43 @@ async fn run_migrations_on(pool: &SqlitePool) -> Result<(), sqlx::Error> {
         }
         sqlx::query("UPDATE schema_info SET version = 50").execute(pool).await?;
         info!("Schema migration v49 → v50 complete.");
+    }
+
+    // v50 → v51: counts and ids for REST API v1 (docs/design/1.0.0-api-v1.md).
+    //   • policies.tests_passed/_failed and compliant_/failing_systems: both
+    //     kinds of count, whatever the compliance mode. systems_passed/_failed
+    //     keep their mode-dependent meaning for the pages. Filled by the
+    //     startup recalculation.
+    //   • reports.policy_id: which policy a saved report is of. No foreign key:
+    //     deleting a policy must not touch its saved reports, and ids are
+    //     never reused (AUTOINCREMENT). Old reports get the id only where
+    //     exactly one policy in the organization has that name.
+    if version < 51 {
+        info!("Running schema migration v50 → v51 (API v1 counts and report policy ids)...");
+        if table_exists(pool, "policies").await {
+            for col in ["tests_passed", "tests_failed", "compliant_systems", "failing_systems"] {
+                if !column_exists(pool, "policies", col).await {
+                    sqlx::query(&format!("ALTER TABLE policies ADD COLUMN {col} INTEGER DEFAULT 0"))
+                        .execute(pool).await?;
+                }
+            }
+        }
+        if table_exists(pool, "reports").await && table_exists(pool, "policies").await {
+            if !column_exists(pool, "reports", "policy_id").await {
+                sqlx::query("ALTER TABLE reports ADD COLUMN policy_id INTEGER").execute(pool).await?;
+            }
+            sqlx::query(
+                "UPDATE reports SET policy_id = (
+                     SELECT p.id FROM policies p
+                      WHERE p.tenant_id = reports.tenant_id AND p.name = reports.policy_name)
+                  WHERE policy_id IS NULL
+                    AND (SELECT COUNT(*) FROM policies p
+                          WHERE p.tenant_id = reports.tenant_id AND p.name = reports.policy_name) = 1",
+            )
+            .execute(pool).await?;
+        }
+        sqlx::query("UPDATE schema_info SET version = 51").execute(pool).await?;
+        info!("Schema migration v50 → v51 complete.");
     }
 
     Ok(())

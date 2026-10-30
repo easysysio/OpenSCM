@@ -6,6 +6,11 @@ All notable changes to OpenSCM are documented here.
 
 ## [Unreleased]
 
+### Changed
+- Database schema v51, the first step of REST API v1 (`docs/design/1.0.0-api-v1.md`):
+  - Policies now store both kinds of pass/fail count, whatever the compliance mode: test results passed and failed, and systems compliant and failing. The existing counts the pages show are unchanged.
+  - A saved policy report records which policy it is of. Reports saved before this upgrade get the policy's id when exactly one policy in the organization has that name.
+
 ---
 
 ## [0.13.0] - 2026-10-29

@@ -248,11 +248,12 @@ pub async fn save_policy_report(
     // Save report
     let saved = sqlx::query(r#"
         INSERT INTO reports
-            (tenant_id, policy_name, policy_version, policy_description,
+            (tenant_id, policy_id, policy_name, policy_version, policy_description,
              submitter_name, tests_metadata, report_results)
-        VALUES (?, ?, ?, ?, ?, ?, ?)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
     "#)
     .bind(tenant_id)
+    .bind(id)
     .bind(policy_row.get::<String, _>("name"))
     .bind(policy_row.get::<String, _>("version"))
     .bind(policy_row.get::<Option<String>, _>("description"))
