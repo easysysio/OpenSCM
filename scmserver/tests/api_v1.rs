@@ -55,7 +55,7 @@ async fn fixture() -> Fx {
         "INSERT INTO systems_in_groups (tenant_id, system_id, group_id) VALUES ('acme', 1, 1), ('acme', 2, 1), ('acme', 3, 1)",
         "INSERT INTO tests (id, tenant_id, name, severity, rational) VALUES
             (5, 'acme', 'ssh root login', 'high', 'Root over SSH is a shared account'),
-            (6, 'acme', 'firewall', 'high', NULL), (7, 'acme', 'auditd', 'medium', NULL)",
+            (6, 'acme', 'firewall', 'high', NULL), (7, 'acme', 'auditd', 'medium', '')",
         "INSERT INTO policies (id, tenant_id, name, version, description) VALUES (7, 'acme', 'CIS', '1', 'Baseline')",
         "INSERT INTO tests_in_policy (tenant_id, policy_id, test_id) VALUES ('acme', 7, 5), ('acme', 7, 6), ('acme', 7, 7)",
         "INSERT INTO systems_in_policy (tenant_id, policy_id, group_id) VALUES ('acme', 7, 1)",
@@ -358,6 +358,50 @@ async fn saved_policy_reports_name_their_policy() {
     let one = v1(&fx, "viewer", &format!("/reports/policy/{}", fx.policy_report)).await;
     assert_eq!(one["policy"]["id"], 7);
     assert!(one["tests"][0].get("rationale").is_some(), "{one}");
+}
+
+// The compliance answer's last_seen_at is to the second, as on /systems/{id};
+// the report data it is built from holds it to the minute.
+#[tokio::test]
+async fn the_compliance_answer_gives_last_seen_to_the_second() {
+    let fx = fixture().await;
+    sqlx::query("UPDATE systems SET last_seen = strftime('%Y-%m-%d %H:%M:42', 'now', '-1 minutes') WHERE id = 1")
+        .execute(&fx.pool).await.unwrap();
+    let sys = v1(&fx, "viewer", "/systems/1").await;
+    assert!(sys["last_seen_at"].as_str().unwrap().ends_with(":42Z"), "{sys}");
+    assert_eq!(v1(&fx, "viewer", "/systems/1/compliance").await["last_seen_at"], sys["last_seen_at"]);
+    assert!(beta(&fx, "viewer", "/systems/1/compliance").await["last_seen"].as_str().unwrap().ends_with("UTC"),
+            "the beta keeps the page's text");
+}
+
+// Empty test text is null in every v1 answer, whether stored as NULL (test 6)
+// or "" (test 7); text that is there is kept (test 5).
+#[tokio::test]
+async fn empty_test_text_is_null_everywhere() {
+    let fx = fixture().await;
+    let empty = |t: &Value| ["description", "rationale", "remediation"].iter().all(|k| t[*k].is_null());
+    for id in [6, 7] {
+        let t = v1(&fx, "viewer", &format!("/tests/{id}")).await;
+        assert!(empty(&t), "{t}");
+    }
+    assert_eq!(v1(&fx, "viewer", "/tests/5").await["rationale"], "Root over SSH is a shared account");
+    for t in v1(&fx, "viewer", "/tests").await["data"].as_array().unwrap() {
+        assert_eq!(empty(t), t["id"] != 5, "{t}");
+    }
+    let live = v1(&fx, "viewer", "/policies/7/compliance").await["tests_metadata"].clone();
+    let saved = v1(&fx, "viewer", &format!("/reports/policy/{}", fx.policy_report)).await["tests"].clone();
+    for metas in [live, saved] {
+        let metas = metas.as_array().unwrap();
+        assert_eq!(metas.len(), 3);
+        for m in metas {
+            if m["name"] == "ssh root login" {
+                assert_eq!(m["rationale"], "Root over SSH is a shared account");
+            } else {
+                assert!(empty(m), "{m}");
+            }
+        }
+    }
+    assert_eq!(beta(&fx, "viewer", "/tests/7").await["rationale"], "", "the beta passes the stored value through");
 }
 
 #[tokio::test]

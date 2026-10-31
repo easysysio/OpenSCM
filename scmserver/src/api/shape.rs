@@ -40,6 +40,14 @@ pub fn opt_score(v: Option<f64>) -> Option<f64> {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Helper: text — optional free text, None when absent or blank, so an empty
+// test description is null whether it was stored as NULL or as "".
+// ─────────────────────────────────────────────────────────────────────────────
+pub fn text(v: Option<String>) -> Option<String> {
+    v.filter(|s| !s.trim().is_empty())
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Helper: timestamp — any format OpenSCM has stored a UTC time in, as
 // "YYYY-MM-DDTHH:MM:SSZ". None for empty or unreadable values.
 // ─────────────────────────────────────────────────────────────────────────────
@@ -284,14 +292,17 @@ pub fn system_compliance(d: SystemReportData, when: When, generated_at: Option<S
 #[derive(Serialize)]
 pub struct TestMetaV1 {
     pub name: String,
-    pub description: String,
-    pub rationale: String,
-    pub remediation: String,
+    pub description: Option<String>,
+    pub rationale: Option<String>,
+    pub remediation: Option<String>,
 }
 
 pub fn test_meta(t: Vec<TestMeta>) -> Vec<TestMetaV1> {
     t.into_iter().map(|t| TestMetaV1 {
-        name: t.name, description: t.description, rationale: t.rational, remediation: t.remediation,
+        name: t.name,
+        description: text(Some(t.description)),
+        rationale: text(Some(t.rational)),
+        remediation: text(Some(t.remediation)),
     }).collect()
 }
 

@@ -300,7 +300,7 @@ The response, shortened:
   "system_id": 2,
   "system_name": "web-02",
   "generated_at": "2026-10-31T12:28:27Z",
-  "last_seen_at": "2026-10-31T12:27:00Z",
+  "last_seen_at": "2026-10-31T12:27:12Z",
   "compliance_score": 66.67,
   "total_pass": 2, "total_fail": 1, "total_na": 0,
   "policy_groups": [{
@@ -662,6 +662,7 @@ list; anything not in it is unchanged.
 | `GET /policies/{id}/compliance` | `submitter_name`, `submission_date` (meaningless on a live report) | Dropped; adds `generated_at`, and `system_id` on each system and result |
 | `GET /systems/{id}/compliance` | — | Adds `generated_at`, and `system_id` on each result |
 | Test descriptions in reports | `rational` | `rationale` |
+| Empty `description`, `rationale`, `remediation` of a test | `null` or `""`, depending on how the test was saved | Always `null` |
 | Saved policy reports | `policy: {name, version}` | Also `policy.id` |
 
 Every `/api/v1beta1` answer carries `Deprecation: true` and a `Link` header

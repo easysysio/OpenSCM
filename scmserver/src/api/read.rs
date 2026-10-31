@@ -193,7 +193,13 @@ pub async fn systems_compliance(auth: ApiAuth, Extension(pool): Extension<Sqlite
         .await.map_err(db_err)?;
     if auth.v1() {
         let checked = shape::Checked::for_system(&pool, &auth.tenant_id, id).await.map_err(db_err)?;
-        let body = shape::system_compliance(data, When::Live(&checked), Some(shape::now()));
+        let mut body = shape::system_compliance(data, When::Live(&checked), Some(shape::now()));
+        // The report data holds last_seen as page text, to the minute; the
+        // live answer gives it to the second, as GET /systems/{id} does.
+        let seen: Option<String> = sqlx::query_scalar(
+            "SELECT CAST(last_seen AS TEXT) FROM systems WHERE id = ? AND tenant_id = ?")
+            .bind(id).bind(&auth.tenant_id).fetch_one(&pool).await.map_err(db_err)?;
+        body.last_seen_at = shape::opt_timestamp(seen.as_deref());
         return Ok(Json(serde_json::to_value(body).map_err(|_| ApiError::internal())?));
     }
     Ok(Json(serde_json::to_value(data).map_err(|_| ApiError::internal())?))
@@ -262,6 +268,9 @@ const TEST_SELECT: &str = "SELECT id, name, description, rational, remediation, 
 fn test_json(r: &sqlx::sqlite::SqliteRow, v1: bool) -> Value {
     if v1 {
         let mut v = test_json(r, false);
+        for (key, col) in [("description", "description"), ("rationale", "rational"), ("remediation", "remediation")] {
+            v[key] = json!(shape::text(r.get::<Option<String>, _>(col)));
+        }
         v["compliance"] = json!({
             "score": opt_score(r.get("compliance_score")),
             "systems": {

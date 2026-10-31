@@ -442,7 +442,7 @@ components:
         os: {type: string}
         arch: {type: string}
         ip: {type: string}
-        last_seen_at: {type: [string, "null"], format: date-time}
+        last_seen_at: {type: [string, "null"], format: date-time, description: "To the second; in a saved system report, to the minute, as saved."}
         generated_at: {type: string, format: date-time, description: "Live report only."}
         compliance_score: {type: [number, "null"]}
         total_pass: {type: integer}
@@ -481,9 +481,9 @@ components:
       type: object
       properties:
         name: {type: string}
-        description: {type: string}
-        rationale: {type: string}
-        remediation: {type: string}
+        description: {type: [string, "null"], description: "null when empty, as on the test itself."}
+        rationale: {type: [string, "null"]}
+        remediation: {type: [string, "null"]}
     PolicyCompliance:
       type: object
       properties:

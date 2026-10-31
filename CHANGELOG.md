@@ -16,6 +16,7 @@ All notable changes to OpenSCM are documented here.
   - Audit `details` is always an object; older plain-text entries come as `{"message": "…"}`.
   - Every list has a `resume_cursor`: pass it as `cursor` later to get only what was added since.
   - The live policy report drops the submitter fields, which only apply to saved reports, and adds `generated_at`. Each of its systems carries `system_id`, and its test descriptions say `rationale` (it was misspelt `rational`).
+  - A test's `description`, `rationale` and `remediation` are `null` when empty, in `/tests` and in reports alike; the beta gave `null` or `""` depending on how the test was saved.
   - Saved policy reports name the policy's `id`.
 - The API tokens page's example call now uses `/api/v1/me`.
 
