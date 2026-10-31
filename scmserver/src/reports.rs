@@ -170,6 +170,8 @@ pub async fn save_policy_report(
     // Pull the excluded flag too so the saved snapshot freezes it for the audit trail.
     let raw_results = sqlx::query(r#"
         SELECT
+            s.id AS system_id,
+            t.id AS test_id,
             s.name AS system_name,
             t.name AS test_name,
             res.result AS status_text,
@@ -206,10 +208,14 @@ pub async fn save_policy_report(
             containers: Vec::new(),
         });
 
+        // The ids let the API name each result's system and test; the
+        // saved-report page ignores them (is_excludable stays false).
         entry.results.push(IndividualResult {
             test_name: t_name,
             status: status.clone(),
             is_excluded,
+            system_id: Some(row.get::<i64, _>("system_id")),
+            test_id: Some(row.get::<i64, _>("test_id")),
             ..Default::default()
         });
     }

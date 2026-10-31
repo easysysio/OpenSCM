@@ -234,7 +234,7 @@ paths:
     parameters: [{$ref: "#/components/parameters/kind"}, {$ref: "#/components/parameters/id"}]
     get:
       summary: Get a saved report
-      description: Viewer. The snapshot as saved. Results carry no checked_at; a policy report's results have system_id and test_id null.
+      description: Viewer. The snapshot as saved. Results carry no checked_at. In policy reports saved before 1.0, system_id and test_id are null: those snapshots kept names only.
       responses:
         "200": {description: The report., content: {application/json: {schema: {$ref: "#/components/schemas/SavedReport"}}}}
         "404": {$ref: "#/components/responses/NotFound"}
@@ -468,7 +468,7 @@ components:
       type: object
       description: One system in a policy report.
       properties:
-        system_id: {type: [integer, "null"], description: "null in saved reports."}
+        system_id: {type: [integer, "null"], description: "null in policy reports saved before 1.0."}
         system_name: {type: string}
         pass_count: {type: integer}
         fail_count: {type: integer}

@@ -360,6 +360,37 @@ async fn saved_policy_reports_name_their_policy() {
     assert!(one["tests"][0].get("rationale").is_some(), "{one}");
 }
 
+// A policy report saved now names each result's system and test; one saved
+// before 1.0 has no ids on record; the beta's answer does not change.
+#[tokio::test]
+async fn saved_policy_reports_name_systems_and_tests() {
+    let fx = fixture().await;
+    let one = v1(&fx, "viewer", &format!("/reports/policy/{}", fx.policy_report)).await;
+    let mut seen = Vec::new();
+    for s in one["systems"].as_array().unwrap() {
+        let sid = &s["system_id"];
+        for r in s["results"].as_array().unwrap() {
+            assert_eq!(&r["system_id"], sid, "{s}");
+            seen.push((r["system_id"].as_i64().unwrap(), r["test_id"].as_i64().unwrap(), r["status"].as_str().unwrap().to_string()));
+        }
+    }
+    seen.sort();
+    assert_eq!(seen, [(1, 5, "PASS".into()), (1, 6, "FAIL".into()), (1, 7, "FAIL".into()),
+                      (2, 5, "FAIL".into()), (2, 6, "PASS".into())], "{one}");
+
+    // Saved before 1.0: the snapshot has names only.
+    sqlx::query("UPDATE reports SET report_results = ? WHERE id = 1")
+        .bind(r#"[{"system_name":"web1","results":[{"test_name":"ssh root login","status":"PASS"}],"is_passed":true}]"#)
+        .execute(&fx.pool).await.unwrap();
+    let old = v1(&fx, "viewer", "/reports/policy/1").await;
+    assert!(old["systems"][0]["system_id"].is_null() && old["systems"][0]["results"][0]["test_id"].is_null(), "{old}");
+
+    let b = beta(&fx, "viewer", &format!("/reports/policy/{}", fx.policy_report)).await;
+    for r in b["systems"].as_array().unwrap().iter().flat_map(|s| s["results"].as_array().unwrap()) {
+        assert!(r.get("system_id").is_none() && r.get("test_id").is_none(), "{r}");
+    }
+}
+
 // The compliance answer's last_seen_at is to the second, as on /systems/{id};
 // the report data it is built from holds it to the minute.
 #[tokio::test]

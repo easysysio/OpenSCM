@@ -516,6 +516,13 @@ pub async fn reports_get(auth: ApiAuth, Extension(pool): Extension<SqlitePool>, 
                 "systems": systems.into_iter().map(|s| shape::system_report(s, When::Saved)).collect::<Vec<_>>(),
             })));
         }
+        // Policy reports saved from 1.0 record each result's ids; the beta
+        // answers as it did before they did.
+        let mut systems = systems;
+        for r in systems.iter_mut().flat_map(|s| s.results.iter_mut()) {
+            r.system_id = None;
+            r.test_id = None;
+        }
         return Ok(Json(json!({
             "id": report.id,
             "kind": "policy",
