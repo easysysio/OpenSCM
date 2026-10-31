@@ -65,9 +65,21 @@ fn is_rate_limited(o: &Outcome) -> bool {
     o.location.contains("Too%20many%20failed%20sign-in%20attempts")
 }
 
-async fn locks(pool: &SqlitePool, details: &str) -> i64 {
-    sqlx::query_scalar("SELECT COUNT(*) FROM audit_log WHERE action = 'auth.login_locked' AND details = ?")
-        .bind(details).fetch_one(pool).await.unwrap()
+// Lock entries of one scope. Also checks that every audit entry so far
+// (failures, successes, locks) has details that are a JSON object, or none.
+async fn locks(pool: &SqlitePool, scope: &str) -> i64 {
+    let all: Vec<(String, Option<String>)> = sqlx::query_as("SELECT action, details FROM audit_log")
+        .fetch_all(pool).await.unwrap();
+    for (action, d) in &all {
+        if let Some(d) = d {
+            let v: serde_json::Value = serde_json::from_str(d).unwrap_or_else(|e| panic!("{action}: {d}: {e}"));
+            assert!(v.is_object(), "{action}: {d}");
+        }
+    }
+    assert!(all.iter().any(|(a, d)| a == "auth.login_failure" && d.is_some()), "{all:?}");
+    sqlx::query_scalar("SELECT COUNT(*) FROM audit_log
+                         WHERE action = 'auth.login_locked' AND json_extract(details, '$.scope') = ?")
+        .bind(scope).fetch_one(pool).await.unwrap()
 }
 
 #[tokio::test]

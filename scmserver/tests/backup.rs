@@ -387,7 +387,9 @@ async fn a_restore_brings_back_the_backup_and_keeps_the_old_files() {
         .fetch_one(&pool).await.unwrap();
     assert_eq!(n, 1);
     assert_eq!(target, "a.oscm-backup");
-    assert!(details.contains("pre-restore-"), "{details}");
+    let details: serde_json::Value = serde_json::from_str(&details).unwrap();
+    assert_eq!(details["backup_file"], "a.oscm-backup");
+    assert!(details["pre_restore"].as_str().unwrap().contains("pre-restore-"), "{details}");
     assert!(!dir.join(backup::RESTORE_NOTE).exists());
     pool.close().await;
     a.pool.close().await;

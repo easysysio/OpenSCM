@@ -283,7 +283,7 @@ pub async fn users_add_save(
         Some(&auth), Some(ip.as_str()),
         "user.create",
         Some("user"), Some(&username),
-        Some(&format!("{{\"role\":\"{}\"}}", role)),
+        Some(serde_json::json!({"role": role})),
     ).await;
     Redirect::to("/users").into_response()
 }
@@ -554,7 +554,7 @@ pub async fn users_edit_save(
         Some(&auth), Some(ip.as_str()),
         action,
         Some("user"), Some(&id.to_string()),
-        Some(&format!("{{\"new_role\":\"{}\"}}", role)),
+        Some(serde_json::json!({"new_role": role})),
     ).await;
 
     let target = if is_admin { "/users" } else { "/" };
@@ -649,7 +649,7 @@ pub async fn change_password(
                 Some(&auth), Some(ip.as_str()),
                 "user.password_change",
                 Some("user"), Some(&user_id.to_string()),
-                Some(if is_owner { "self" } else { "by_admin" }),
+                Some(serde_json::json!({"by": if is_owner { "self" } else { "admin" }})),
             ).await;
 
             let encoded = urlencoding::encode("Password updated successfully").to_string();

@@ -26,7 +26,9 @@ use crate::models::{AuditEntry, AuthSession, UserRole};
 
 // ─────────────────────────────────────────────────────────────────────────────
 // record
-// Writes one audit_log row. Swallows DB errors so the request being audited
+// Writes one audit_log row. `details` is a JSON object (or None): the type
+// keeps plain text out, so the API can serve every new entry as an object.
+// Swallows DB errors so the request being audited
 // can never fail because of a logging side-effect. Pass actor=None for events
 // triggered without an authenticated session (e.g. a failed login attempt
 // before AuthSession exists, or a background scheduler job).
@@ -39,7 +41,7 @@ pub async fn record(
     action:      &str,
     target_type: Option<&str>,
     target_id:   Option<&str>,
-    details:     Option<&str>,
+    details:     Option<serde_json::Value>,
 ) {
     let (actor_user_id, actor_username): (Option<i32>, &str) = match actor {
         Some(s) => (Some(s.userid), s.username.as_str()),
@@ -65,7 +67,7 @@ pub async fn record_raw(
     action:         &str,
     target_type:    Option<&str>,
     target_id:      Option<&str>,
-    details:        Option<&str>,
+    details:        Option<serde_json::Value>,
 ) {
     let res = sqlx::query(
         "INSERT INTO audit_log
@@ -79,7 +81,7 @@ pub async fn record_raw(
     .bind(action)
     .bind(target_type)
     .bind(target_id)
-    .bind(details)
+    .bind(details.map(|d| d.to_string()))
     .bind(ip_address)
     .execute(pool)
     .await;
@@ -242,10 +244,7 @@ pub async fn prune(pool: &SqlitePool) {
                     None,
                     "audit.prune",
                     Some("audit_log"), None,
-                    Some(&format!(
-                        "{{\"removed\":{},\"retention_days\":{}}}",
-                        removed, days
-                    )),
+                    Some(serde_json::json!({"removed": removed, "retention_days": days})),
                 ).await;
             }
             Ok(_) => {}  // nothing to prune today

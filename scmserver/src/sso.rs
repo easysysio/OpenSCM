@@ -473,7 +473,7 @@ pub async fn save_provider(
     crate::audit::record(
         pool, &auth.tenant_id, Some(auth), Some(ip),
         "sso.provider_save", Some("sso_provider"), None,
-        Some(&serde_json::json!({ "issuer": issuer, "enabled": enabled, "trust_email": trust_email }).to_string()),
+        Some(serde_json::json!({ "issuer": issuer, "enabled": enabled, "trust_email": trust_email })),
     ).await;
     Ok(if enabled { "Provider saved and enabled" } else { "Provider saved (not enabled)" })
 }
@@ -520,7 +520,7 @@ pub async fn test_provider(
         pool, &auth.tenant_id, Some(auth), Some(ip),
         if result.is_ok() { "sso.provider_test_success" } else { "sso.provider_test_failure" },
         Some("sso_provider"), Some(&p.id.to_string()),
-        result.as_ref().err().map(|e| serde_json::json!({ "error": e }).to_string()).as_deref(),
+        result.as_ref().err().map(|e| serde_json::json!({ "error": e })),
     ).await;
     let doc = result?;
     let host = |u: &str| reqwest::Url::parse(u).ok().and_then(|x| x.host_str().map(str::to_string)).unwrap_or_default();

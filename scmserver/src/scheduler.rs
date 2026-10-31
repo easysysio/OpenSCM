@@ -1063,7 +1063,7 @@ async fn prune_reports(pool: &SqlitePool) {
                 None,
                 "retention.reports_pruned",
                 Some("reports"), None,
-                Some(&format!("{{\"removed\":{},\"retention_days\":{}}}", removed, days)),
+                Some(serde_json::json!({"removed": removed, "retention_days": days})),
             ).await;
         }
     }
@@ -1108,7 +1108,7 @@ async fn prune_notifications(pool: &SqlitePool) {
                     None,
                     "retention.notifications_pruned",
                     Some("notify"), None,
-                    Some(&format!("{{\"removed\":{},\"retention_days\":{}}}", removed, days)),
+                    Some(serde_json::json!({"removed": removed, "retention_days": days})),
                 ).await;
             }
             Ok(_) => {}
@@ -1159,7 +1159,7 @@ async fn prune_containers(pool: &SqlitePool) {
                     None,
                     "retention.containers_pruned",
                     Some("containers"), None,
-                    Some(&format!("{{\"removed\":{},\"retention_days\":{}}}", removed, days)),
+                    Some(serde_json::json!({"removed": removed, "retention_days": days})),
                 ).await;
             }
             Ok(_) => {}
@@ -1226,7 +1226,7 @@ pub async fn prune_trends(pool: &SqlitePool) {
                         None,
                         action,
                         Some(table), None,
-                        Some(&format!("{{\"removed\":{},\"retention_days\":{}}}", removed, days)),
+                        Some(serde_json::json!({"removed": removed, "retention_days": days})),
                     ).await;
                 }
                 Ok(_) => {}

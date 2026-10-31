@@ -188,7 +188,7 @@ pub async fn auto_add_save(
         "auto_group_create",
         Some("auto_group"),
         Some(&group_id.to_string()),
-        Some(&format!("name={:?} initial_matches={}", name, changed)),
+        Some(serde_json::json!({"name": name, "initial_matches": changed})),
     ).await;
 
     info!("auto-group '{}' (id={}) created by '{}'; matched {} systems",
@@ -388,8 +388,7 @@ pub async fn auto_edit_save(
         "auto_group_update",
         Some("auto_group"),
         Some(&id.to_string()),
-        Some(&format!("name={:?} enabled={} systems_reassigned={}",
-                      name, enabled, changed)),
+        Some(serde_json::json!({"name": name, "enabled": enabled, "systems_reassigned": changed})),
     ).await;
 
     info!("auto-group id={} updated by '{}' (enabled={}); reassigned {} systems",
@@ -449,7 +448,7 @@ pub async fn auto_toggle(
         if now_enabled == 1 { "auto_group_enable" } else { "auto_group_disable" },
         Some("auto_group"),
         Some(&id.to_string()),
-        Some(&format!("systems_reassigned={}", changed)),
+        Some(serde_json::json!({"systems_reassigned": changed})),
     ).await;
 
     info!("auto-group id={} toggled to enabled={} by '{}'; reassigned {} systems",

@@ -305,7 +305,7 @@ pub async fn tokens_create(
         "enrollment.token_create",
         Some("enrollment_token"),
         Some(&prefix),
-        Some(&format!("name={:?} expires={:?} max_uses={:?}", name, expires_at, max_uses)),
+        Some(serde_json::json!({"name": name, "expires_at": expires_at, "max_uses": max_uses})),
     ).await;
     info!("Enrollment token '{}' ({}) created by '{}'.", name, prefix, auth.username);
 

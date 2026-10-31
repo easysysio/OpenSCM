@@ -503,7 +503,7 @@ pub async fn login_submit(
                 crate::audit::record_raw(
                     &pool, &tenant_id, Some(userid), &username, Some(ip.as_str()),
                     "auth.login_failure", Some("user"), Some(&userid.to_string()),
-                    Some("tenant_suspended"),
+                    Some(serde_json::json!({"reason": "tenant_suspended"})),
                 ).await;
                 return (jar, Redirect::to(
                     "/login?error_message=This+organization+is+suspended.+Please+contact+support."));
@@ -518,7 +518,7 @@ pub async fn login_submit(
                 crate::audit::record_raw(
                     &pool, &tenant_id, Some(userid), &username, Some(ip.as_str()),
                     "auth.login_failure", Some("user"), Some(&userid.to_string()),
-                    Some("email_unverified"),
+                    Some(serde_json::json!({"reason": "email_unverified"})),
                 ).await;
                 return (jar, Redirect::to(
                     "/login?error_message=Please+confirm+your+email+address+first.+\
@@ -564,7 +564,7 @@ pub async fn login_submit(
             crate::audit::record_raw(
                 &pool, &tenant, uid, &form.username, Some(ip.as_str()),
                 "auth.login_locked", Some("user"), uid.map(|u| u.to_string()).as_deref(),
-                Some("account"),
+                Some(serde_json::json!({"scope": "account"})),
             ).await;
         }
 
@@ -588,7 +588,7 @@ pub async fn login_submit(
                 Some(ip.as_str()),
                 "auth.login_failure",
                 Some("user"), Some(&userid_raw.to_string()),
-                Some("bad_password"),
+                Some(serde_json::json!({"reason": "bad_password"})),
             ).await;
         } else {
             // No matching user — record the attempt against the default tenant
@@ -599,7 +599,7 @@ pub async fn login_submit(
                 Some(ip.as_str()),
                 "auth.login_failure",
                 Some("user"), None,
-                Some("unknown_user"),
+                Some(serde_json::json!({"reason": "unknown_user"})),
             ).await;
         }
 
@@ -624,7 +624,7 @@ async fn note_address_failure(pool: &SqlitePool, ip: &crate::handlers::ClientIp)
         crate::audit::record_raw(
             pool, "default", None, "", Some(ip.as_str()),
             "auth.login_locked", Some("address"), Some(ip.as_str()),
-            Some("address"),
+            Some(serde_json::json!({"scope": "address"})),
         ).await;
     }
 }

@@ -74,9 +74,15 @@ fn names(dir: &Path) -> Vec<String> {
     v
 }
 
-async fn audit(pool: &SqlitePool, action: &str) -> Vec<String> {
-    sqlx::query_scalar("SELECT COALESCE(details,'') FROM audit_log WHERE action = ? ORDER BY id")
-        .bind(action).fetch_all(pool).await.unwrap()
+// The details of every `action` entry, each of which must be a JSON object.
+async fn audit(pool: &SqlitePool, action: &str) -> Vec<serde_json::Value> {
+    let rows: Vec<String> = sqlx::query_scalar("SELECT details FROM audit_log WHERE action = ? ORDER BY id")
+        .bind(action).fetch_all(pool).await.unwrap();
+    rows.iter().map(|d| {
+        let v: serde_json::Value = serde_json::from_str(d).unwrap_or_else(|e| panic!("{action}: {d}: {e}"));
+        assert!(v.is_object(), "{action}: {d}");
+        v
+    }).collect()
 }
 
 fn su() -> AuthSession {
@@ -157,7 +163,9 @@ async fn runs_write_verify_record_and_keep_the_newest() {
     assert!(st.passphrase_problem.is_none());
     let a = audit(&s.pool, "backup.create").await;
     assert_eq!(a.len(), 3);
-    assert!(a[2].contains("verified") && a[2].contains("deleted 1 older"), "{}", a[2]);
+    assert_eq!(a[2], serde_json::json!({"trigger": "manual", "file": made[2], "size_bytes": a[2]["size_bytes"],
+                                         "verified": true, "pruned": 1}));
+    assert!(a[2]["size_bytes"].as_u64().unwrap() > 0, "{}", a[2]);
     assert!(s.jobs.dashboard_notice(&s.pool).await.is_none(), "all is well: no banner");
 }
 
@@ -177,7 +185,10 @@ async fn a_failed_run_keeps_everything_and_tells_superusers() {
     assert_eq!(st.last_result.as_deref(), Some("failed"));
     assert!(st.last_error.unwrap().contains("set-passphrase"));
     assert!(st.last_ok_at.is_some(), "the last good backup is still shown");
-    assert_eq!(audit(&s.pool, "backup.failed").await.len(), 1);
+    let failed = audit(&s.pool, "backup.failed").await;
+    assert_eq!(failed.len(), 1);
+    assert_eq!(failed[0]["trigger"], "scheduled");
+    assert!(failed[0]["error"].as_str().unwrap().contains("set-passphrase"), "{}", failed[0]);
     let bell: Vec<(i32, String)> = sqlx::query_as("SELECT owner_id, message FROM notify").fetch_all(&s.pool).await.unwrap();
     assert_eq!(bell.len(), 1, "the superuser only, not the admin: {bell:?}");
     assert_eq!(bell[0].0, 1);
@@ -212,7 +223,7 @@ async fn the_schedule_runs_when_due_and_catches_up() {
     let h = s.jobs.tick(&s.pool, t("2026-10-29 12:00:00")).await.expect("overdue: runs");
     h.await.unwrap();
     assert_eq!(audit(&s.pool, "backup.create").await.len(), 1);
-    assert!(audit(&s.pool, "backup.create").await[0].starts_with("scheduled"));
+    assert_eq!(audit(&s.pool, "backup.create").await[0]["trigger"], "scheduled");
     // Advanced to the next slot; nothing more until then.
     assert_eq!(s.jobs.next_run(&s.pool, t("2026-10-29 12:01:00")).await, Some(t("2026-10-30 02:00:00")));
     assert!(s.jobs.tick(&s.pool, t("2026-10-29 12:01:00")).await.is_none());
@@ -254,7 +265,8 @@ async fn only_superusers_manage_backups() {
     assert!(loc(&r).contains("success_message") && loc(&r).ends_with("#backup"), "{}", loc(&r));
     assert_eq!(backup_jobs::load_settings(&s.pool).await,
                BackupSettings { enabled: true, schedule: "15 3 * * *".into(), keep: 5 });
-    assert_eq!(audit(&s.pool, "backup.settings").await.len(), 1);
+    assert_eq!(audit(&s.pool, "backup.settings").await,
+               [serde_json::json!({"enabled": true, "schedule": "15 3 * * *", "keep": 5})]);
 
     // The page: the tab and its contents for the superuser, nothing for an admin.
     let tera = Arc::new(scmserver::init_tera().unwrap());

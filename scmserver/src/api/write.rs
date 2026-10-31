@@ -66,7 +66,7 @@ async fn audit(pool: &SqlitePool, auth: &ApiAuth, action: &str, target: (&str, S
     }
     crate::audit::record(
         pool, &auth.tenant_id, Some(&auth.as_session()), Some(&auth.ip),
-        action, Some(target.0), Some(&target.1), Some(&details.to_string()),
+        action, Some(target.0), Some(&target.1), Some(details),
     ).await;
 }
 

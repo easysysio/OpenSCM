@@ -899,7 +899,7 @@ pub async fn restore(
 pub async fn record_restore(pool: &sqlx::SqlitePool, db_path: &str) {
     let path = Path::new(db_path).parent().unwrap_or(Path::new(".")).join(RESTORE_NOTE);
     let Ok(raw) = fs::read_to_string(&path) else { return };
-    let (target, details) = match serde_json::from_str::<RestoreNote>(&raw) {
+    let (target, message, details) = match serde_json::from_str::<RestoreNote>(&raw) {
         Ok(n) => (
             n.backup_file.clone(),
             format!(
@@ -907,12 +907,22 @@ pub async fn record_restore(pool: &sqlx::SqlitePool, db_path: &str) {
                 n.backup_file, n.backup_created_at, n.backup_host, n.backup_version, n.backup_schema,
                 if n.config_restored { ", config included" } else { "" }, n.pre_restore
             ),
+            serde_json::json!({
+                "backup_file": n.backup_file, "backup_created_at": n.backup_created_at,
+                "backup_host": n.backup_host, "backup_version": n.backup_version,
+                "backup_schema": n.backup_schema, "config_restored": n.config_restored,
+                "pre_restore": n.pre_restore,
+            }),
         ),
-        Err(_) => (String::new(), format!("Restored from a backup ({})", raw.trim())),
+        Err(_) => (
+            String::new(),
+            format!("Restored from a backup ({})", raw.trim()),
+            serde_json::json!({"message": "Restored from a backup", "note": raw.trim()}),
+        ),
     };
     crate::audit::record_raw(pool, "default", None, "system", None, "backup.restored",
-                             Some("backup"), Some(&target), Some(&details)).await;
-    tracing::info!("{details}");
+                             Some("backup"), Some(&target), Some(details)).await;
+    tracing::info!("{message}");
     if let Err(e) = fs::remove_file(&path) {
         tracing::warn!("Cannot remove {}: {e}", path.display());
     }

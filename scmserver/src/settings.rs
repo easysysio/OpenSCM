@@ -728,7 +728,7 @@ pub async fn settings_rotate_keys(
                 "tenant.key_rotated",
                 Some("tenant"),
                 Some(auth.tenant_id.as_str()),
-                Some(&format!("{{\"new_fingerprint\":\"{}\"}}", &public_b64[..public_b64.len().min(24)])),
+                Some(serde_json::json!({"new_fingerprint": &public_b64[..public_b64.len().min(24)]})),
             ).await;
             let msg = format!(
                 "Signing key rotated. Agents switch to the new key at their next check-in; \
@@ -783,8 +783,7 @@ pub async fn settings_backup_save(
     }
     crate::audit::record(
         &pool, "default", Some(&auth), Some(&ip.0), "backup.settings", Some("backup"), None,
-        Some(&format!("scheduled backups {}, schedule '{}' (UTC), keep {}",
-                      if new.enabled { "on" } else { "off" }, new.schedule, new.keep)),
+        Some(serde_json::json!({"enabled": new.enabled, "schedule": new.schedule, "keep": new.keep})),
     ).await;
     backup_redirect("success_message", "Backup settings saved.")
 }

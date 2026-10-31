@@ -697,7 +697,7 @@ pub async fn sso_callback(
             info!("User '{}' signed in through SSO for tenant '{}'", user.username, user.tenant_id);
             crate::audit::record_raw(
                 &pool, &user.tenant_id, Some(user.user_id), &user.username, Some(ip.as_str()),
-                "auth.login_success", Some("user"), Some(&user.user_id.to_string()), Some("sso"),
+                "auth.login_success", Some("user"), Some(&user.user_id.to_string()), Some(serde_json::json!({"method": "sso"})),
             ).await;
             (jar.add(cookie), Redirect::to("/")).into_response()
         }
@@ -707,7 +707,7 @@ pub async fn sso_callback(
                 crate::audit::record_raw(
                     &pool, tenant, None, "(sso)", Some(ip.as_str()),
                     "auth.login_failure", Some("user"), None,
-                    Some(&format!("sso: {}", f.reason)),
+                    Some(serde_json::json!({"method": "sso", "reason": f.reason})),
                 ).await;
             }
             (jar, to_login(f.public)).into_response()

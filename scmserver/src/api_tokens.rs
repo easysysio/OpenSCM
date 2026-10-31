@@ -163,9 +163,7 @@ pub async fn tokens_create(
     audit::record(
         &pool, &auth.tenant_id, Some(&auth), Some(ip.as_str()),
         "api_token.create", Some("api_token"), Some(&prefix),
-        Some(&format!("{{\"name\":{},\"role\":\"{}\",\"expires\":\"{}\"}}",
-                      serde_json::to_string(&name).unwrap_or_default(), role,
-                      expires_modifier.unwrap_or("never"))),
+        Some(serde_json::json!({"name": name, "role": role, "expires": expires_modifier.unwrap_or("never")})),
     ).await;
     info!("API token '{}' ({}) created by '{}' with role {}.", name, prefix, auth.username, role);
 

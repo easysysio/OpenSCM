@@ -374,7 +374,7 @@ pub async fn system_groups_delete(
         if was_auto == 1 { "auto_group_delete" } else { "group_delete" },
         Some(if was_auto == 1 { "auto_group" } else { "group" }),
         Some(&id.to_string()),
-        prior_name.as_deref().map(|n| format!("name={:?}", n)).as_deref(),
+        prior_name.map(|n| serde_json::json!({"name": n})),
     ).await;
 
     let _ = sync_tx.send(()).await;

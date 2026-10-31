@@ -323,7 +323,7 @@ async fn token_blocked_by_plan(
         pool, tenant_id, None, Some(payload.ip.as_str()),
         "enrollment.token_plan_limit",
         Some("system"), Some(&system_id.to_string()),
-        Some(&format!("host={:?} valid token, plan limit {} reached", payload.hostname, limit.limit)),
+        Some(serde_json::json!({"hostname": payload.hostname, "plan": limit.plan, "limit": limit.limit})),
     ).await;
     crate::plan::notify_admins_once(
         pool,
@@ -482,7 +482,7 @@ pub async fn send(
                                                 &pool, tenant_id, None, Some(payload.ip.as_str()),
                                                 "enrollment.token_approve",
                                                 Some("system"), Some(&existing_id.to_string()),
-                                                Some(&format!("host={:?} auto-approved on re-registration", payload.hostname)),
+                                                Some(serde_json::json!({"hostname": payload.hostname, "stage": "re-registration"})),
                                             ).await;
                                         }
                                     }
@@ -607,7 +607,7 @@ pub async fn send(
                         &pool, tenant_id, None, Some(payload.ip.as_str()),
                         "enrollment.token_approve",
                         Some("system"), Some(&new_id.to_string()),
-                        Some(&format!("host={:?} auto-approved at enrollment", payload.hostname)),
+                        Some(serde_json::json!({"hostname": payload.hostname, "stage": "enrollment"})),
                     ).await;
                 } else if let Some(TokenOutcome::PlanLimit(ref limit)) = outcome {
                     token_blocked_by_plan(&pool, tenant_id, &payload, new_id, limit).await;
@@ -618,7 +618,7 @@ pub async fn send(
                         &pool, tenant_id, None, Some(payload.ip.as_str()),
                         "enrollment.token_rejected",
                         Some("system"), Some(&new_id.to_string()),
-                        Some(&format!("host={:?} invalid/expired token", payload.hostname)),
+                        Some(serde_json::json!({"hostname": payload.hostname, "reason": "invalid_or_expired"})),
                     ).await;
                 }
 

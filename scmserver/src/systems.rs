@@ -1429,7 +1429,7 @@ pub async fn system_report_run_policy(
                 Some(&auth), Some(ip.as_str()),
                 "policy.run_on_system",
                 Some("system"), Some(&system_id.to_string()),
-                Some(&format!("{{\"policy_id\":{},\"tests_queued\":{}}}", policy_id, n)),
+                Some(serde_json::json!({"policy_id": policy_id, "tests_queued": n})),
             ).await;
             let msg = urlencoding::encode(&format!(
                 "{} test(s) queued for this system. Results will appear after the agent's next check-in.", n
@@ -1745,7 +1745,7 @@ pub async fn systems_bulk_upgrade(
         Some(&auth), Some(ip.as_str()),
         "system.upgrade_queued_bulk",
         Some("system"), Some(&format!("ids:{}", id_list)),
-        Some(&format!("{{\"requested\":{},\"queued\":{}}}", ids.len(), queued)),
+        Some(serde_json::json!({"requested": ids.len(), "queued": queued})),
     ).await;
     let msg = urlencoding::encode(&format!(
         "Upgrade queued for {} system(s) — agents will upgrade on next check-in.",
@@ -1848,10 +1848,7 @@ pub async fn systems_upgrade_all(
         Some(&auth), Some(ip.as_str()),
         "system.upgrade_queued_all",
         Some("system"), Some(&format!("ids:{}", id_list)),
-        Some(&format!(
-            "{{\"eligible\":{},\"queued\":{}}}",
-            targets.len(), queued
-        )),
+        Some(serde_json::json!({"eligible": targets.len(), "queued": queued})),
     ).await;
     let msg = urlencoding::encode(&format!(
         "Upgrade queued for {} system(s) — agents will upgrade on next check-in.",

@@ -319,7 +319,7 @@ pub async fn add_submit(
                 &pool, &auth.tenant_id, Some(&auth), Some(ip.as_str()),
                 "directory.create",
                 Some("directory"), Some(&new_id.to_string()),
-                Some(&format!("{{\"name\":{}}}", serde_json::to_string(&form.name).unwrap_or_default())),
+                Some(serde_json::json!({"name": form.name})),
             ).await;
             Redirect::to("/admin/directories?success_message=Directory+added").into_response()
         }
@@ -521,14 +521,12 @@ pub async fn test(
         Err(e) => (false, Some(e)),
     };
 
-    let details_json = err.as_ref().map(|e|
-        format!("{{\"error\":{}}}", serde_json::to_string(e).unwrap_or_else(|_| "\"\"".into()))
-    );
+    let details_json = err.as_ref().map(|e| serde_json::json!({"error": e}));
     crate::audit::record(
         &pool, &auth.tenant_id, Some(&auth), Some(ip.as_str()),
         if ok { "directory.test_success" } else { "directory.test_failure" },
         Some("directory"), Some(&id.to_string()),
-        details_json.as_deref(),
+        details_json,
     ).await;
 
     Json(TestResponse { ok, error: err })

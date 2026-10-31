@@ -276,7 +276,10 @@ impl World {
         let recorded: String = sqlx::query_scalar(
             "SELECT COALESCE(details, '') FROM audit_log WHERE action = 'auth.login_failure' ORDER BY id DESC LIMIT 1",
         ).fetch_optional(&self.pool).await.unwrap().unwrap_or_default();
-        assert!(recorded.contains(reason), "{why}: refused, but for the wrong reason.\n  expected: {reason}\n  recorded: {recorded}");
+        let d: serde_json::Value = serde_json::from_str(&recorded).unwrap_or_default();
+        assert_eq!(d["method"], "sso", "{why}: {recorded}");
+        assert!(d["reason"].as_str().unwrap_or("").contains(reason),
+                "{why}: refused, but for the wrong reason.\n  expected: {reason}\n  recorded: {recorded}");
     }
 
     async fn count(&self, sql: &str) -> i64 {
@@ -327,7 +330,7 @@ async fn a_valid_sign_in_creates_a_session_for_the_matching_user() {
     assert_eq!(w.subject_of(20).await.as_deref(), Some("idp-subject-bob"));
     assert_eq!(w.count("SELECT COUNT(*) FROM sso_login_state").await, 0, "the state is spent");
     assert!(r.cookies.get("sso_flow").is_some_and(|v| v.is_empty()), "the flow cookie is cleared");
-    assert_eq!(w.count("SELECT COUNT(*) FROM audit_log WHERE action = 'auth.login_success' AND details = 'sso' AND tenant_id = 'acme'").await, 1);
+    assert_eq!(w.count("SELECT COUNT(*) FROM audit_log WHERE action = 'auth.login_success' AND json_extract(details, '$.method') = 'sso' AND tenant_id = 'acme'").await, 1);
 }
 
 #[tokio::test]

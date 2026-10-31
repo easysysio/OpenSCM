@@ -452,14 +452,16 @@ impl Backups {
                 );
                 info!("Backup: {details}");
                 crate::audit::record_raw(pool, "default", actor_id, &actor_name, None, "backup.create",
-                                         Some("backup"), Some(&name), Some(&details)).await;
+                                         Some("backup"), Some(&name),
+                                         Some(serde_json::json!({"trigger": trigger.label(), "file": name, "size_bytes": r.size,
+                                                    "verified": true, "pruned": r.pruned.len()}))).await;
             }
             Err(e) => {
                 set_setting(pool, "backup_last_result", "failed").await;
                 set_setting(pool, "backup_last_error", e).await;
                 error!("Backup ({}) failed: {e}", trigger.label());
                 crate::audit::record_raw(pool, "default", actor_id, &actor_name, None, "backup.failed",
-                                         Some("backup"), None, Some(&format!("{}: {e}", trigger.label()))).await;
+                                         Some("backup"), None, Some(serde_json::json!({"trigger": trigger.label(), "error": e}))).await;
                 notify_superusers(pool, &format!("Backup failed: {e}")).await;
                 crate::alerts::fire_backup_failed(pool, e).await;
             }
@@ -552,6 +554,6 @@ pub async fn record_cli_backup(db: &Path, file: &Path, size: u64) {
     let Ok(pool) = sqlx::sqlite::SqlitePoolOptions::new().max_connections(1).connect_with(opts).await else { return };
     let name = file.file_name().unwrap_or_default().to_string_lossy().to_string();
     crate::audit::record_raw(&pool, "default", None, "command line", None, "backup.create", Some("backup"),
-                             Some(&name), Some(&format!("cli backup {} ({})", name, backup::human_size(size)))).await;
+                             Some(&name), Some(serde_json::json!({"trigger": "cli", "file": name, "size_bytes": size}))).await;
     pool.close().await;
 }
