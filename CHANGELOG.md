@@ -30,6 +30,7 @@ All notable changes to OpenSCM are documented here.
 - Audit log entries now always store `details` as a JSON object, or nothing. Sign-in failures, lockouts, password changes, auto groups, group deletes, enrollment tokens and agent enrollment, and backups used to write plain text; for example `bad_password` is now `{"reason": "bad_password"}`, and a backup is `{"trigger", "file", "size_bytes", "verified", "pruned"}`. Values are escaped properly, so a name with a quote in it no longer produces broken JSON. Entries already in the log are unchanged. The audit log page shows the JSON as stored.
 - CI hardening from a SonarCloud scan: third-party GitHub Actions are pinned to full commit SHAs (the tag is kept in a comment), the `nfpm` and `cargo-zigbuild` downloads refuse anything but HTTPS with TLS 1.2 or newer, and every release build runs with `--locked` so it uses exactly the committed `Cargo.lock`.
 - The server binary no longer embeds 45 AdminLTE plugins that no page uses (code editors, calendars, maps, rich-text editors and so on) or the unminified copies of jQuery and DataTables; only the minified files the pages load remain. That removes about 38 MB of embedded files and the code-scan findings that came from them.
+- An agent that upgrades itself gives the new binary the same file mode as the one it replaces, instead of always `0755`.
 
 ---
 

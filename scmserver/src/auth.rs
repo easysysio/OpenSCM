@@ -111,7 +111,9 @@ pub async fn issue_session_cookie(
         obj.insert("epoch".into(), json!(epoch));
     }
 
-    let mut cookie = Cookie::new("session", session.to_string());
+    // Secure is set below whenever app_url is https. It cannot be set always:
+    // sign-in must work on a plain-http install (http://host:8000).
+    let mut cookie = Cookie::new("session", session.to_string()); // NOSONAR
     cookie.set_path("/");
     cookie.set_http_only(true);
     cookie.set_same_site(SameSite::Lax);

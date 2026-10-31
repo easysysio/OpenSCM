@@ -951,11 +951,17 @@ async fn dispatch_server_command(
                 return Ok(());
             }
 
-            // Make the temp file executable on Unix before replacing.
+            // Give the new binary the mode of the one it replaces, so the
+            // upgrade keeps whatever the package installed, minus any
+            // setuid/setgid bits. 0o700 only if that cannot be read: the agent
+            // runs it as its own user.
             #[cfg(unix)]
             {
                 use std::os::unix::fs::PermissionsExt;
-                let _ = fs::set_permissions(&tmp_path, fs::Permissions::from_mode(0o755));
+                let mode = fs::metadata(&current_exe)
+                    .map(|m| m.permissions().mode() & 0o777)
+                    .unwrap_or(0o700);
+                let _ = fs::set_permissions(&tmp_path, fs::Permissions::from_mode(mode));
             }
 
             // Atomically replace the running binary on disk.

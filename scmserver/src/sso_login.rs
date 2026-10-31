@@ -616,7 +616,9 @@ pub async fn sso_start(
     }
     match begin_login(&pool, &form.organization, strictness(rules)).await {
         Ok(started) => {
-            let mut cookie = Cookie::new(FLOW_COOKIE, started.state.clone());
+            // Secure is set below whenever app_url is https. It cannot be set always:
+            // sign-in must work on a plain-http install (http://host:8000).
+            let mut cookie = Cookie::new(FLOW_COOKIE, started.state.clone()); // NOSONAR
             cookie.set_path("/auth/sso");
             cookie.set_http_only(true);
             // Lax: the provider sends the browser back with a top-level GET,
