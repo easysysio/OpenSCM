@@ -359,6 +359,31 @@ pub async fn create(
         v?
     };
 
+    // 2–4 hash, compress and encrypt: seconds of CPU and file I/O, kept off
+    // the async workers so a scheduled backup does not stall the server.
+    let (paths, out, passphrase) = (paths.clone(), out.to_path_buf(), passphrase.to_string());
+    let created = tokio::task::spawn_blocking(move || {
+        package(&paths, &out, &snapshot, schema_version, &passphrase, work_factor)
+    })
+    .await
+    .map_err(|e| format!("The backup task failed: {e}"))?;
+    drop(tmp);
+    created
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Helper: package
+// The blocking part of create: reads the keys and config, writes the
+// manifest and the encrypted archive next to `out`, then moves it into place.
+// ─────────────────────────────────────────────────────────────────────────────
+fn package(
+    paths: &Paths,
+    out: &Path,
+    snapshot: &Path,
+    schema_version: i64,
+    passphrase: &str,
+    work_factor: Option<u8>,
+) -> Result<Created, String> {
     // 2. Keys and config, read once into memory, so what is hashed is what is
     //    archived.
     let key = fs::read(&paths.private_key)
@@ -375,7 +400,7 @@ pub async fn create(
 
     // 3. Manifest.
     let mut files = BTreeMap::new();
-    files.insert(DB_ENTRY.to_string(), sha256_file(&snapshot).map_err(|e| e.to_string())?);
+    files.insert(DB_ENTRY.to_string(), sha256_file(snapshot).map_err(|e| e.to_string())?);
     files.insert(KEY_ENTRY.to_string(), sha256_hex(&key));
     files.insert(PUB_ENTRY.to_string(), sha256_hex(&pubkey));
     if let Some(c) = &config {
@@ -394,7 +419,7 @@ pub async fn create(
     let manifest_json = serde_json::to_vec_pretty(&manifest).map_err(|e| e.to_string())?;
 
     let mut entries: Vec<(&str, Source)> = vec![
-        (DB_ENTRY, Source::File(snapshot.clone())),
+        (DB_ENTRY, Source::File(snapshot.to_path_buf())),
         (KEY_ENTRY, Source::Bytes(key)),
         (PUB_ENTRY, Source::Bytes(pubkey)),
     ];
@@ -570,6 +595,57 @@ pub async fn verify(file: &Path, passphrase: &str, live_public_key: Option<&Path
 // The work of verify, unpacking into `dir` (left there for restore to use).
 // ─────────────────────────────────────────────────────────────────────────────
 async fn check(file: &Path, passphrase: &str, dir: &Path, live_public_key: Option<&Path>) -> Result<Verified, String> {
+    // Decrypting and unpacking is CPU and file work: off the async workers.
+    let (f, pw, d) = (file.to_path_buf(), passphrase.to_string(), dir.to_path_buf());
+    let (manifest, key_fingerprint) = tokio::task::spawn_blocking(move || unpack(&f, &pw, &d))
+        .await
+        .map_err(|e| format!("The verify task failed: {e}"))??;
+
+    let (schema, counts) = {
+        let mut conn = open_db(&dir.join(DB_ENTRY)).await?;
+        let schema = check_snapshot(&mut conn).await;
+        let mut counts = Vec::new();
+        if schema.is_ok() {
+            for (label, table) in [("Organizations", "tenants"), ("Systems", "systems"),
+                                   ("Results", "results"), ("Saved reports", "reports")] {
+                let n: Option<i64> = sqlx::query_scalar(&format!("SELECT COUNT(*) FROM {table}"))
+                    .fetch_one(&mut conn).await.ok();
+                counts.push((label, n));
+            }
+        }
+        let _ = conn.close().await;
+        (schema?, counts)
+    };
+    if schema != manifest.schema_version {
+        return Err(format!(
+            "The manifest says schema {} but the database is at {}.",
+            manifest.schema_version, schema
+        ));
+    }
+
+    let live_key = match live_public_key {
+        Some(p) => tokio::fs::read_to_string(p).await.ok(),
+        None => None,
+    };
+    let matches_this_server = live_key
+        .and_then(|s| public_key_bytes(&s).ok())
+        .map(|live| fingerprint_of(&live) == key_fingerprint);
+
+    Ok(Verified {
+        newer_than_this_server: manifest.schema_version > crate::schema::SCHEMA_VERSION,
+        manifest,
+        counts,
+        key_fingerprint,
+        matches_this_server,
+    })
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Helper: unpack
+// The blocking part of check: decrypts the backup into `dir`, checks the
+// manifest against what was unpacked, and fingerprints the server key.
+// ─────────────────────────────────────────────────────────────────────────────
+fn unpack(file: &Path, passphrase: &str, dir: &Path) -> Result<(Manifest, String), String> {
     let (manifest_bytes, hashes) = extract(file, passphrase, dir)?;
 
     let manifest: Manifest = serde_json::from_slice(&manifest_bytes)
@@ -599,41 +675,7 @@ async fn check(file: &Path, passphrase: &str, dir: &Path, live_public_key: Optio
     let read = |name: &str| fs::read_to_string(dir.join(name)).map_err(|e| format!("{name}: {e}"));
     let pub_b64 = read(PUB_ENTRY)?;
     let key_fingerprint = key_fingerprint(&read(KEY_ENTRY)?, &pub_b64)?;
-
-    let (schema, counts) = {
-        let mut conn = open_db(&dir.join(DB_ENTRY)).await?;
-        let schema = check_snapshot(&mut conn).await;
-        let mut counts = Vec::new();
-        if schema.is_ok() {
-            for (label, table) in [("Organizations", "tenants"), ("Systems", "systems"),
-                                   ("Results", "results"), ("Saved reports", "reports")] {
-                let n: Option<i64> = sqlx::query_scalar(&format!("SELECT COUNT(*) FROM {table}"))
-                    .fetch_one(&mut conn).await.ok();
-                counts.push((label, n));
-            }
-        }
-        let _ = conn.close().await;
-        (schema?, counts)
-    };
-    if schema != manifest.schema_version {
-        return Err(format!(
-            "The manifest says schema {} but the database is at {}.",
-            manifest.schema_version, schema
-        ));
-    }
-
-    let matches_this_server = live_public_key
-        .and_then(|p| fs::read_to_string(p).ok())
-        .and_then(|s| public_key_bytes(&s).ok())
-        .map(|live| fingerprint_of(&live) == key_fingerprint);
-
-    Ok(Verified {
-        newer_than_this_server: manifest.schema_version > crate::schema::SCHEMA_VERSION,
-        manifest,
-        counts,
-        key_fingerprint,
-        matches_this_server,
-    })
+    Ok((manifest, key_fingerprint))
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -822,6 +864,33 @@ pub async fn restore(
         return Err("Cancelled. Nothing was changed.".into());
     }
 
+    // Moving files aside and copying the restored ones in: blocking file
+    // work, off the async workers.
+    let (paths2, unpacked, file2, m2) = (paths.clone(), tmp.path().to_path_buf(), file.to_path_buf(), m.clone());
+    let pre = tokio::task::spawn_blocking(move || {
+        swap_in(&paths2, &unpacked, &db_dir, &file2, &m2, include_config)
+    })
+    .await
+    .map_err(|e| format!("The restore task failed: {e}"))??;
+    drop(tmp);
+
+    Ok(Restored { verified: v, pre_restore: pre, config_restored: include_config })
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Helper: swap_in
+// The blocking part of restore: moves the current files into pre-restore-<ts>/,
+// places the unpacked ones, puts everything back on failure, and leaves the
+// note for the audit log. Returns the pre-restore folder.
+// ─────────────────────────────────────────────────────────────────────────────
+fn swap_in(
+    paths: &Paths,
+    unpacked: &Path,
+    db_dir: &Path,
+    file: &Path,
+    m: &Manifest,
+    include_config: bool,
+) -> Result<PathBuf, String> {
     let ts = chrono::Utc::now();
     let pre = db_dir.join(format!("pre-restore-{}", ts.format("%Y%m%dT%H%M%SZ")));
     create_private_dir(&pre.join("keys"))?;
@@ -832,12 +901,12 @@ pub async fn restore(
         // restored database.
         Swap { target: with_suffix(&paths.db, "-wal"), src: None, aside: "scm.db-wal", default_mode: 0o600 },
         Swap { target: with_suffix(&paths.db, "-shm"), src: None, aside: "scm.db-shm", default_mode: 0o600 },
-        Swap { target: paths.db.clone(), src: Some(tmp.path().join(DB_ENTRY)), aside: "scm.db", default_mode: 0o600 },
-        Swap { target: paths.private_key.clone(), src: Some(tmp.path().join(KEY_ENTRY)), aside: KEY_ENTRY, default_mode: 0o600 },
-        Swap { target: paths.public_key.clone(), src: Some(tmp.path().join(PUB_ENTRY)), aside: PUB_ENTRY, default_mode: 0o644 },
+        Swap { target: paths.db.clone(), src: Some(unpacked.join(DB_ENTRY)), aside: "scm.db", default_mode: 0o600 },
+        Swap { target: paths.private_key.clone(), src: Some(unpacked.join(KEY_ENTRY)), aside: KEY_ENTRY, default_mode: 0o600 },
+        Swap { target: paths.public_key.clone(), src: Some(unpacked.join(PUB_ENTRY)), aside: PUB_ENTRY, default_mode: 0o644 },
     ];
     if include_config {
-        swaps.push(Swap { target: paths.config.clone(), src: Some(tmp.path().join(CONFIG_ENTRY)), aside: CONFIG_ENTRY, default_mode: 0o600 });
+        swaps.push(Swap { target: paths.config.clone(), src: Some(unpacked.join(CONFIG_ENTRY)), aside: CONFIG_ENTRY, default_mode: 0o600 });
     }
 
     let mut done: Vec<Done> = Vec::new();
@@ -888,7 +957,7 @@ pub async fn restore(
         }
     }
 
-    Ok(Restored { verified: v, pre_restore: pre, config_restored: include_config })
+    Ok(pre)
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -898,7 +967,7 @@ pub async fn restore(
 // ─────────────────────────────────────────────────────────────────────────────
 pub async fn record_restore(pool: &sqlx::SqlitePool, db_path: &str) {
     let path = Path::new(db_path).parent().unwrap_or(Path::new(".")).join(RESTORE_NOTE);
-    let Ok(raw) = fs::read_to_string(&path) else { return };
+    let Ok(raw) = tokio::fs::read_to_string(&path).await else { return };
     let (target, message, details) = match serde_json::from_str::<RestoreNote>(&raw) {
         Ok(n) => (
             n.backup_file.clone(),
@@ -923,7 +992,7 @@ pub async fn record_restore(pool: &sqlx::SqlitePool, db_path: &str) {
     crate::audit::record_raw(pool, "default", None, "system", None, "backup.restored",
                              Some("backup"), Some(&target), Some(details)).await;
     tracing::info!("{message}");
-    if let Err(e) = fs::remove_file(&path) {
+    if let Err(e) = tokio::fs::remove_file(&path).await {
         tracing::warn!("Cannot remove {}: {e}", path.display());
     }
 }

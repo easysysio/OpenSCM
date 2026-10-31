@@ -415,7 +415,7 @@ impl Backups {
         }
         let created = backup::create(&self.paths, &out, &pass, self.work_factor).await?;
         if let Err(e) = backup::verify(&out, &pass, Some(&self.paths.public_key)).await {
-            let _ = std::fs::remove_file(&out);
+            let _ = tokio::fs::remove_file(&out).await;
             return Err(format!("The backup was written but did not verify ({e}); it was deleted."));
         }
         let keep = load_settings(pool).await.keep;

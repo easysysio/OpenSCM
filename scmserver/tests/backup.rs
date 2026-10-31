@@ -523,7 +523,7 @@ async fn backups_are_owned_like_the_database() {
     use std::os::unix::fs::{MetadataExt, PermissionsExt};
     let s = server(1).await;
     let primary = std::fs::metadata(&s.paths.db).unwrap().gid();
-    let out = std::process::Command::new("id").arg("-G").output().unwrap();
+    let out = tokio::process::Command::new("id").arg("-G").output().await.unwrap();
     let Some(other) = String::from_utf8_lossy(&out.stdout).split_whitespace()
         .filter_map(|g| g.parse::<u32>().ok()).find(|g| *g != primary) else {
         eprintln!("skipped: this user belongs to only one group");

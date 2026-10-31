@@ -609,7 +609,7 @@ async fn post_heartbeat(
         enrollment_token: if needs_handshake {
             config.server.enrollment_token.clone()
         } else { None },
-        server_key:   fs::read_to_string(&identity.server_pub_path).ok()
+        server_key:   tokio::fs::read_to_string(&identity.server_pub_path).await.ok()
             .map(|k| k.trim().to_string())
             .filter(|k| !k.is_empty()),
         protocol:     Some(PROTOCOL),
@@ -637,7 +637,7 @@ async fn post_heartbeat(
             "Server at '{}' rejected ID '{}'. Resetting the ID for re-registration.",
             base_url, identity.current_id
         );
-        let _ = fs::remove_file(&identity.id_path);
+        let _ = tokio::fs::remove_file(&identity.id_path).await;
         return Ok(None);
     }
     if !response.status().is_success() {
@@ -828,7 +828,7 @@ async fn dispatch_server_command(
         Trust::Unpinned => {
             if let Some(server_key) = inner_json.get("server_public_key").and_then(|k| k.as_str()) {
                 if decode_public_key(server_key.trim()).is_ok() {
-                    fs::write(&identity.server_pub_path, server_key.trim())?;
+                    tokio::fs::write(&identity.server_pub_path, server_key.trim()).await?;
                     info!("Server public key pinned for namespace '{}'.", identity.namespace);
                 }
             }
@@ -839,7 +839,7 @@ async fn dispatch_server_command(
         Trust::Verified => {
             if let Some(next) = inner_json.get("next_server_public_key").and_then(|k| k.as_str()) {
                 if decode_public_key(next.trim()).is_ok() {
-                    fs::write(&identity.server_pub_path, next.trim())?;
+                    tokio::fs::write(&identity.server_pub_path, next.trim()).await?;
                     info!("Server signing key rotated; now trusting the new key for namespace '{}'.",
                           identity.namespace);
                 }
@@ -859,7 +859,7 @@ async fn dispatch_server_command(
     match command {
         Some("REGISTER") => {
             if let Some(new_id) = inner_json.get("id").and_then(|id| id.as_i64()) {
-                fs::write(&identity.id_path, new_id.to_string())?;
+                tokio::fs::write(&identity.id_path, new_id.to_string()).await?;
                 info!("Registered with server '{}' as Agent ID: {}.", base_url, new_id);
             } else {
                 error!("REGISTER command received but no ID in response.");
@@ -946,7 +946,7 @@ async fn dispatch_server_command(
             };
             let tmp_path = current_exe.with_extension("new");
 
-            if let Err(e) = fs::write(&tmp_path, &bytes) {
+            if let Err(e) = tokio::fs::write(&tmp_path, &bytes).await {
                 error!("Failed to write upgrade binary to {:?}: {}", tmp_path, e);
                 return Ok(());
             }
@@ -958,19 +958,19 @@ async fn dispatch_server_command(
             #[cfg(unix)]
             {
                 use std::os::unix::fs::PermissionsExt;
-                let mode = fs::metadata(&current_exe)
+                let mode = tokio::fs::metadata(&current_exe).await
                     .map(|m| m.permissions().mode() & 0o777)
                     .unwrap_or(0o700);
-                let _ = fs::set_permissions(&tmp_path, fs::Permissions::from_mode(mode));
+                let _ = tokio::fs::set_permissions(&tmp_path, fs::Permissions::from_mode(mode)).await;
             }
 
             // Atomically replace the running binary on disk.
             if let Err(e) = self_replace::self_replace(&tmp_path) {
                 error!("self_replace failed: {}", e);
-                let _ = fs::remove_file(&tmp_path);
+                let _ = tokio::fs::remove_file(&tmp_path).await;
                 return Ok(());
             }
-            let _ = fs::remove_file(&tmp_path);
+            let _ = tokio::fs::remove_file(&tmp_path).await;
 
             info!("Binary replaced with v{}. Restarting...", version);
 
@@ -1032,7 +1032,7 @@ pub async fn send_system_info(
             // Remember, from a reply signed by the pinned key only, that this
             // server speaks protocol 1: from then on old-style replies are refused.
             if speaks_protocol && trust == Trust::Verified && !identity.protocol_path.exists() {
-                let _ = fs::write(&identity.protocol_path, PROTOCOL.to_string());
+                let _ = tokio::fs::write(&identity.protocol_path, PROTOCOL.to_string()).await;
                 info!("Server '{}' speaks agent protocol {}; replies are now bound to their request.", base_url, PROTOCOL);
             }
         }

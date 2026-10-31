@@ -1,4 +1,4 @@
-use std::{sync::{Arc, atomic::{AtomicBool}}, net::SocketAddr, fs, error::Error};
+use std::{sync::{Arc, atomic::{AtomicBool}}, net::SocketAddr, error::Error};
 use tracing::{info, error, debug};
 use tracing_subscriber::{fmt, EnvFilter, registry, layer::SubscriberExt, util::SubscriberInitExt, reload};
 use base64::{Engine as _, engine::general_purpose};
@@ -102,7 +102,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
     debug!("Log level set to '{}'", loglevel);
 
     // 4. Cryptography: Load key and derive Cookie Key
-    let priv_base64 = fs::read_to_string(private_key_path())?;
+    let priv_base64 = tokio::fs::read_to_string(private_key_path()).await?;
     let priv_bytes = general_purpose::STANDARD.decode(priv_base64.trim())?;
 
     if priv_bytes.len() != 32 {
@@ -135,7 +135,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
     // Held until the process exits.
     let _instance_lock = scmserver::instance_lock::acquire(&db_file)?;
     if !std::path::Path::new(&db_file).exists() {
-        fs::File::create(&db_file)
+        tokio::fs::File::create(&db_file).await
             .map_err(|e| format!("Cannot create database file '{}': {}", db_file, e))?;
     }
 

@@ -221,24 +221,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         return Ok(());
     }
 
-    let _instance_lock = {
-        use fs2::FileExt;
-        use std::io::{Seek, SeekFrom, Write};
-        let lock_path = config::lock_path();
-        let mut file = std::fs::OpenOptions::new()
-            .create(true).read(true).write(true)
-            .open(lock_path)
-            .map_err(|e| { error!("Cannot open lock file {}: {}", lock_path, e); e })?;
-        if file.try_lock_exclusive().is_err() {
-            warn!("Another scmclient instance already holds {} — exiting to avoid \
-                   duplicate agents.", lock_path);
-            return Ok(());
-        }
-        // Record our PID in the lock file for operators (best-effort, cosmetic).
-        let _ = file.set_len(0);
-        let _ = file.seek(SeekFrom::Start(0));
-        let _ = writeln!(&file, "{}", std::process::id());
-        file
+    let _instance_lock = match tokio::task::spawn_blocking(acquire_instance_lock).await?? {
+        Some(file) => file,
+        None => return Ok(()),
     };
 
     // 4. Load config
@@ -339,6 +324,31 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         debug!("Next heartbeat in {} seconds", sleep_time);
         sleep(Duration::from_secs(sleep_time)).await;
     }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Helper: acquire_instance_lock
+// Takes the exclusive lock file so only one agent runs. None when another
+// instance holds it. Blocking file I/O, so main runs it on a blocking thread.
+// ─────────────────────────────────────────────────────────────────────────────
+fn acquire_instance_lock() -> std::io::Result<Option<std::fs::File>> {
+    use fs2::FileExt;
+    use std::io::{Seek, SeekFrom, Write};
+    let lock_path = config::lock_path();
+    let mut file = std::fs::OpenOptions::new()
+        .create(true).read(true).write(true)
+        .open(lock_path)
+        .map_err(|e| { error!("Cannot open lock file {}: {}", lock_path, e); e })?;
+    if file.try_lock_exclusive().is_err() {
+        warn!("Another scmclient instance already holds {} — exiting to avoid \
+               duplicate agents.", lock_path);
+        return Ok(None);
+    }
+    // Record our PID in the lock file for operators (best-effort, cosmetic).
+    let _ = file.set_len(0);
+    let _ = file.seek(SeekFrom::Start(0));
+    let _ = writeln!(&file, "{}", std::process::id());
+    Ok(Some(file))
 }
 
 fn print_usage() {

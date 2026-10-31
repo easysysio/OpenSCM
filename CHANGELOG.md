@@ -31,6 +31,7 @@ All notable changes to OpenSCM are documented here.
 - CI hardening from a SonarCloud scan: third-party GitHub Actions are pinned to full commit SHAs (the tag is kept in a comment), the `nfpm` and `cargo-zigbuild` downloads refuse anything but HTTPS with TLS 1.2 or newer, and every release build runs with `--locked` so it uses exactly the committed `Cargo.lock`.
 - The server binary no longer embeds 45 AdminLTE plugins that no page uses (code editors, calendars, maps, rich-text editors and so on), nor the unminified, unused-variant and old-font-format files of the plugins it keeps; only the files the pages load remain. Embedded static files drop from 100 MB to 49 MB, and the code-scan findings in vendored code go with them.
 - An agent that upgrades itself gives the new binary the same file mode as the one it replaces, instead of always `0755`.
+- A scheduled or "Back up now" backup no longer ties up the server while it compresses and encrypts: that work, and the verify that follows, now runs on a separate thread, so pages and agent check-ins keep being answered. Restore and the remaining file reads and writes in the agent and server startup moved off the async threads the same way.
 
 ---
 
