@@ -1,12 +1,15 @@
 openapi: 3.1.0
 info:
   title: OpenSCM REST API
-  version: v1beta1
+  version: v1
   summary: Read compliance data, trigger scans and onboard systems from your own tools.
   description: |
-    The API of an OpenSCM server (Community Edition or SaaS), at `/api/v1beta1`.
-    It is a beta: it may still change in 0.x releases, and every change is noted
-    in the CHANGELOG. It becomes `/api/v1`, frozen, once integrations have used it.
+    The API of an OpenSCM server (Community Edition or SaaS), at `/api/v1`.
+
+    **Stability.** Frozen from OpenSCM 1.0.0: fields and endpoints may be
+    added, but nothing is renamed or removed, or changes type or meaning. A
+    breaking change would be `/api/v2`. The deprecated beta, `/api/v1beta1`,
+    is described in openapi-v1beta1.yaml until 1.1.0 removes it.
 
     **Authentication.** Every request sends an API token, created under
     *user menu → API tokens*:
@@ -23,14 +26,20 @@ info:
     422 `plan_limit`, 429 `rate_limited` (with `Retry-After`),
     503 `not_installed`.
 
-    **Lists** return `{"data": […], "next_cursor": "…" | null}`. Pass
-    `cursor=<next_cursor>` for the next page; `limit` is 1–1000 (default 100).
+    **Lists** return `{"data": […], "next_cursor": "…" | null, "resume_cursor": "…"}`.
+    Pass `cursor=<next_cursor>` for the next page; `limit` is 1–1000 (default
+    100). `resume_cursor` marks the last item returned: pass it as `cursor`
+    later to get only what was added since.
+
+    **Formats.** Timestamps are ISO 8601 UTC ending in `Z`, in fields whose
+    names end in `_at`. Scores are percentages rounded to 2 decimals, and
+    `null` when nothing has been scanned.
 
     **Rate limit:** 600 requests a minute per token.
   license:
     name: AGPL-3.0
 servers:
-  - url: https://your-openscm-server/api/v1beta1
+  - url: https://your-openscm-server/api/v1
 security:
   - bearer: []
 
@@ -106,7 +115,7 @@ paths:
       summary: A system's compliance
       description: Viewer. Every policy linked to the system, each test's latest result, evidence and exclusion — the same data as the system report page and a saved system report.
       responses:
-        "200": {description: The system report., content: {application/json: {schema: {type: object}}}}
+        "200": {description: The system report., content: {application/json: {schema: {$ref: "#/components/schemas/SystemCompliance"}}}}
         "404": {$ref: "#/components/responses/NotFound"}
   /systems/{system_id}/results/{test_id}/exclusion:
     parameters:
@@ -133,14 +142,14 @@ paths:
       description: Viewer.
       parameters: [{$ref: "#/components/parameters/limit"}, {$ref: "#/components/parameters/cursor"}]
       responses:
-        "200": {description: A page of groups., content: {application/json: {schema: {$ref: "#/components/schemas/Page"}}}}
+        "200": {description: A page of groups., content: {application/json: {schema: {$ref: "#/components/schemas/GroupPage"}}}}
   /groups/{id}:
     parameters: [{$ref: "#/components/parameters/id"}]
     get:
       summary: Get a group, with its systems and linked policies
       description: Viewer.
       responses:
-        "200": {description: The group., content: {application/json: {schema: {type: object}}}}
+        "200": {description: The group., content: {application/json: {schema: {$ref: "#/components/schemas/Group"}}}}
         "404": {$ref: "#/components/responses/NotFound"}
 
   /tests:
@@ -149,14 +158,14 @@ paths:
       description: Viewer.
       parameters: [{$ref: "#/components/parameters/limit"}, {$ref: "#/components/parameters/cursor"}]
       responses:
-        "200": {description: A page of tests., content: {application/json: {schema: {$ref: "#/components/schemas/Page"}}}}
+        "200": {description: A page of tests., content: {application/json: {schema: {$ref: "#/components/schemas/TestPage"}}}}
   /tests/{id}:
     parameters: [{$ref: "#/components/parameters/id"}]
     get:
       summary: Get a test, with its conditions
       description: Viewer.
       responses:
-        "200": {description: The test., content: {application/json: {schema: {type: object}}}}
+        "200": {description: The test., content: {application/json: {schema: {$ref: "#/components/schemas/Test"}}}}
         "404": {$ref: "#/components/responses/NotFound"}
 
   /policies:
@@ -165,7 +174,7 @@ paths:
       description: Viewer.
       parameters: [{$ref: "#/components/parameters/limit"}, {$ref: "#/components/parameters/cursor"}]
       responses:
-        "200": {description: A page of policies., content: {application/json: {schema: {$ref: "#/components/schemas/Page"}}}}
+        "200": {description: A page of policies., content: {application/json: {schema: {$ref: "#/components/schemas/PolicyPage"}}}}
   /policies/import:
     post:
       summary: Import a policy
@@ -184,7 +193,7 @@ paths:
       summary: Get a policy, with its tests and groups
       description: Viewer.
       responses:
-        "200": {description: The policy., content: {application/json: {schema: {type: object}}}}
+        "200": {description: The policy., content: {application/json: {schema: {$ref: "#/components/schemas/Policy"}}}}
         "404": {$ref: "#/components/responses/NotFound"}
   /policies/{id}/compliance:
     parameters: [{$ref: "#/components/parameters/id"}]
@@ -192,15 +201,15 @@ paths:
       summary: A policy's compliance
       description: Viewer. Every system in scope and each test's result — the live policy report, as on the policy report page.
       responses:
-        "200": {description: The policy report., content: {application/json: {schema: {type: object}}}}
+        "200": {description: The policy report., content: {application/json: {schema: {$ref: "#/components/schemas/PolicyCompliance"}}}}
         "404": {$ref: "#/components/responses/NotFound"}
   /policies/{id}/run:
     parameters: [{$ref: "#/components/parameters/id"}]
     post:
       summary: Run a policy now
-      description: Runner. Queues the policy's tests on every system in scope; results arrive as agents report.
+      description: Runner. Queues the policy's tests on every system in scope; results arrive as agents report. A result is from this run once its checked_at is at or after queued_at.
       responses:
-        "202": {description: Queued., content: {application/json: {schema: {type: object}}}}
+        "202": {description: Queued., content: {application/json: {schema: {$ref: "#/components/schemas/RunQueued"}}}}
         "404": {$ref: "#/components/responses/NotFound"}
 
   /reports/{kind}:
@@ -210,7 +219,7 @@ paths:
       description: Viewer.
       parameters: [{$ref: "#/components/parameters/limit"}, {$ref: "#/components/parameters/cursor"}]
       responses:
-        "200": {description: A page of saved reports., content: {application/json: {schema: {$ref: "#/components/schemas/Page"}}}}
+        "200": {description: A page of saved reports., content: {application/json: {schema: {$ref: "#/components/schemas/SavedReportPage"}}}}
     post:
       summary: Save a report now
       description: 'Runner. Body: {"policy_id": N} for a policy report, {"system_id": N} for a system report. In SaaS, 422 when the plan''s report limit is reached.'
@@ -225,9 +234,9 @@ paths:
     parameters: [{$ref: "#/components/parameters/kind"}, {$ref: "#/components/parameters/id"}]
     get:
       summary: Get a saved report
-      description: Viewer. The snapshot exactly as saved.
+      description: Viewer. The snapshot as saved. Results carry no checked_at; a policy report's results have system_id and test_id null.
       responses:
-        "200": {description: The report., content: {application/json: {schema: {type: object}}}}
+        "200": {description: The report., content: {application/json: {schema: {$ref: "#/components/schemas/SavedReport"}}}}
         "404": {$ref: "#/components/responses/NotFound"}
   /reports/{kind}/{id}/pdf:
     parameters: [{$ref: "#/components/parameters/kind"}, {$ref: "#/components/parameters/id"}]
@@ -248,7 +257,7 @@ paths:
         - {name: since, in: query, description: "ISO 8601 UTC; entries at or after it.", schema: {type: string, format: date-time}}
         - {name: action, in: query, description: "Actions starting with this, e.g. system. or auth.login_failure.", schema: {type: string}}
       responses:
-        "200": {description: A page of entries., content: {application/json: {schema: {$ref: "#/components/schemas/Page"}}}}
+        "200": {description: A page of entries., content: {application/json: {schema: {$ref: "#/components/schemas/AuditPage"}}}}
         "403": {$ref: "#/components/responses/Forbidden"}
 
 components:
@@ -275,7 +284,8 @@ components:
       type: object
       properties:
         data: {type: array, items: {type: object}}
-        next_cursor: {type: [string, "null"]}
+        next_cursor: {type: [string, "null"], description: "The next page's cursor; null on the last page."}
+        resume_cursor: {type: string, description: "The cursor after the last item returned, to carry on from later."}
     Me:
       type: object
       properties:
@@ -303,18 +313,17 @@ components:
         compliance:
           type: object
           properties:
-            score: {type: [number, "null"]}
+            score: {type: [number, "null"], description: "Rounded to 2 decimals; null when not scanned."}
             tests_passed: {type: [integer, "null"]}
             tests_failed: {type: [integer, "null"]}
             tests_total: {type: [integer, "null"]}
         telemetry: {type: object}
         created_at: {type: [string, "null"], format: date-time}
-        last_seen: {type: [string, "null"], format: date-time}
+        last_seen_at: {type: [string, "null"], format: date-time}
     SystemPage:
-      type: object
-      properties:
-        data: {type: array, items: {$ref: "#/components/schemas/System"}}
-        next_cursor: {type: [string, "null"]}
+      allOf:
+        - {$ref: "#/components/schemas/Page"}
+        - {properties: {data: {type: array, items: {$ref: "#/components/schemas/System"}}}}
     ImportSummary:
       type: object
       properties:
@@ -323,3 +332,225 @@ components:
         inserted_tests: {type: integer}
         updated_tests: {type: integer}
         unlinked_tests: {type: integer}
+    Counts:
+      type: object
+      properties:
+        passed: {type: integer}
+        failed: {type: integer}
+    Group:
+      type: object
+      properties:
+        id: {type: integer}
+        name: {type: string}
+        description: {type: [string, "null"]}
+        automatic: {type: boolean, description: "Members come from a rule, not from PUT /systems/{id}/groups."}
+        member_count: {type: integer}
+        systems: {type: array, description: "GET /groups/{id} only.", items: {type: object, properties: {id: {type: integer}, name: {type: string}}}}
+        policies: {type: array, description: "GET /groups/{id} only.", items: {type: object, properties: {id: {type: integer}, name: {type: string}}}}
+    GroupPage:
+      allOf:
+        - {$ref: "#/components/schemas/Page"}
+        - {properties: {data: {type: array, items: {$ref: "#/components/schemas/Group"}}}}
+    Test:
+      type: object
+      properties:
+        id: {type: integer}
+        name: {type: string}
+        description: {type: [string, "null"]}
+        rationale: {type: [string, "null"]}
+        remediation: {type: [string, "null"]}
+        severity: {type: string}
+        filter: {type: [string, "null"]}
+        app_filter: {type: [string, "null"]}
+        external_id: {type: [string, "null"]}
+        compliance:
+          type: object
+          properties:
+            score: {type: [number, "null"]}
+            systems: {$ref: "#/components/schemas/Counts", description: "Systems where the test passes, and fails."}
+        conditions: {type: array, description: "GET /tests/{id} only.", items: {type: object}}
+        applicability: {type: array, description: "GET /tests/{id} only.", items: {type: object}}
+    TestPage:
+      allOf:
+        - {$ref: "#/components/schemas/Page"}
+        - {properties: {data: {type: array, items: {$ref: "#/components/schemas/Test"}}}}
+    Policy:
+      type: object
+      properties:
+        id: {type: integer}
+        name: {type: string}
+        version: {type: string}
+        description: {type: [string, "null"]}
+        author: {type: [string, "null"]}
+        external_id: {type: [string, "null"]}
+        compliance:
+          type: object
+          properties:
+            score: {type: [number, "null"], description: "By scoring_mode; null when not scanned."}
+            scoring_mode: {type: string, enum: [test, system], description: "Settings → Compliance."}
+            score_by_test: {type: [number, "null"]}
+            score_by_system: {type: [number, "null"]}
+            score_by_container: {type: [number, "null"]}
+            tests: {$ref: "#/components/schemas/Counts", description: "Test results passed and failed."}
+            systems: {$ref: "#/components/schemas/Counts", description: "Systems passing every test, and systems with a failure."}
+        tests: {type: array, description: "GET /policies/{id} only.", items: {type: object, properties: {id: {type: integer}, name: {type: string}, severity: {type: string}}}}
+        groups: {type: array, description: "GET /policies/{id} only.", items: {type: object, properties: {id: {type: integer}, name: {type: string}}}}
+    PolicyPage:
+      allOf:
+        - {$ref: "#/components/schemas/Page"}
+        - {properties: {data: {type: array, items: {$ref: "#/components/schemas/Policy"}}}}
+    Evidence:
+      type: object
+      description: One check the agent made.
+      properties:
+        phase: {type: string, enum: [applicability, condition]}
+        element: {type: string}
+        input: {type: string}
+        selement: {type: string}
+        operator: {type: string}
+        expected: {type: string}
+        result: {type: string}
+        note: {type: string}
+    Result:
+      type: object
+      properties:
+        test_id: {type: [integer, "null"]}
+        test_name: {type: string}
+        system_id: {type: [integer, "null"]}
+        status: {type: string, enum: [PASS, FAIL, NA, NOT_SCANNED]}
+        is_excluded: {type: boolean}
+        excluded_reason: {type: [string, "null"]}
+        evidence: {type: [array, "null"], items: {$ref: "#/components/schemas/Evidence"}}
+        checked_at: {type: [string, "null"], format: date-time, description: "When the server received the result; null when not scanned. Live reports only."}
+    Container:
+      type: object
+      properties:
+        container_id: {type: integer}
+        name: {type: string}
+        runtime: {type: string}
+        image: {type: [string, "null"]}
+        compliance_score: {type: [number, "null"]}
+        pass_count: {type: integer}
+        fail_count: {type: integer}
+        na_count: {type: integer}
+        results: {type: array, items: {$ref: "#/components/schemas/Result"}}
+    SystemCompliance:
+      type: object
+      properties:
+        system_id: {type: integer}
+        system_name: {type: string}
+        os: {type: string}
+        arch: {type: string}
+        ip: {type: string}
+        last_seen_at: {type: [string, "null"], format: date-time}
+        generated_at: {type: string, format: date-time, description: "Live report only."}
+        compliance_score: {type: [number, "null"]}
+        total_pass: {type: integer}
+        total_fail: {type: integer}
+        total_na: {type: integer}
+        policy_groups:
+          type: array
+          items:
+            type: object
+            properties:
+              policy_id: {type: integer}
+              policy_name: {type: string}
+              policy_version: {type: string}
+              policy_description: {type: [string, "null"]}
+              pass_count: {type: integer}
+              fail_count: {type: integer}
+              na_count: {type: integer}
+              excluded_count: {type: integer}
+              is_passed: {type: boolean}
+              results: {type: array, items: {$ref: "#/components/schemas/Result"}}
+        containers: {type: array, items: {$ref: "#/components/schemas/Container"}}
+    SystemReport:
+      type: object
+      description: One system in a policy report.
+      properties:
+        system_id: {type: [integer, "null"], description: "null in saved reports."}
+        system_name: {type: string}
+        pass_count: {type: integer}
+        fail_count: {type: integer}
+        na_count: {type: integer}
+        excluded_count: {type: integer}
+        is_passed: {type: boolean}
+        results: {type: array, items: {$ref: "#/components/schemas/Result"}}
+        containers: {type: array, items: {$ref: "#/components/schemas/Container"}}
+    TestMeta:
+      type: object
+      properties:
+        name: {type: string}
+        description: {type: string}
+        rationale: {type: string}
+        remediation: {type: string}
+    PolicyCompliance:
+      type: object
+      properties:
+        policy_id: {type: integer}
+        policy_name: {type: string}
+        version: {type: string}
+        description: {type: [string, "null"]}
+        generated_at: {type: string, format: date-time}
+        compliance_score: {type: [number, "null"]}
+        total_pass: {type: integer}
+        total_fail: {type: integer}
+        total_na: {type: integer}
+        total_excluded: {type: integer}
+        system_reports: {type: array, items: {$ref: "#/components/schemas/SystemReport"}}
+        tests_metadata: {type: array, items: {$ref: "#/components/schemas/TestMeta"}}
+    RunQueued:
+      type: object
+      properties:
+        policy_id: {type: integer}
+        queued_at: {type: string, format: date-time}
+        systems:
+          type: array
+          description: Active systems in the policy's scope.
+          items: {type: object, properties: {id: {type: integer}, name: {type: string}, online: {type: boolean}}}
+    SavedReportItem:
+      type: object
+      properties:
+        id: {type: integer}
+        kind: {type: string, enum: [policy, system]}
+        saved_at: {type: string, format: date-time}
+        saved_by: {type: string}
+        policy:
+          type: object
+          description: Policy reports.
+          properties:
+            id: {type: [integer, "null"], description: "null for reports saved before 1.0 whose policy could not be told apart by name."}
+            name: {type: string}
+            version: {type: string}
+            description: {type: [string, "null"], description: "GET /reports/policy/{id} only."}
+        system:
+          type: object
+          description: System reports.
+          properties:
+            id: {type: integer}
+            name: {type: string}
+    SavedReportPage:
+      allOf:
+        - {$ref: "#/components/schemas/Page"}
+        - {properties: {data: {type: array, items: {$ref: "#/components/schemas/SavedReportItem"}}}}
+    SavedReport:
+      allOf:
+        - {$ref: "#/components/schemas/SavedReportItem"}
+        - properties:
+            systems: {type: array, description: Policy reports., items: {$ref: "#/components/schemas/SystemReport"}}
+            tests: {type: array, description: Policy reports., items: {$ref: "#/components/schemas/TestMeta"}}
+            report: {$ref: "#/components/schemas/SystemCompliance", description: "System reports; null if the snapshot cannot be read."}
+    AuditEntry:
+      type: object
+      properties:
+        id: {type: integer}
+        created_at: {type: string, format: date-time}
+        action: {type: string}
+        actor: {type: object, properties: {id: {type: [integer, "null"]}, username: {type: string}}}
+        target: {type: object, properties: {type: {type: [string, "null"]}, id: {type: [string, "null"]}}}
+        details: {type: [object, "null"], description: "Entries written as text before 1.0 come as {\"message\": \"…\"}."}
+        ip: {type: [string, "null"]}
+    AuditPage:
+      allOf:
+        - {$ref: "#/components/schemas/Page"}
+        - {properties: {data: {type: array, items: {$ref: "#/components/schemas/AuditEntry"}}}}

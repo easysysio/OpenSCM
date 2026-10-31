@@ -6,16 +6,22 @@ provisioning that approves new systems. It is available in Community Edition
 and SaaS, at:
 
 ```
-https://your-openscm-server/api/v1beta1
+https://your-openscm-server/api/v1
 ```
 
-!!! info "Beta"
-    `v1beta1` is usable and documented, but may still change in 0.x releases.
-    Every change is listed in the CHANGELOG. It becomes `/api/v1`, frozen,
-    once integrations have used it.
+!!! success "Stable"
+    `/api/v1` is frozen from OpenSCM 1.0.0. Fields and endpoints may be
+    added, but nothing is renamed or removed, or changes type or meaning. A
+    breaking change would be a new version, `/api/v2`.
+
+!!! warning "`/api/v1beta1` is deprecated"
+    The beta API still answers in 1.0, exactly as before, with a
+    `Deprecation: true` header. It is removed in 1.1.0. See
+    [Moving from v1beta1](#moving-from-v1beta1).
 
 The full reference is the OpenAPI file, [`openapi.yaml`](../api/openapi.yaml).
-Load it into any OpenAPI viewer or client generator.
+Load it into any OpenAPI viewer or client generator. The beta's is
+[`openapi-v1beta1.yaml`](../api/openapi-v1beta1.yaml).
 
 ---
 
@@ -32,7 +38,7 @@ your CI system's secret store, and refer to that:
 
 ```bash
 export OPENSCM_TOKEN='oscm_api_…'
-export API=https://your-openscm-server/api/v1beta1
+export API=https://your-openscm-server/api/v1
 ```
 
 **3. Make the first call.** `/me` says who the token acts as:
@@ -58,7 +64,7 @@ read the JSON, and these two variables:
 
 ```bash
 AUTH="Authorization: Bearer $OPENSCM_TOKEN"
-API=https://your-openscm-server/api/v1beta1
+API=https://your-openscm-server/api/v1
 ```
 
 ---
@@ -94,7 +100,7 @@ Send the token in the `Authorization` header:
 
 ```bash
 curl -H "Authorization: Bearer oscm_api_…" \
-  https://your-openscm-server/api/v1beta1/me
+  https://your-openscm-server/api/v1/me
 ```
 
 ```json
@@ -103,18 +109,23 @@ curl -H "Authorization: Bearer oscm_api_…" \
 ```
 
 Bodies are JSON (`Content-Type: application/json`). Timestamps are ISO 8601
-UTC with `Z`.
+UTC with `Z`, in fields whose names end in `_at`. Scores are percentages
+rounded to 2 decimals, and `null` when nothing has been scanned yet.
 
 ### Lists and paging
 
 Lists return a page and, if there is more, a cursor for the next one:
 
 ```json
-{"data": [ … ], "next_cursor": "MTAw"}
+{"data": [ … ], "next_cursor": "MTAw", "resume_cursor": "MTAw"}
 ```
 
 Request the next page with `?cursor=MTAw`. `limit` sets the page size, 1–1000
-(default 100).
+(default 100). `next_cursor` is `null` on the last page.
+
+`resume_cursor` is always there: it marks the last item returned. Keep it,
+and pass it as `cursor` later to get only what was added since. The
+[SIEM example](#send-the-audit-log-to-a-siem-admin) works this way.
 
 ### Errors
 
@@ -205,7 +216,7 @@ done
 
 ```
 1	web-01	active	100.0
-2	web-02	active	66.66666666666666
+2	web-02	active	66.67
 3	db-01	active	100.0
 4	web-03	pending
 ```
@@ -218,20 +229,21 @@ One system, as `GET /systems/{id}` and in each list item:
   "name": "web-02",
   "status": "active",
   "online": true,
-  "last_seen": "2026-10-29T19:43:02Z",
+  "last_seen_at": "2026-10-29T19:43:02Z",
   "created_at": "2026-10-20T08:12:44Z",
   "ip": "10.0.1.12",
   "os": "Debian GNU/Linux 12 (bookworm)",
   "arch": "x86_64",
   "groups": [{"id": 1, "name": "web-servers"}],
   "agent": {"version": "0.13.0", "protocol": 1, "upgrade_available": null},
-  "compliance": {"score": 66.66666666666666, "tests_passed": 2, "tests_failed": 1, "tests_total": 3},
+  "compliance": {"score": 66.67, "tests_passed": 2, "tests_failed": 1, "tests_total": 3},
   "telemetry": {"cpu_usage": 7.5, "mem_used_mb": 812, "mem_total_mb": 3936,
                 "disk_used_gb": 9.1, "disk_total_gb": 39.2, "uptime_secs": 1209600}
 }
 ```
 
-Filter with `?status=active|pending` and `?group=<group id>`.
+Filter with `?status=active|pending` and `?group=<group id>`. A system not
+yet scanned has `"score": null`.
 
 ### Approve new systems and put them in a group (Editor)
 
@@ -273,7 +285,7 @@ curl -sf -H "$AUTH" "$API/systems/2/compliance" | jq -r '
   .policy_groups[] as $p
   | $p.results[]
   | select(.status == "FAIL" and (.is_excluded | not))
-  | "\($p.policy_name): \(.test_name)\n    " + ((.evidence // "[]") | fromjson | map(.note) | join("; "))'
+  | "\($p.policy_name): \(.test_name)\n    " + (.evidence // [] | map(.note) | join("; "))'
 ```
 
 ```
@@ -287,62 +299,96 @@ The response, shortened:
 {
   "system_id": 2,
   "system_name": "web-02",
-  "compliance_score": 66.66666666666666,
+  "generated_at": "2026-10-31T12:28:27Z",
+  "last_seen_at": "2026-10-31T12:27:00Z",
+  "compliance_score": 66.67,
   "total_pass": 2, "total_fail": 1, "total_na": 0,
   "policy_groups": [{
     "policy_id": 7, "policy_name": "Linux baseline", "policy_version": "1.2",
     "pass_count": 2, "fail_count": 1, "na_count": 0, "excluded_count": 0, "is_passed": false,
     "results": [{
-      "test_id": 11, "test_name": "SSH: root login disabled",
-      "status": "FAIL", "is_excluded": false,
-      "evidence": "[{\"phase\":\"condition\",\"element\":\"FILE\",\"input\":\"/etc/ssh/sshd_config\",\"selement\":\"CONTENT\",\"operator\":\"CONTAINS\",\"expected\":\"PermitRootLogin no\",\"result\":\"FAIL\",\"note\":\"expected to contain 'PermitRootLogin no' — not satisfied\"}]"
+      "test_id": 11, "test_name": "SSH: root login disabled", "system_id": 2,
+      "status": "FAIL", "is_excluded": false, "excluded_reason": null,
+      "checked_at": "2026-10-31T12:25:12Z",
+      "evidence": [{
+        "phase": "condition", "element": "FILE", "input": "/etc/ssh/sshd_config",
+        "selement": "CONTENT", "operator": "CONTAINS", "expected": "PermitRootLogin no",
+        "result": "FAIL", "note": "expected to contain 'PermitRootLogin no' — not satisfied"
+      }]
     }]
   }]
 }
 ```
 
-`status` is `PASS`, `FAIL` or `NA`. `evidence` is a JSON array **as a
-string** (hence `fromjson` above), and absent when the agent sent none.
+`status` is `PASS`, `FAIL`, `NA`, or `NOT_SCANNED` before the agent has
+reported the test. `evidence` is the agent's list of checks, or `null` when
+it sent none. `checked_at` is when the server received the result, `null`
+when not scanned.
 
 ### Policy scores for a dashboard, as CSV (Viewer)
 
 ```bash
 curl -sf -H "$AUTH" "$API/policies" | jq -r '
   ["policy", "version", "score"],
-  (.data[] | [.name, .version,
-              (if .compliance.score < 0 then "" else (.compliance.score * 100 | round / 100) end)])
+  (.data[] | [.name, .version, .compliance.score])
   | @csv'
 ```
 
 ```
 "policy","version","score"
 "Linux baseline","1.2",88.89
-"Web server hardening","1.0",""
+"Web server hardening","1.0",
 ```
 
-A score of `-1` means the policy has not been scanned yet. `compliance.score`
-follows **Settings → Compliance** (by test or by system); `score_by_test`
-and `score_by_system` give both. For every system and test result under one
-policy, use `GET /policies/{id}/compliance`, the live policy report.
+The score is empty when the policy has not been scanned yet (`null` in the
+JSON). One policy's `compliance`:
+
+```json
+{"score": 88.89, "scoring_mode": "test", "score_by_test": 88.89, "score_by_system": 66.67,
+ "score_by_container": null,
+ "tests": {"passed": 8, "failed": 1}, "systems": {"passed": 2, "failed": 1}}
+```
+
+`score` follows **Settings → Compliance**, and `scoring_mode` says which
+(`test` or `system`); `score_by_test` and `score_by_system` give both.
+`tests` counts results passed and failed; `systems` counts systems that pass
+every test and systems with a failure. For every system and test result under
+one policy, use `GET /policies/{id}/compliance`, the live policy report.
 
 ### Scan in CI and fail on a finding (Runner)
 
 ```bash
+set -e
 # Queue the policy's tests on its systems
-curl -sf -X POST -H "$AUTH" "$API/policies/7/run"
-# {"policy_id": 7, "queued": true}
+queued=$(curl -sf -X POST -H "$AUTH" "$API/policies/7/run" | jq -r .queued_at)
 
-# Agents run them at their next check-in. Wait longer than their heartbeat
-# interval (300 seconds by default) before reading the result.
-sleep 360
+# Wait, at most 15 minutes, until every result of the policy on system 42
+# was checked after the run was queued
+for i in $(seq 90); do
+  results=$(curl -sf -H "$AUTH" "$API/systems/42/compliance" |
+            jq '[.policy_groups[] | select(.policy_id == 7) | .results[]]')
+  echo "$results" | jq -e --arg q "$queued" 'all((.checked_at // "") >= $q)' > /dev/null && break
+  [ "$i" = 90 ] && { echo "no fresh results after 15 minutes"; exit 1; }
+  sleep 10
+done
 
-curl -sf -H "$AUTH" "$API/systems/42/compliance" | jq -e '
-  [.policy_groups[].results[] | select(.status == "FAIL" and (.is_excluded | not))]
-  | length == 0'
+# Fail the step on an open finding
+echo "$results" | jq -e 'all(.status != "FAIL" or .is_excluded)'
 ```
 
-`jq -e` exits non-zero when the last expression is `false`, so the CI step
-fails while the system has an open finding.
+Running a policy answers with when it was queued and the systems it reached:
+
+```json
+{"policy_id": 7, "queued_at": "2026-10-31T12:32:03Z",
+ "systems": [{"id": 41, "name": "web-01", "online": true}, {"id": 42, "name": "web-02", "online": true}]}
+```
+
+Agents run the tests at their next check-in (every 300 seconds by default).
+A result is from this run once its `checked_at` is at or after `queued_at`;
+both are whole seconds in UTC, so comparing them as text works. A system that
+is not `online` won't answer until it is back. `jq -e` exits non-zero when
+its last expression is `false`, so the CI step fails while the system has an
+open finding.
 
 ### Save a monthly report and download the PDF (Runner)
 
@@ -359,10 +405,13 @@ system, use `/reports/system` with `{"system_id": 42}`. `GET /reports/policy`
 lists saved reports, oldest first:
 
 ```json
-{"data": [{"id": 1, "kind": "policy", "policy": {"name": "Linux baseline", "version": "1.2"},
-           "saved_at": "2026-10-29T19:45:07Z", "saved_by": "alice"}],
- "next_cursor": null}
+{"data": [{"id": 1, "kind": "policy", "policy": {"id": 7, "name": "Linux baseline", "version": "1.2"},
+           "saved_at": "2026-10-31T12:33:57Z", "saved_by": "alice"}],
+ "next_cursor": null, "resume_cursor": "MQ"}
 ```
+
+`policy.id` is `null` for reports saved before 1.0 whose policy could not be
+told apart by name.
 
 ### Accept a risk, with the reason (Editor)
 
@@ -430,27 +479,29 @@ and history is kept. A minimal file:
 }
 ```
 
+This is the policy export's file format, which is separate from the API's
+answers and keeps its own field names, such as `rational`.
+
 ### Send the audit log to a SIEM (Admin)
 
 The audit log is returned oldest first. This script, run from cron, appends
 new entries to a file one JSON object per line (for Splunk, Elastic or
-Wazuh to pick up) and remembers where it stopped:
+Wazuh to pick up). It keeps `resume_cursor`, so each run starts where the
+last one stopped:
 
 ```bash
 #!/bin/bash
 set -euo pipefail
-API=https://your-openscm-server/api/v1beta1
+API=https://your-openscm-server/api/v1
 AUTH="Authorization: Bearer $OPENSCM_TOKEN"   # an Admin token
-STATE=/var/lib/openscm-siem/last              # "<last id> <its time>"
+STATE=/var/lib/openscm-siem/cursor            # where the last run stopped
 OUT=/var/log/openscm-audit.jsonl
 
-{ read -r last_id since < "$STATE"; } 2>/dev/null || { last_id=0; since=1970-01-01T00:00:00Z; }
-cursor=""
+cursor=$(cat "$STATE" 2>/dev/null || true)
 while :; do
-  page=$(curl -sf -H "$AUTH" "$API/audit-log?since=$since&limit=500${cursor:+&cursor=$cursor}")
-  echo "$page" | jq -c --argjson last "$last_id" '.data[] | select(.id > $last)' >> "$OUT"
-  newest=$(echo "$page" | jq -r '.data[-1] // empty | "\(.id) \(.at)"')
-  [ -n "$newest" ] && echo "$newest" > "$STATE"
+  page=$(curl -sf -H "$AUTH" "$API/audit-log?limit=500${cursor:+&cursor=$cursor}")
+  echo "$page" | jq -c '.data[]' >> "$OUT"
+  echo "$page" | jq -r .resume_cursor > "$STATE"
   cursor=$(echo "$page" | jq -r '.next_cursor // empty')
   [ -z "$cursor" ] && break
 done
@@ -459,14 +510,16 @@ done
 One entry:
 
 ```json
-{"id": 9, "at": "2026-10-29T19:46:24Z", "action": "policy.run",
- "actor": {"id": 1, "username": "alice"}, "target": {"type": "policy", "id": "7"},
- "details": {"via": "api", "token": "runner-token"}, "ip": "203.0.113.7"}
+{"id": 6, "created_at": "2026-10-31T12:33:47Z", "action": "system.approve",
+ "actor": {"id": 1, "username": "alice"}, "target": {"type": "system", "id": "4"},
+ "details": {"via": "api", "token": "editor-token"}, "ip": "203.0.113.7"}
 ```
 
 `?action=` keeps only actions starting with a prefix, e.g. `?action=auth.`
-for sign-ins. `details` is text for most entries and an object for changes
-made through the API.
+for sign-ins; `?since=` only entries at or after an ISO 8601 time. `details`
+is always an object, or `null`: for example `{"reason": "bad_password"}` on a
+failed sign-in. Entries written as text before 1.0 come as
+`{"message": "…"}`.
 
 ### Upgrade an agent (Admin)
 
@@ -500,7 +553,7 @@ import time
 import urllib.error
 import urllib.request
 
-API = os.environ.get("OPENSCM_URL", "https://your-openscm-server") + "/api/v1beta1"
+API = os.environ.get("OPENSCM_URL", "https://your-openscm-server") + "/api/v1"
 TOKEN = os.environ["OPENSCM_TOKEN"]
 
 
@@ -541,7 +594,7 @@ for system in all_pages("/systems?status=active&limit=500"):
     for policy in report["policy_groups"]:
         for r in policy["results"]:
             if r["status"] == "FAIL" and not r["is_excluded"]:
-                why = "; ".join(c["note"] for c in json.loads(r.get("evidence") or "[]"))
+                why = "; ".join(c["note"] for c in r["evidence"] or [])
                 print(f"{system['name']}\t{policy['policy_name']}\t{r['test_name']}\t{why}")
 ```
 
@@ -557,7 +610,7 @@ report: `call("POST", "/reports/policy", {"policy_id": 7})`.
 ## PowerShell
 
 ```powershell
-$Api     = "https://your-openscm-server/api/v1beta1"
+$Api     = "https://your-openscm-server/api/v1"
 $Headers = @{ Authorization = "Bearer $env:OPENSCM_TOKEN" }
 
 # Who am I?
@@ -585,3 +638,32 @@ Invoke-WebRequest -Uri "$Api/reports/policy/$($report.id)/pdf" -Headers $Headers
 
 `Invoke-RestMethod` throws on an error status; the error body is in
 `$_.ErrorDetails.Message`.
+
+---
+
+## Moving from v1beta1
+
+`/api/v1` has the same endpoints, tokens, roles, rate limit and errors as
+`/api/v1beta1`. Change the address, then check your scripts against this
+list; anything not in it is unchanged.
+
+| | v1beta1 | v1 |
+|---|---|---|
+| Address | `/api/v1beta1/…` | `/api/v1/…` |
+| Scores | Unrounded, e.g. `66.66666666666666`; `-1` when not scanned | Rounded to 2 decimals; `null` when not scanned |
+| Timestamps | `last_seen`, the audit log's `at`; the compliance answers use `2026-10-29 19:43 UTC` | Always ISO 8601 UTC with `Z`, in fields ending `_at`: `last_seen_at`, `created_at` |
+| `evidence` | A JSON array inside a string | An array, or `null` |
+| When a result arrived | Not given | `checked_at` on every live result |
+| `POST /policies/{id}/run` | `{"policy_id": 7, "queued": true}` | `{"policy_id": 7, "queued_at": "…", "systems": [{"id", "name", "online"}]}` |
+| Policy counts | `systems_passed`/`systems_failed`, which counted test results when scoring by test | `tests: {passed, failed}` and `systems: {passed, failed}` in either mode, plus `scoring_mode` |
+| Test counts | `systems_passed`/`systems_failed` | `systems: {passed, failed}` |
+| Audit `details` | Text or an object | Always an object, or `null`; old text entries as `{"message": "…"}` |
+| Lists | `data`, `next_cursor` | Also `resume_cursor`, to carry on later from where you stopped |
+| `GET /policies/{id}/compliance` | `submitter_name`, `submission_date` (meaningless on a live report) | Dropped; adds `generated_at`, and `system_id` on each system and result |
+| `GET /systems/{id}/compliance` | — | Adds `generated_at`, and `system_id` on each result |
+| Test descriptions in reports | `rational` | `rationale` |
+| Saved policy reports | `policy: {name, version}` | Also `policy.id` |
+
+Every `/api/v1beta1` answer carries `Deprecation: true` and a `Link` header
+pointing here, so you can find scripts still using it in your logs before
+1.1.0 removes it.
