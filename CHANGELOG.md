@@ -28,6 +28,7 @@ All notable changes to OpenSCM are documented here.
   - Policies now store both kinds of pass/fail count, whatever the compliance mode: test results passed and failed, and systems compliant and failing. The existing counts the pages show are unchanged.
   - A saved policy report records which policy it is of. Reports saved before this upgrade get the policy's id when exactly one policy in the organization has that name.
 - Audit log entries now always store `details` as a JSON object, or nothing. Sign-in failures, lockouts, password changes, auto groups, group deletes, enrollment tokens and agent enrollment, and backups used to write plain text; for example `bad_password` is now `{"reason": "bad_password"}`, and a backup is `{"trigger", "file", "size_bytes", "verified", "pruned"}`. Values are escaped properly, so a name with a quote in it no longer produces broken JSON. Entries already in the log are unchanged. The audit log page shows the JSON as stored.
+- CI hardening from a SonarCloud scan: third-party GitHub Actions are pinned to full commit SHAs (the tag is kept in a comment), the `nfpm` and `cargo-zigbuild` downloads refuse anything but HTTPS with TLS 1.2 or newer, and every release build runs with `--locked` so it uses exactly the committed `Cargo.lock`.
 
 ---
 
