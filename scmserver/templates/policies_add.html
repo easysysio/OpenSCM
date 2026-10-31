@@ -33,7 +33,7 @@
 
       {% if error_message %}
       <div class="alert alert-danger alert-dismissible shadow-sm">
-        <button type="button" class="close" data-dismiss="alert" aria-hidden="true">&times;</button>
+        <button type="button" class="close" data-dismiss="alert" aria-label="Close"><span aria-hidden="true">&times;</span></button>
         <h5><i class="icon fas fa-ban"></i> Error</h5>
         {{ error_message }}
       </div>
@@ -49,24 +49,24 @@
                 <div class="row">
                   <div class="col-md-8">
                     <div class="form-group">
-                      <label>Policy Name</label>
-                      <input type="text" name="name" class="form-control" placeholder="e.g., CIS Ubuntu 22.04 Level 1" required>
+                      <label for="name">Policy Name</label>
+                      <input id="name" type="text" name="name" class="form-control" placeholder="e.g., CIS Ubuntu 22.04 Level 1" required>
                     </div>
                   </div>
                   <div class="col-md-4">
                     <div class="form-group">
-                      <label>Version</label>
-                      <input type="text" name="version" class="form-control" placeholder="1.0.0" required>
+                      <label for="version">Version</label>
+                      <input id="version" type="text" name="version" class="form-control" placeholder="1.0.0" required>
                     </div>
                   </div>
                 </div>
                 <div class="form-group">
-                  <label>Policy Description</label>
-                  <textarea name="description" class="form-control" rows="2" placeholder="Describe the intent..."></textarea>
+                  <label for="description">Policy Description</label>
+                  <textarea id="description" name="description" class="form-control" rows="2" placeholder="Describe the intent..."></textarea>
                 </div>
                 <div class="form-group">
-                  <label>Author</label>
-                  <input type="text" name="author" class="form-control" placeholder="e.g., Security Team">
+                  <label for="author">Author</label>
+                  <input id="author" type="text" name="author" class="form-control" placeholder="e.g., Security Team">
                 </div>
               </div>
             </div>
@@ -78,7 +78,7 @@
             <div class="card card-info shadow-sm">
               <div class="card-header"><h3 class="card-title"><i class="fas fa-vial mr-2"></i>Select Security Tests</h3></div>
               <div class="card-body">
-                <select name="tests" class="duallistbox" multiple="multiple">
+                <label for="tests" class="sr-only">Tests in this policy</label><select id="tests" name="tests" class="duallistbox" multiple="multiple">
                   {% for test in tests %}
                     <option value="{{ test.id }}">{{ test.name }}</option>
                   {% endfor %}
@@ -90,7 +90,7 @@
             <div class="card card-success shadow-sm">
               <div class="card-header"><h3 class="card-title"><i class="fas fa-server mr-2"></i>Assign System Groups</h3></div>
               <div class="card-body">
-                <select name="system_groups" class="duallistbox" multiple="multiple">
+                <label for="system_groups" class="sr-only">System groups</label><select id="system_groups" name="system_groups" class="duallistbox" multiple="multiple">
                   {% for group in system_groups %}
                     {# Auto-managed groups get an ✨ prefix + the (auto) suffix
                        so admins can tell them apart from manual groups in the
@@ -142,15 +142,15 @@
                   </div>
                   <div class="col-md-4" id="cron-input-group" style="display: none;">
                     <div class="form-group">
-                      <label>Cron Expression</label>
-                      <input type="text" name="cron_val" class="form-control" placeholder="0 0 * * *">
+                      <label for="cron_val">Cron Expression</label>
+                      <input id="cron_val" type="text" name="cron_val" class="form-control" placeholder="0 0 * * *">
                       <small class="text-muted text-xs d-block">min hour day month day-of-week — evaluated in <strong>UTC</strong> (it is now <span class="schedule-utc-now">UTC</span>)</small>
                     </div>
                   </div>
                   <div class="col-md-4" id="next-run-group">
                     <div class="form-group">
-                      <label>First Execution Time</label>
-                      <input type="datetime-local" name="next_run" class="form-control schedule-time">
+                      <label for="next_run">First Execution Time</label>
+                      <input id="next_run" type="datetime-local" name="next_run" class="form-control schedule-time">
                       <input type="hidden" name="next_run_tz_offset">
                       <small class="text-muted text-xs schedule-tz-name">UTC</small>
                     </div>
@@ -194,15 +194,15 @@
                   </div>
                   <div class="col-md-4" id="report-cron-input-group" style="display: none;">
                     <div class="form-group">
-                      <label>Cron Expression</label>
-                      <input type="text" name="report_cron_val" class="form-control" placeholder="0 0 * * *">
+                      <label for="report_cron_val">Cron Expression</label>
+                      <input id="report_cron_val" type="text" name="report_cron_val" class="form-control" placeholder="0 0 * * *">
                       <small class="text-muted text-xs d-block">min hour day month day-of-week — evaluated in <strong>UTC</strong> (it is now <span class="schedule-utc-now">UTC</span>)</small>
                     </div>
                   </div>
                   <div class="col-md-4" id="report-next-run-group">
                     <div class="form-group">
-                      <label>First Execution Time</label>
-                      <input type="datetime-local" name="report_next_run" class="form-control schedule-time">
+                      <label for="report_next_run">First Execution Time</label>
+                      <input id="report_next_run" type="datetime-local" name="report_next_run" class="form-control schedule-time">
                       <input type="hidden" name="report_next_run_tz_offset">
                       <small class="text-muted text-xs schedule-tz-name">UTC</small>
                     </div>

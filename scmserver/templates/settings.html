@@ -899,8 +899,8 @@
 <script>
   // Update live preview when thresholds change
   function updatePreview() {
-    var sat = parseInt($('#compliance_sat').val()) || 80;
-    var marginal = parseInt($('#compliance_marginal').val()) || 60;
+    var sat = Number.parseInt($('#compliance_sat').val()) || 80;
+    var marginal = Number.parseInt($('#compliance_marginal').val()) || 60;
 
     // Update SAT bar — show a value just above sat threshold
     var satVal = Math.min(sat + 10, 100);
@@ -928,8 +928,8 @@
 
   // Validate sat > marginal on submit
   $('form').on('submit', function(e) {
-    var sat = parseInt($('#compliance_sat').val());
-    var marginal = parseInt($('#compliance_marginal').val());
+    var sat = Number.parseInt($('#compliance_sat').val());
+    var marginal = Number.parseInt($('#compliance_marginal').val());
     if (marginal >= sat) {
       e.preventDefault();
       alert('MARGINAL threshold must be less than SAT threshold.');

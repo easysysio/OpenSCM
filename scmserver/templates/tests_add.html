@@ -59,7 +59,7 @@
       
       {% if error_message %}
       <div class="alert alert-danger alert-dismissible shadow-sm">
-        <button type="button" class="close" data-dismiss="alert" aria-hidden="true">&times;</button>
+        <button type="button" class="close" data-dismiss="alert" aria-label="Close"><span aria-hidden="true">&times;</span></button>
         <h5><i class="icon fas fa-ban"></i> Attention</h5>
         {{ error_message }}
       </div>
@@ -79,13 +79,13 @@
                   <div class="col-md-9">
                     <div class="form-group">
                       <label for="name">Test Name</label>
-                      <input type="text" name="name" class="form-control" placeholder="e.g. Ensure SSH Protocol 2 is used" required>
+                      <input id="name" type="text" name="name" class="form-control" placeholder="e.g. Ensure SSH Protocol 2 is used" required>
                     </div>
                   </div>
                   <div class="col-md-3">
                     <div class="form-group">
                       <label for="severity">Severity Level</label>
-                      <select name="severity" class="form-control">
+                      <select id="severity" name="severity" class="form-control">
                         <option>Information</option>
                         <option>Low</option>
                         <option>Medium</option>
@@ -98,20 +98,20 @@
 
                 <div class="form-group">
                   <label for="description">General Description</label>
-                  <textarea name="description" class="form-control" rows="2" placeholder="Briefly describe what this test checks..."></textarea>
+                  <textarea id="description" name="description" class="form-control" rows="2" placeholder="Briefly describe what this test checks..."></textarea>
                 </div>
 
                 <div class="row">
                   <div class="col-md-6">
                     <div class="form-group">
                       <label for="rational">Rationale</label>
-                      <textarea name="rational" class="form-control" rows="3" placeholder="Why is this test important?"></textarea>
+                      <textarea id="rational" name="rational" class="form-control" rows="3" placeholder="Why is this test important?"></textarea>
                     </div>
                   </div>
                   <div class="col-md-6">
                     <div class="form-group">
                       <label for="remediation">Remediation Steps</label>
-                      <textarea name="remediation" class="form-control" rows="3" placeholder="How to fix a failure..."></textarea>
+                      <textarea id="remediation" name="remediation" class="form-control" rows="3" placeholder="How to fix a failure..."></textarea>
                     </div>
                   </div>
                 </div>
@@ -150,7 +150,7 @@
                   <div class="logic-container">
                     <div class="d-flex align-items-center mb-4">
                       <h5 class="m-0">Run this test if </h5>
-                      <select name="app_filter" class="form-control mx-2" style="width: auto;">
+                      <label for="app_filter" class="sr-only">Applicability conditions must match</label><select id="app_filter" name="app_filter" class="form-control mx-2" style="width: auto;">
                         <option value="all">ALL</option>
                         <option value="any">ANY</option>
                       </select>
@@ -162,7 +162,7 @@
                       <div class="condition-row mb-3 row align-items-end shadow-sm" data-id="app_cond_{{ i }}" {% if i != 1 %}style="display: none;"{% endif %}>
                         <div class="col-md-2">
                           <div class="condition-label">Subject</div>
-                          <select class="form-control" name="app_element_{{ i }}">
+                          <label for="app_element_{{ i }}" class="sr-only">Applicability element</label><select id="app_element_{{ i }}" class="form-control" name="app_element_{{ i }}">
                             <option value="" selected>-- Select --</option>
                             <optgroup label="Host">
                               {% for element in host_elements %}
@@ -179,12 +179,12 @@
 
                         <div class="col-md-2">
                           <div class="condition-label">Parameter</div>
-                          <input type="text" class="form-control" name="app_input_{{ i }}" placeholder="e.g. apache2">
+                          <label for="app_input_{{ i }}" class="sr-only">Applicability element input</label><input id="app_input_{{ i }}" type="text" class="form-control" name="app_input_{{ i }}" placeholder="e.g. apache2">
                         </div>
 
                         <div class="col-md-2">
                           <div class="condition-label">Sub-Element</div>
-                          <select name="app_selement_{{ i }}" class="form-control">
+                          <label for="app_selement_{{ i }}" class="sr-only">Applicability sub-element</label><select id="app_selement_{{ i }}" name="app_selement_{{ i }}" class="form-control">
                             <option value="" selected>-- None --</option>
                             {% for selement in selements %}
                               <option>{{ selement.name }}</option>
@@ -194,7 +194,7 @@
 
                         <div class="col-md-2">
                           <div class="condition-label">Operator</div>
-                          <select class="form-control" name="app_condition_{{ i }}">
+                          <label for="app_condition_{{ i }}" class="sr-only">Applicability condition</label><select id="app_condition_{{ i }}" class="form-control" name="app_condition_{{ i }}">
                             <option value="" selected>-- Select --</option>
                             {% for condition in conditions %}
                               <option>{{ condition.name }}</option>
@@ -204,7 +204,7 @@
 
                         <div class="col-md-3">
                           <div class="condition-label">Expected Value</div>
-                          <input type="text" class="form-control" name="app_sinput_{{ i }}" placeholder="e.g. installed">
+                          <label for="app_sinput_{{ i }}" class="sr-only">Applicability expected value</label><input id="app_sinput_{{ i }}" type="text" class="form-control" name="app_sinput_{{ i }}" placeholder="e.g. installed">
                         </div>
 
                         <div class="col-md-1 text-right">
@@ -240,7 +240,7 @@
                 <div class="logic-container">
                   <div class="d-flex align-items-center mb-4">
                     <h5 class="m-0">This test matches </h5>
-                    <select name="filter" class="form-control mx-2" style="width: auto;">
+                    <label for="filter" class="sr-only">Conditions must match</label><select id="filter" name="filter" class="form-control mx-2" style="width: auto;">
                       <option value="all">ALL</option>
                       <option value="any">ANY</option>
                     </select>
@@ -252,7 +252,7 @@
                     <div class="condition-row mb-3 row align-items-end shadow-sm" data-id="cond_{{ i }}" {% if i != 1 %}style="display: none;"{% endif %}>
                       <div class="col-md-2">
                         <div class="condition-label">Subject</div>
-                        <select class="form-control" name="element_{{ i }}">
+                        <label for="element_{{ i }}" class="sr-only">Element</label><select id="element_{{ i }}" class="form-control" name="element_{{ i }}">
                           <option value="" selected>-- Select --</option>
                           <optgroup label="Host">
                             {% for element in host_elements %}
@@ -269,12 +269,12 @@
                       
                       <div class="col-md-2">
                         <div class="condition-label">Parameter</div>
-                        <input type="text" class="form-control" name="input_{{ i }}" placeholder="e.g. /etc/ssh/sshd_config">
+                        <label for="input_{{ i }}" class="sr-only">Element input</label><input id="input_{{ i }}" type="text" class="form-control" name="input_{{ i }}" placeholder="e.g. /etc/ssh/sshd_config">
                       </div>
 
                       <div class="col-md-2">
                         <div class="condition-label">Sub-Element</div>
-                        <select name="selement_{{ i }}" class="form-control">
+                        <label for="selement_{{ i }}" class="sr-only">Sub-element</label><select id="selement_{{ i }}" name="selement_{{ i }}" class="form-control">
                           <option value="" selected>-- None --</option>
                           {% for selement in selements %}
                             <option>{{ selement.name }}</option>
@@ -284,7 +284,7 @@
 
                       <div class="col-md-2">
                         <div class="condition-label">Operator</div>
-                        <select class="form-control" name="condition_{{ i }}">
+                        <label for="condition_{{ i }}" class="sr-only">Condition</label><select id="condition_{{ i }}" class="form-control" name="condition_{{ i }}">
                           <option value="" selected>-- Select --</option>
                           {% for condition in conditions %}
                             <option>{{ condition.name }}</option>
@@ -294,7 +294,7 @@
 
                       <div class="col-md-3">
                         <div class="condition-label">Expected Value</div>
-                        <input type="text" class="form-control" name="sinput_{{ i }}" placeholder="e.g. Protocol 2">
+                        <label for="sinput_{{ i }}" class="sr-only">Expected value</label><input id="sinput_{{ i }}" type="text" class="form-control" name="sinput_{{ i }}" placeholder="e.g. Protocol 2">
                       </div>
 
                       <div class="col-md-1 text-right">
@@ -370,7 +370,7 @@
     const row = button.closest('.condition-row');
     if (row) {
       const dataId = row.getAttribute('data-id');
-      const conditionId = parseInt(dataId.replace('app_cond_', ''));
+      const conditionId = Number.parseInt(dataId.replace('app_cond_', ''));
       row.querySelectorAll('input, select').forEach(el => {
         if (el.tagName === 'SELECT') el.selectedIndex = 0;
         else el.value = '';
@@ -414,7 +414,7 @@
     const row = button.closest('.condition-row');
     if (row) {
       const dataId = row.getAttribute('data-id');
-      const conditionId = parseInt(dataId.replace('cond_', ''));
+      const conditionId = Number.parseInt(dataId.replace('cond_', ''));
 
       row.querySelectorAll('input, select').forEach(el => {
         if (el.tagName === 'SELECT') el.selectedIndex = 0;

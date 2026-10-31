@@ -64,7 +64,7 @@
       
       {% if error_message %}
       <div class="alert alert-danger alert-dismissible shadow-sm">
-        <button type="button" class="close" data-dismiss="alert" aria-hidden="true">&times;</button>
+        <button type="button" class="close" data-dismiss="alert" aria-label="Close"><span aria-hidden="true">&times;</span></button>
         <h5><i class="icon fas fa-ban"></i> Attention</h5>
         {{ error_message }}
       </div>
@@ -84,13 +84,13 @@
                   <div class="col-md-9">
                     <div class="form-group">
                       <label for="name">Test Name</label>
-                      <input type="text" name="name" value="{{ test.name }}" class="form-control" required>
+                      <input id="name" type="text" name="name" value="{{ test.name }}" class="form-control" required>
                     </div>
                   </div>
                   <div class="col-md-3">
                     <div class="form-group">
                       <label for="severity">Severity</label>
-                      <select name="severity" class="form-control">
+                      <select id="severity" name="severity" class="form-control">
                         <option {% if test.severity == "Information" %}selected{% endif %}>Information</option>
                         <option {% if test.severity == "Low" %}selected{% endif %}>Low</option>
                         <option {% if test.severity == "Medium" %}selected{% endif %}>Medium</option>
@@ -103,20 +103,20 @@
 
                 <div class="form-group">
                   <label for="description">Description</label>
-                  <textarea name="description" class="form-control" rows="2">{{ test.description }}</textarea>
+                  <textarea id="description" name="description" class="form-control" rows="2">{{ test.description }}</textarea>
                 </div>
 
                 <div class="row">
                   <div class="col-md-6">
                     <div class="form-group">
                       <label for="rational">Rationale</label>
-                      <textarea name="rational" class="form-control" rows="3">{{ test.rational }}</textarea>
+                      <textarea id="rational" name="rational" class="form-control" rows="3">{{ test.rational }}</textarea>
                     </div>
                   </div>
                   <div class="col-md-6">
                     <div class="form-group">
                       <label for="remediation">Remediation</label>
-                      <textarea name="remediation" class="form-control" rows="3">{{ test.remediation }}</textarea>
+                      <textarea id="remediation" name="remediation" class="form-control" rows="3">{{ test.remediation }}</textarea>
                     </div>
                   </div>
                 </div>
@@ -159,7 +159,7 @@
                   <div class="logic-container">
                     <div class="d-flex align-items-center mb-4">
                       <h5 class="m-0">Run this test if </h5>
-                      <select name="app_filter" class="form-control mx-2" style="width: auto;">
+                      <label for="app_filter" class="sr-only">Applicability conditions must match</label><select id="app_filter" name="app_filter" class="form-control mx-2" style="width: auto;">
                         <option value="all" {% if test.app_filter == "all" %}selected{% endif %}>ALL</option>
                         <option value="any" {% if test.app_filter == "any" %}selected{% endif %}>ANY</option>
                       </select>
@@ -173,7 +173,7 @@
                         {% if not ac %}style="display: none;"{% endif %}>
                         <div class="col-md-2">
                           <div class="condition-label">Subject</div>
-                          <select class="form-control" name="app_element_{{ i }}">
+                          <label for="app_element_{{ i }}" class="sr-only">Applicability element</label><select id="app_element_{{ i }}" class="form-control" name="app_element_{{ i }}">
                             <option value="">-- Select --</option>
                             <optgroup label="Host">
                               {% for element in host_elements %}
@@ -189,12 +189,12 @@
                         </div>
                         <div class="col-md-2">
                           <div class="condition-label">Parameter</div>
-                          <input type="text" class="form-control" name="app_input_{{ i }}"
+                          <label for="app_input_{{ i }}" class="sr-only">Applicability element input</label><input id="app_input_{{ i }}" type="text" class="form-control" name="app_input_{{ i }}"
                             value="{% if ac %}{{ ac.input }}{% endif %}" placeholder="e.g. apache2">
                         </div>
                         <div class="col-md-2">
                           <div class="condition-label">Sub-Element</div>
-                          <select name="app_selement_{{ i }}" class="form-control">
+                          <label for="app_selement_{{ i }}" class="sr-only">Applicability sub-element</label><select id="app_selement_{{ i }}" name="app_selement_{{ i }}" class="form-control">
                             <option value="">-- None --</option>
                             {% for selement in selements %}
                               <option {% if ac and ac.selement == selement.name %}selected{% endif %}>{{ selement.name }}</option>
@@ -203,7 +203,7 @@
                         </div>
                         <div class="col-md-2">
                           <div class="condition-label">Operator</div>
-                          <select class="form-control" name="app_condition_{{ i }}">
+                          <label for="app_condition_{{ i }}" class="sr-only">Applicability condition</label><select id="app_condition_{{ i }}" class="form-control" name="app_condition_{{ i }}">
                             <option value="">-- Select --</option>
                             {% for condition in conditions %}
                               <option {% if ac and ac.condition == condition.name %}selected{% endif %}>{{ condition.name }}</option>
@@ -212,7 +212,7 @@
                         </div>
                         <div class="col-md-3">
                           <div class="condition-label">Expected Value</div>
-                          <input type="text" class="form-control" name="app_sinput_{{ i }}"
+                          <label for="app_sinput_{{ i }}" class="sr-only">Applicability expected value</label><input id="app_sinput_{{ i }}" type="text" class="form-control" name="app_sinput_{{ i }}"
                             value="{% if ac %}{{ ac.sinput }}{% endif %}" placeholder="e.g. installed">
                         </div>
                         <div class="col-md-1 text-right">
@@ -248,7 +248,7 @@
                 <div class="logic-container">
                   <div class="d-flex align-items-center mb-4">
                     <h5 class="m-0">This test matches </h5>
-                    <select name="filter" class="form-control mx-2" style="width: auto;">
+                    <label for="filter" class="sr-only">Conditions must match</label><select id="filter" name="filter" class="form-control mx-2" style="width: auto;">
                       <option value="all" {% if test.filter == "all" %}selected{% endif %}>ALL</option>
                       <option value="any" {% if test.filter == "any" %}selected{% endif %}>ANY</option>
                     </select>
@@ -262,7 +262,7 @@
                       {% if not tc %}style="display: none;"{% endif %}>
                       <div class="col-md-2">
                         <div class="condition-label">Subject</div>
-                        <select name="element_{{ i }}" class="form-control">
+                        <label for="element_{{ i }}" class="sr-only">Element</label><select id="element_{{ i }}" name="element_{{ i }}" class="form-control">
                           <option value=""></option>
                           <optgroup label="Host">
                             {% for element in host_elements %}
@@ -278,11 +278,11 @@
                       </div>
                       <div class="col-md-2">
                         <div class="condition-label">Parameter</div>
-                        <input type="text" name="input_{{ i }}" value="{% if tc %}{{ tc.input }}{% endif %}" class="form-control">
+                        <label for="input_{{ i }}" class="sr-only">Element input</label><input id="input_{{ i }}" type="text" name="input_{{ i }}" value="{% if tc %}{{ tc.input }}{% endif %}" class="form-control">
                       </div>
                       <div class="col-md-2">
                         <div class="condition-label">Sub-Element</div>
-                        <select name="selement_{{ i }}" class="form-control">
+                        <label for="selement_{{ i }}" class="sr-only">Sub-element</label><select id="selement_{{ i }}" name="selement_{{ i }}" class="form-control">
                           <option value=""></option>
                           {% for selement in selements %}
                             <option {% if tc and tc.selement == selement.name %}selected{% endif %}>{{ selement.name }}</option>
@@ -291,7 +291,7 @@
                       </div>
                       <div class="col-md-2">
                         <div class="condition-label">Operator</div>
-                        <select name="condition_{{ i }}" class="form-control">
+                        <label for="condition_{{ i }}" class="sr-only">Condition</label><select id="condition_{{ i }}" name="condition_{{ i }}" class="form-control">
                           <option value=""></option>
                           {% for cond_opt in conditions %}
                             <option {% if tc and tc.condition == cond_opt.name %}selected{% endif %}>{{ cond_opt.name }}</option>
@@ -300,7 +300,7 @@
                       </div>
                       <div class="col-md-3">
                         <div class="condition-label">Expected Value</div>
-                        <input type="text" name="sinput_{{ i }}" value="{% if tc %}{{ tc.sinput | default(value='') }}{% endif %}" class="form-control">
+                        <label for="sinput_{{ i }}" class="sr-only">Expected value</label><input id="sinput_{{ i }}" type="text" name="sinput_{{ i }}" value="{% if tc %}{{ tc.sinput | default(value='') }}{% endif %}" class="form-control">
                       </div>
                       {% if i != 1 %}
                       <div class="col-md-1 text-right">
@@ -359,7 +359,7 @@
   document.addEventListener('DOMContentLoaded', function() {
     document.querySelectorAll('#appConditionsContainer .condition-row').forEach(row => {
       if (row.style.display !== 'none') {
-        const id = parseInt(row.getAttribute('data-id').replace('app_cond_', ''));
+        const id = Number.parseInt(row.getAttribute('data-id').replace('app_cond_', ''));
         usedAppIndexes.add(id);
       }
     });
@@ -391,7 +391,7 @@
     const row = button.closest('.condition-row');
     if (row) {
       const dataId = row.getAttribute('data-id');
-      const conditionId = parseInt(dataId.replace('app_cond_', ''));
+      const conditionId = Number.parseInt(dataId.replace('app_cond_', ''));
       row.querySelectorAll('input, select').forEach(el => {
         if (el.tagName === 'SELECT') el.selectedIndex = 0;
         else el.value = '';
@@ -411,7 +411,7 @@
   document.addEventListener('DOMContentLoaded', function() {
     document.querySelectorAll('#conditionsContainer .condition-row').forEach(row => {
       if (row.style.display !== 'none') {
-        const id = parseInt(row.getAttribute('data-id').replace('cond_', ''));
+        const id = Number.parseInt(row.getAttribute('data-id').replace('cond_', ''));
         usedIndexes.add(id);
       }
     });
@@ -444,7 +444,7 @@
     const row = button.closest('.condition-row');
     if (row) {
       const dataId = row.getAttribute('data-id');
-      const conditionId = parseInt(dataId.replace('cond_', ''));
+      const conditionId = Number.parseInt(dataId.replace('cond_', ''));
       row.querySelectorAll('input, select').forEach(el => {
         if (el.tagName === 'SELECT') el.selectedIndex = 0;
         else el.value = '';

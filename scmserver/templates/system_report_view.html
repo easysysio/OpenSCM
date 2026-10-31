@@ -63,7 +63,7 @@
 
       {% if error_message %}
       <div class="alert alert-danger alert-dismissible shadow-sm">
-        <button type="button" class="close" data-dismiss="alert" aria-hidden="true">&times;</button>
+        <button type="button" class="close" data-dismiss="alert" aria-label="Close"><span aria-hidden="true">&times;</span></button>
         <h5><i class="icon fas fa-ban"></i> Error</h5>
         {{ error_message }}
       </div>
@@ -71,7 +71,7 @@
 
       {% if success_message %}
       <div class="alert alert-success alert-dismissible shadow-sm">
-        <button type="button" class="close" data-dismiss="alert" aria-hidden="true">&times;</button>
+        <button type="button" class="close" data-dismiss="alert" aria-label="Close"><span aria-hidden="true">&times;</span></button>
         <h5><i class="icon fas fa-check"></i> {{ success_message }}</h5>
       </div>
       {% endif %}
@@ -434,7 +434,7 @@
       const utcStr = $(this).data('utc');
       if (utcStr) {
         const d = new Date(utcStr);
-        if (!isNaN(d.getTime())) {
+        if (!Number.isNaN(d.getTime())) {
           $(this).text(d.toLocaleString(undefined, {
             year:'numeric', month:'2-digit', day:'2-digit',
             hour:'2-digit', minute:'2-digit', second:'2-digit', hour12:false

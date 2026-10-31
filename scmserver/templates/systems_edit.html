@@ -44,7 +44,7 @@
       
       {% if error_message %}
       <div class="alert alert-danger alert-dismissible shadow-sm">
-        <button type="button" class="close" data-dismiss="alert" aria-hidden="true">&times;</button>
+        <button type="button" class="close" data-dismiss="alert" aria-label="Close"><span aria-hidden="true">&times;</span></button>
         <h5><i class="icon fas fa-ban"></i> Attention</h5>
         {{ error_message }}
       </div>
@@ -52,7 +52,7 @@
 
       {% if success_message %}
       <div class="alert alert-success alert-dismissible shadow-sm">
-        <button type="button" class="close" data-dismiss="alert" aria-hidden="true">&times;</button>
+        <button type="button" class="close" data-dismiss="alert" aria-label="Close"><span aria-hidden="true">&times;</span></button>
         <h5><i class="icon fas fa-check"></i> Done</h5>
         {{ success_message }}
       </div>
@@ -71,30 +71,30 @@
               </div>
               <div class="card-body">
                 <div class="form-group">
-                  <label>System Name</label>
-                  <input type="text" value="{{ system.name }}" class="form-control" readonly>
+                  <label for="f_system_name">System Name</label>
+                  <input id="f_system_name" type="text" value="{{ system.name }}" class="form-control" readonly>
                 </div>
                 <div class="row">
                   <div class="col-6">
                     <div class="form-group">
-                      <label>IP Address</label>
-                      <input type="text" value="{{ system.ip }}" class="form-control" readonly>
+                      <label for="f_ip_address">IP Address</label>
+                      <input id="f_ip_address" type="text" value="{{ system.ip }}" class="form-control" readonly>
                     </div>
                   </div>
                   <div class="col-6">
                     <div class="form-group">
-                      <label>Agent Version</label>
-                      <input type="text" value="{{ system.ver }}" class="form-control" readonly>
+                      <label for="f_agent_version">Agent Version</label>
+                      <input id="f_agent_version" type="text" value="{{ system.ver }}" class="form-control" readonly>
                     </div>
                   </div>
                 </div>
                 <div class="form-group">
-                  <label>Operating System</label>
-                  <input type="text" value="{{ system.os }}" class="form-control" readonly>
+                  <label for="f_operating_system">Operating System</label>
+                  <input id="f_operating_system" type="text" value="{{ system.os }}" class="form-control" readonly>
                 </div>
                 <div class="form-group">
-                  <label>Architecture</label>
-                  <input type="text" value="{{ system.arch }}" class="form-control" readonly>
+                  <label for="f_architecture">Architecture</label>
+                  <input id="f_architecture" type="text" value="{{ system.arch }}" class="form-control" readonly>
                 </div>
                 <p class="text-xs text-muted italic mt-3">
                   <i class="fas fa-info-circle mr-1"></i> These fields are managed by the OpenSCM agent and cannot be modified manually.
@@ -110,8 +110,8 @@
               </div>
               <div class="card-body" style="min-height: 345px;">
                 <div class="form-group">
-                  <label>Assigned System Groups</label>
-                  <select class="select2bs4" name="groups" multiple="multiple" data-placeholder="Select groups to apply policies..." style="width: 100%;">
+                  <label for="groups">Assigned System Groups</label>
+                  <select id="groups" class="select2bs4" name="groups" multiple="multiple" data-placeholder="Select groups to apply policies..." style="width: 100%;">
                     {% for group in groups %}
                       <option value="{{ group.id }}" 
                         {% for connection in systems_in_groups %}

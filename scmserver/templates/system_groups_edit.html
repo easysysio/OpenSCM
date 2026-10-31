@@ -47,7 +47,7 @@
       
       {% if error_message %}
       <div class="alert alert-danger alert-dismissible shadow-sm">
-        <button type="button" class="close" data-dismiss="alert" aria-hidden="true">&times;</button>
+        <button type="button" class="close" data-dismiss="alert" aria-label="Close"><span aria-hidden="true">&times;</span></button>
         <h5><i class="icon fas fa-ban"></i> Attention</h5>
         {{ error_message }}
       </div>
@@ -55,7 +55,7 @@
 
       {% if success_message %}
       <div class="alert alert-success alert-dismissible shadow-sm">
-        <button type="button" class="close" data-dismiss="alert" aria-hidden="true">&times;</button>
+        <button type="button" class="close" data-dismiss="alert" aria-label="Close"><span aria-hidden="true">&times;</span></button>
         <h5><i class="icon fas fa-check"></i> Done</h5>
         {{ success_message }}
       </div>
@@ -72,21 +72,21 @@
                   <div class="col-md-12">
                     <div class="form-group">
                       <label for="name">Group Name</label>
-                      <input type="text" name="name" value="{{ group.name }}" class="form-control" required>
+                      <input id="name" type="text" name="name" value="{{ group.name }}" class="form-control" required>
                     </div>
                   </div>
                 </div>
                 
                 <div class="form-group">
                   <label for="description">Description</label>
-                  <textarea name="description" class="form-control" rows="3">{{ group.description }}</textarea>
+                  <textarea id="description" name="description" class="form-control" rows="3">{{ group.description }}</textarea>
                 </div>
 
                 <hr>
 
                 <div class="form-group">
-                  <label><i class="fas fa-server mr-1"></i> Update System Members</label>
-                  <select class="duallistbox" name="systems" multiple="multiple" style="width: 100%;">
+                  <label for="systems"><i class="fas fa-server mr-1"></i> Update System Members</label>
+                  <select id="systems" class="duallistbox" name="systems" multiple="multiple" style="width: 100%;">
                     {% for system in systems %}
                       <option value="{{ system.id }}"
                         {% for connection in systems_in_groups %}

@@ -36,7 +36,7 @@
       
       {% if error_message %}
       <div class="alert alert-danger alert-dismissible shadow-sm">
-        <button type="button" class="close" data-dismiss="alert" aria-hidden="true">&times;</button>
+        <button type="button" class="close" data-dismiss="alert" aria-label="Close"><span aria-hidden="true">&times;</span></button>
         <h5><i class="icon fas fa-ban"></i> Attention</h5>
         {{ error_message }}
       </div>
@@ -44,7 +44,7 @@
 
       {% if success_message %}
       <div class="alert alert-success alert-dismissible shadow-sm">
-        <button type="button" class="close" data-dismiss="alert" aria-hidden="true">&times;</button>
+        <button type="button" class="close" data-dismiss="alert" aria-label="Close"><span aria-hidden="true">&times;</span></button>
         <h5><i class="icon fas fa-check"></i> Done</h5>
         {{ success_message }}
       </div>
@@ -65,7 +65,7 @@
                       <label for="name">Display Name</label>
                       <div class="input-group">
                         <div class="input-group-prepend"><span class="input-group-text"><i class="fas fa-id-card"></i></span></div>
-                        <input type="text" name="name" class="form-control" placeholder="e.g. John Doe">
+                        <input id="name" type="text" name="name" class="form-control" placeholder="e.g. John Doe">
                       </div>
                     </div>
                   </div>
@@ -74,7 +74,7 @@
                       <label for="email">Email Address</label>
                       <div class="input-group">
                         <div class="input-group-prepend"><span class="input-group-text"><i class="fas fa-envelope"></i></span></div>
-                        <input type="email" name="email" class="form-control" placeholder="john@example.com">
+                        <input id="email" type="email" name="email" class="form-control" placeholder="john@example.com">
                       </div>
                     </div>
                   </div>
@@ -86,7 +86,7 @@
                       <label for="username">Login Username</label>
                       <div class="input-group">
                         <div class="input-group-prepend"><span class="input-group-text"><i class="fas fa-user"></i></span></div>
-                        <input type="text" name="username" class="form-control" placeholder="jdoe" required>
+                        <input id="username" type="text" name="username" class="form-control" placeholder="jdoe" required>
                       </div>
                     </div>
                   </div>
@@ -131,7 +131,7 @@
                 <div class="form-group">
                   <label for="role">Access Level / Role</label>
                   <div class="d-flex align-items-center">
-                    <select name="role" class="form-control" style="max-width: 340px;">
+                    <select id="role" name="role" class="form-control" style="max-width: 340px;">
                       {% if is_superuser %}
                       <option value="superuser">Superuser (Platform Management)</option>
                       {% endif %}

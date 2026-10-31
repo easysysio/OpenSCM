@@ -51,7 +51,7 @@
 
       {% if error_message %}
       <div class="alert alert-danger alert-dismissible shadow-sm">
-        <button type="button" class="close" data-dismiss="alert" aria-hidden="true">&times;</button>
+        <button type="button" class="close" data-dismiss="alert" aria-label="Close"><span aria-hidden="true">&times;</span></button>
         <h5><i class="icon fas fa-ban"></i> Attention</h5>
         {{ error_message }}
       </div>
@@ -101,7 +101,7 @@
                          {% if i != 1 %}style="display: none;"{% endif %}>
                       <div class="col-md-3">
                         <div class="condition-label">Field</div>
-                        <select class="form-control field-select" name="field_{{ i }}"
+                        <label for="field_{{ i }}" class="sr-only">Condition field</label><select id="field_{{ i }}" class="form-control field-select" name="field_{{ i }}"
                                 data-row="{{ i }}" onchange="onFieldChange(this)">
                           <option value="">-- Select field --</option>
                           <optgroup label="Identity">
@@ -131,7 +131,7 @@
 
                       <div class="col-md-3">
                         <div class="condition-label">Operator</div>
-                        <select class="form-control op-select" name="op_{{ i }}"
+                        <label for="op_{{ i }}" class="sr-only">Condition operator</label><select id="op_{{ i }}" class="form-control op-select" name="op_{{ i }}"
                                 data-row="{{ i }}">
                           <option value="">-- Select field first --</option>
                         </select>
@@ -139,7 +139,7 @@
 
                       <div class="col-md-5">
                         <div class="condition-label">Value</div>
-                        <input type="text" class="form-control value-input"
+                        <label for="value_{{ i }}" class="sr-only">Condition value</label><input id="value_{{ i }}" type="text" class="form-control value-input"
                                name="value_{{ i }}" data-row="{{ i }}"
                                placeholder="Pick a field to see hints">
                       </div>
@@ -317,7 +317,7 @@
     const row = button.closest('.condition-row');
     if (!row) return;
     const dataId = row.getAttribute('data-id');
-    const conditionId = parseInt(dataId.replace('cond_', ''), 10);
+    const conditionId = Number.parseInt(dataId.replace('cond_', ''), 10);
     row.querySelectorAll('input, select').forEach(el => {
       if (el.tagName === 'SELECT') el.selectedIndex = 0;
       else el.value = '';

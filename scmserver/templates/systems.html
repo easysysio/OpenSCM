@@ -38,7 +38,7 @@
 
       {% if error_message %}
       <div class="alert alert-danger alert-dismissible">
-        <button type="button" class="close" data-dismiss="alert" aria-hidden="true">&times;</button>
+        <button type="button" class="close" data-dismiss="alert" aria-label="Close"><span aria-hidden="true">&times;</span></button>
         <h5><i class="icon fas fa-ban"></i> Error</h5>
         {{ error_message }}
       </div>
@@ -46,7 +46,7 @@
 
       {% if success_message %}
       <div class="alert alert-success alert-dismissible">
-        <button type="button" class="close" data-dismiss="alert" aria-hidden="true">&times;</button>
+        <button type="button" class="close" data-dismiss="alert" aria-label="Close"><span aria-hidden="true">&times;</span></button>
         <h5><i class="icon fas fa-check"></i> Success</h5>
         {{ success_message }}
       </div>
@@ -111,7 +111,7 @@
                     <th style="display:none;">Status_Internal</th>
                     <th style="width: 22px; text-align:center;" class="dt-no-sort"></th>
                     <th style="width: 20px; text-align:center;">
-                      <input type="checkbox" id="select-all" title="Select All">
+                      <label for="select-all" class="sr-only">Select All</label><input type="checkbox" id="select-all" title="Select All">
                     </th>
                     <th style="width: 10px">ID</th>
                     <th>Name</th>
@@ -131,7 +131,7 @@
                     <td style="display:none;">{{ system.status }}</td>
                     <td class="text-center expand-toggle" style="cursor:pointer; user-select:none;" title="Show containers"></td>
                     <td class="text-center">
-                      <input type="checkbox" class="row-checkbox" value="{{ system.id }}" title="Select">
+                      <label for="select_system_{{ system.id }}" class="sr-only">Select system</label><input id="select_system_{{ system.id }}" type="checkbox" class="row-checkbox" value="{{ system.id }}" title="Select">
                     </td>
                     <td>{{ system.id }}</td>
                     <td>
@@ -487,7 +487,7 @@
             const memTotal  = btn.data('mem-total');
             const diskUsed  = btn.data('disk-used');
             const diskTotal = btn.data('disk-total');
-            const uptime    = parseInt(btn.data('uptime'), 10);
+            const uptime    = Number.parseInt(btn.data('uptime'), 10);
 
             $('#m-cpu').text(cpu !== '' ? (Math.round(cpu * 10) / 10) + '%' : '—');
 
@@ -499,7 +499,7 @@
                 $('#m-disk').text(diskUsed + ' / ' + diskTotal + ' GB');
             } else { $('#m-disk').text('—'); }
 
-            if (!isNaN(uptime)) {
+            if (!Number.isNaN(uptime)) {
                 const days = Math.floor(uptime / 86400);
                 const hours = Math.floor((uptime % 86400) / 3600);
                 $('#m-uptime').text((days > 0 ? days + 'd ' : '') + hours + 'h');

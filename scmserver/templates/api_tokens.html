@@ -22,13 +22,13 @@
 
       {% if error_message %}
       <div class="alert alert-danger alert-dismissible shadow-sm">
-        <button type="button" class="close" data-dismiss="alert" aria-hidden="true">&times;</button>
+        <button type="button" class="close" data-dismiss="alert" aria-label="Close"><span aria-hidden="true">&times;</span></button>
         <h5><i class="icon fas fa-ban"></i> Error</h5>{{ error_message }}
       </div>
       {% endif %}
       {% if success_message %}
       <div class="alert alert-success alert-dismissible shadow-sm">
-        <button type="button" class="close" data-dismiss="alert" aria-hidden="true">&times;</button>
+        <button type="button" class="close" data-dismiss="alert" aria-label="Close"><span aria-hidden="true">&times;</span></button>
         {{ success_message }}
       </div>
       {% endif %}
@@ -40,7 +40,7 @@
         <p class="mb-2">Copy it now — <strong>it will not be shown again.</strong>
           Send it with every request as <code>Authorization: Bearer &lt;token&gt;</code>.</p>
         <div class="input-group">
-          <input type="text" id="newTokenValue" class="form-control text-monospace" readonly value="{{ new_token }}">
+          <label for="newTokenValue" class="sr-only">New token</label><input type="text" id="newTokenValue" class="form-control text-monospace" readonly value="{{ new_token }}">
           <div class="input-group-append">
             <button class="btn btn-outline-secondary" type="button" id="copyTokenBtn">
               <i class="fas fa-copy mr-1"></i> Copy

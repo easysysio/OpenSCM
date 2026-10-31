@@ -12,7 +12,7 @@
   <div class="container-fluid">
       {% if error_message %}
       <div class="alert alert-danger alert-dismissible">
-        <button type="button" class="close" data-dismiss="alert" aria-hidden="true">&times;</button>
+        <button type="button" class="close" data-dismiss="alert" aria-label="Close"><span aria-hidden="true">&times;</span></button>
         <h5><i class="icon fas fa-ban"></i> Error</h5>
         {{ error_message }}
       </div>
@@ -20,7 +20,7 @@
 
       {% if success_message %}
       <div class="alert alert-success alert-dismissible">
-        <button type="button" class="close" data-dismiss="alert" aria-hidden="true">&times;</button>
+        <button type="button" class="close" data-dismiss="alert" aria-label="Close"><span aria-hidden="true">&times;</span></button>
         <h5><i class="icon fas fa-check"></i> Success</h5>
         {{ success_message }}
       </div>
@@ -158,7 +158,7 @@
               </label>
             </div>
             <div id="row_email" class="mt-2">
-              <input type="text" class="form-control" name="target_email"
+              <label for="target_email" class="sr-only">Email recipients</label><input id="target_email" type="text" class="form-control" name="target_email"
                      placeholder="ops@example.com, security@example.com"
                      value="{{ tgt_email }}">
               <small class="form-text text-muted">Comma-separate several addresses. Requires SMTP under Settings.</small>
@@ -174,9 +174,9 @@
               </label>
             </div>
             <div id="row_webhook" class="mt-2">
-              <input type="text" class="form-control mb-2" name="target_webhook"
+              <label for="target_webhook" class="sr-only">Webhook URL</label><input id="target_webhook" type="text" class="form-control mb-2" name="target_webhook"
                      placeholder="https://hooks.example.com/…" value="{{ tgt_webhook }}">
-              <input type="password" class="form-control" name="secret_webhook"
+              <label for="secret_webhook" class="sr-only">Webhook Authorization header</label><input id="secret_webhook" type="password" class="form-control" name="secret_webhook"
                      autocomplete="new-password"
                      placeholder="{% if sec_webhook %}Authorization header — unchanged{% else %}Authorization header (optional), e.g. Bearer …{% endif %}">
               <small class="form-text text-muted">
@@ -194,7 +194,7 @@
               </label>
             </div>
             <div id="row_syslog" class="mt-2">
-              <input type="text" class="form-control" name="target_syslog"
+              <label for="target_syslog" class="sr-only">Syslog server</label><input id="target_syslog" type="text" class="form-control" name="target_syslog"
                      placeholder="logs.example.com:514" value="{{ tgt_syslog }}">
               <small class="form-text text-muted">
                 RFC 5424 over UDP, port 514 by default. UDP cannot confirm arrival.
@@ -269,8 +269,8 @@
   var warning   = document.getElementById('rule-warning');
 
   function scoreOf(opt, axis) {
-    var v = parseFloat(axis === 'system' ? opt.dataset.system : opt.dataset.test);
-    return isNaN(v) ? -1 : v;
+    var v = Number.parseFloat(axis === 'system' ? opt.dataset.system : opt.dataset.test);
+    return Number.isNaN(v) ? -1 : v;
   }
   function pct(v) { return v.toFixed(2) + '%'; }
 
@@ -286,7 +286,7 @@
     var t = trigger.value;
     var axis = axisSel.value;
     var axisLabel = axis === 'system' ? 'system compliance' : 'test compliance';
-    var th = parseFloat(threshold.value);
+    var th = Number.parseFloat(threshold.value);
     var options = Array.prototype.slice.call(policySel.options);
     show(current, ''); show(warning, '');
     if (scope.value === 'server' || !options.length) { return; }
@@ -299,7 +299,7 @@
       }
       show(current, 'Watching ' + options.length + ' polic' +
                     (options.length === 1 ? 'y' : 'ies') + '.');
-      if (isNaN(th) || (t !== 'below' && t !== 'above')) { return; }
+      if (Number.isNaN(th) || (t !== 'below' && t !== 'above')) { return; }
       var past = scanned.filter(function (o) {
         var v = scoreOf(o, axis);
         return t === 'below' ? v < th : v > th;
@@ -325,7 +325,7 @@
       return;
     }
     show(current, name + ' is currently at ' + pct(cur) + ' ' + axisLabel + '.');
-    if (isNaN(th)) { return; }
+    if (Number.isNaN(th)) { return; }
 
     if (t === 'below' && cur < th) {
       show(warning, 'It is already below ' + th + '%, so this rule will not fire until the score ' +

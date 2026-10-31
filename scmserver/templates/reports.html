@@ -30,7 +30,7 @@
 
       {% if error_message %}
       <div class="alert alert-danger alert-dismissible">
-        <button type="button" class="close" data-dismiss="alert" aria-hidden="true">&times;</button>
+        <button type="button" class="close" data-dismiss="alert" aria-label="Close"><span aria-hidden="true">&times;</span></button>
         <h5><i class="icon fas fa-ban"></i> Error</h5>
         {{ error_message }}
       </div>
@@ -38,7 +38,7 @@
 
       {% if success_message %}
       <div class="alert alert-success alert-dismissible">
-        <button type="button" class="close" data-dismiss="alert" aria-hidden="true">&times;</button>
+        <button type="button" class="close" data-dismiss="alert" aria-label="Close"><span aria-hidden="true">&times;</span></button>
         <h5><i class="icon fas fa-check"></i> Success</h5>
         {{ success_message }}
       </div>
@@ -87,7 +87,7 @@
                     <thead>
                       <tr>
                         <th style="width:10px">ID</th>
-                        <th style="width:20px; text-align:center;"><input type="checkbox" id="policy-select-all" title="Select All"></th>
+                        <th style="width:20px; text-align:center;"><label for="policy-select-all" class="sr-only">Select All</label><input type="checkbox" id="policy-select-all" title="Select All"></th>
                         <th>Policy Name</th>
                         <th>Version</th>
                         <th>Publisher</th>
@@ -99,7 +99,7 @@
                       {% for report in reports %}
                       <tr>
                         <td>{{ report.id }}</td>
-                        <td class="text-center"><input type="checkbox" class="policy-row-checkbox" value="{{ report.id }}"
+                        <td class="text-center"><label for="select_policy_report_{{ report.id }}" class="sr-only">Select report</label><input id="select_policy_report_{{ report.id }}" type="checkbox" class="policy-row-checkbox" value="{{ report.id }}"
                           data-policy-key="{{ report.policy_name }}@{{ report.policy_version }}" title="Select"></td>
                         <td><strong>{{ report.policy_name }}</strong></td>
                         <td><span class="badge badge-light">v{{ report.policy_version }}</span></td>
@@ -150,7 +150,7 @@
                     <thead>
                       <tr>
                         <th style="width:10px">ID</th>
-                        <th style="width:20px; text-align:center;"><input type="checkbox" id="system-select-all" title="Select All"></th>
+                        <th style="width:20px; text-align:center;"><label for="system-select-all" class="sr-only">Select All</label><input type="checkbox" id="system-select-all" title="Select All"></th>
                         <th>System Name</th>
                         <th>Publisher</th>
                         <th>Date Generated</th>
@@ -161,7 +161,7 @@
                       {% for report in system_reports %}
                       <tr>
                         <td>{{ report.id }}</td>
-                        <td class="text-center"><input type="checkbox" class="system-row-checkbox" value="{{ report.id }}"
+                        <td class="text-center"><label for="select_system_report_{{ report.id }}" class="sr-only">Select report</label><input id="select_system_report_{{ report.id }}" type="checkbox" class="system-row-checkbox" value="{{ report.id }}"
                           data-system-key="{{ report.system_id }}@{{ report.system_name }}" title="Select"></td>
                         <td><strong><i class="fas fa-server mr-1 text-muted"></i>{{ report.system_name }}</strong></td>
                         <td>{{ report.submitter_name }}</td>

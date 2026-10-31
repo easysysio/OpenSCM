@@ -21,7 +21,7 @@
   // "2026-10-06T06:00" (UTC) → the same instant as a datetime-local value.
   function utcToLocalInput(utc) {
     var d = new Date(utc + ':00Z');
-    if (isNaN(d)) return '';
+    if (Number.isNaN(d.getTime())) return '';
     return d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate())
          + 'T' + pad(d.getHours()) + ':' + pad(d.getMinutes());
   }
@@ -70,7 +70,7 @@
         var off = inp.form.querySelector('input[name="' + p.name + '_tz_offset"]');
         if (!off) return;
         var d = p.value ? new Date(p.value) : null;
-        off.value = (d && !isNaN(d)) ? d.getTimezoneOffset() : '';
+        off.value = (d && !Number.isNaN(d.getTime())) ? d.getTimezoneOffset() : '';
       });
     });
   });
