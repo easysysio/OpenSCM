@@ -126,7 +126,7 @@
                     <td class="text-right">
                       {% if t.status == "Active" %}
                       <a href="#" class="btn btn-sm btn-outline-danger"
-                         onclick="return postTo('/api-tokens/revoke/{{ t.id }}', 'Revoke this token? Anything using it stops working at once.')"
+                         onclick="postTo('/api-tokens/revoke/{{ t.id }}', 'Revoke this token? Anything using it stops working at once.'); return false;"
                          title="Revoke"><i class="fas fa-ban"></i></a>
                       {% endif %}
                     </td>

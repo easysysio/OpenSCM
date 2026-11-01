@@ -99,7 +99,7 @@
               <td class="text-right" style="white-space:nowrap;">
                 {% if is_admin %}
                 <button type="button" class="btn btn-outline-secondary btn-xs"
-                        onclick="return postTo('/alerts/{{ a.id }}/test', 'Send a test delivery through this alert\'s transport?')"
+                        onclick="postTo('/alerts/{{ a.id }}/test', 'Send a test delivery through this alert\'s transport?'); return false;"
                         title="Send a test delivery">
                   <i class="fas fa-paper-plane"></i> Test
                 </button>
@@ -107,12 +107,12 @@
                   <i class="fas fa-edit"></i>
                 </a>
                 <button type="button" class="btn btn-outline-secondary btn-xs"
-                        onclick="return postTo('/alerts/{{ a.id }}/toggle')"
+                        onclick="postTo('/alerts/{{ a.id }}/toggle'); return false;"
                         title="{% if a.enabled %}Disable{% else %}Enable{% endif %}">
                   <i class="fas {% if a.enabled %}fa-pause{% else %}fa-play{% endif %}"></i>
                 </button>
                 <button type="button" class="btn btn-outline-danger btn-xs"
-                        onclick="return postTo('/alerts/{{ a.id }}/delete', 'Delete this alert? Its delivery history is kept.')"
+                        onclick="postTo('/alerts/{{ a.id }}/delete', 'Delete this alert? Its delivery history is kept.'); return false;"
                         title="Delete">
                   <i class="fas fa-trash"></i>
                 </button>

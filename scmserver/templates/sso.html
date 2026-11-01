@@ -113,10 +113,10 @@
               <button type="submit" class="btn btn-primary"><i class="fas fa-save mr-1"></i> Save</button>
               {% if provider %}
                 <a href="#" class="btn btn-default ml-1"
-                   onclick="return postTo('/admin/sso/test')"><i class="fas fa-plug mr-1"></i> Test connection</a>
+                   onclick="postTo('/admin/sso/test'); return false;"><i class="fas fa-plug mr-1"></i> Test connection</a>
                 {% if provider.enabled %}
                 <a href="#" class="btn btn-outline-danger float-right"
-                   onclick="return postTo('/admin/sso/disable', 'Turn single sign-on off? Users will sign in with their passwords. The configuration is kept.')">
+                   onclick="postTo('/admin/sso/disable', 'Turn single sign-on off? Users will sign in with their passwords. The configuration is kept.'); return false;">
                   <i class="fas fa-power-off mr-1"></i> Disable</a>
                 {% endif %}
               {% endif %}

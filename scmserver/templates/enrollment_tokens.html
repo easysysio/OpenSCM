@@ -124,7 +124,7 @@ enrollment_token = "oscm_…"</pre>
                         </button>
                       </form>
                       <a href="#" class="btn btn-sm btn-outline-danger ml-1"
-                         onclick="return postTo('/systems/tokens/delete/{{ t.id }}', 'Delete this token? Agents still holding it will enroll as pending.')"
+                         onclick="postTo('/systems/tokens/delete/{{ t.id }}', 'Delete this token? Agents still holding it will enroll as pending.'); return false;"
                          title="Delete"><i class="fas fa-trash"></i></a>
                     </td>
                   </tr>

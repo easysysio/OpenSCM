@@ -116,7 +116,7 @@
                             <i class="fas {% if is_viewer %}fa-download{% else %}fa-lock{% endif %}"></i>
                           </a>
                           <a class="btn btn-danger btn-sm ml-1 {% if not is_editor %}disabled{% endif %}"
-                             onclick="return postTo('{% if is_editor %}/reports/delete/{{ report.id }}{% else %}#{% endif %}', 'Delete this compliance record? This action is permanent.')"
+                             onclick="postTo('{% if is_editor %}/reports/delete/{{ report.id }}{% else %}#{% endif %}', 'Delete this compliance record? This action is permanent.'); return false;"
                              href="#"
                              {% if not is_editor %}style="opacity:0.5;cursor:not-allowed;filter:grayscale(100%)"{% endif %}>
                             <i class="fas {% if is_editor %}fa-trash{% else %}fa-lock{% endif %}"></i>
@@ -177,7 +177,7 @@
                             <i class="fas {% if is_viewer %}fa-download{% else %}fa-lock{% endif %}"></i>
                           </a>
                           <a class="btn btn-danger btn-sm ml-1 {% if not is_editor %}disabled{% endif %}"
-                             onclick="return postTo('{% if is_editor %}/reports/system/delete/{{ report.id }}{% else %}#{% endif %}', 'Delete this system report? This action is permanent.')"
+                             onclick="postTo('{% if is_editor %}/reports/system/delete/{{ report.id }}{% else %}#{% endif %}', 'Delete this system report? This action is permanent.'); return false;"
                              href="#"
                              {% if not is_editor %}style="opacity:0.5;cursor:not-allowed;filter:grayscale(100%)"{% endif %}>
                             <i class="fas {% if is_editor %}fa-trash{% else %}fa-lock{% endif %}"></i>

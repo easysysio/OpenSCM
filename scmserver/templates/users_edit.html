@@ -190,7 +190,7 @@
             {% if is_admin %}
             <div class="card-footer text-right">
               <a href="#" class="btn btn-outline-danger shadow-sm"
-                 onclick="return postTo('/users/sso/unlink/{{ user.id }}', 'Unlink this account from its single sign-on identity? The user is signed out. The next single sign-on with a matching verified email links it again.')">
+                 onclick="postTo('/users/sso/unlink/{{ user.id }}', 'Unlink this account from its single sign-on identity? The user is signed out. The next single sign-on with a matching verified email links it again.'); return false;">
                 <i class="fas fa-unlink mr-1"></i> Unlink
               </a>
             </div>

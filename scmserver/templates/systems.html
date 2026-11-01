@@ -188,12 +188,12 @@
                     <td class="text-right" style="white-space: nowrap;">
                       {% if system.status == "pending" %}
                         <a class="btn btn-success btn-sm ml-1 {% if not is_editor %}disabled{% endif %}"
-		           onclick="return postTo('{% if is_editor %}/systems/approve/{{ system.id }}{% else %}#{% endif %}', 'Approve this system?')"
+		           onclick="postTo('{% if is_editor %}/systems/approve/{{ system.id }}{% else %}#{% endif %}', 'Approve this system?'); return false;"
 		           href="#">
                           <i class="fas {% if is_editor %}fa-check{% else %}fa-lock{% endif %}"></i> Approve
                         </a>
                         <a class="btn btn-danger btn-sm ml-1 {% if not is_editor %}disabled{% endif %}"
-		           onclick="return postTo('{% if is_editor %}/systems/delete/{{ system.id }}{% else %}#{% endif %}', 'Reject system?')"
+		           onclick="postTo('{% if is_editor %}/systems/delete/{{ system.id }}{% else %}#{% endif %}', 'Reject system?'); return false;"
 		           href="#">
                           <i class="fas {% if is_editor %}fa-trash{% else %}fa-lock{% endif %}"></i>
                         </a>
@@ -246,7 +246,7 @@
                         {% endif %}
 
                         <a class="btn btn-danger btn-sm ml-1 {% if not is_editor %}disabled{% endif %}"
-                           onclick="return postTo('{% if is_editor %}/systems/delete/{{ system.id }}{% else %}#{% endif %}', 'Delete system?')"
+                           onclick="postTo('{% if is_editor %}/systems/delete/{{ system.id }}{% else %}#{% endif %}', 'Delete system?'); return false;"
                            href="#"
 		           {% if is_editor %}title="Delete System"{% else %}style="opacity: 0.5; cursor: not-allowed;" title="Delete Required"{% endif %}>
                           <i class="fas {% if is_editor %}fa-trash{% else %}fa-lock{% endif %}"></i>

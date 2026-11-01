@@ -116,7 +116,7 @@
           {% endfor %}
 
           <div class="dropdown-divider"></div>
-          <a href="#" class="dropdown-item dropdown-footer" onclick="return postTo('/notifications/clear')">Clear All Notifications</a>
+          <a href="#" class="dropdown-item dropdown-footer" onclick="postTo('/notifications/clear'); return false;">Clear All Notifications</a>
         </div>
       </li>
 
@@ -565,7 +565,7 @@ window.confirmSubmit = function (el) {
 function postTo(url, confirmMessage) {
   // Templates render '#' as the target when the user lacks the role for the
   // action; posting that would reload the current page as a POST.
-  if (!url || url === '#') { return false; }
+  if (!url || url === '#') { return; }
   var go = function () {
     var f = document.createElement('form');
     f.method = 'POST';
@@ -578,7 +578,6 @@ function postTo(url, confirmMessage) {
   } else {
     go();
   }
-  return false;
 }
 </script>
 

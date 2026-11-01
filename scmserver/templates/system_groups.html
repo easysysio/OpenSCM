@@ -144,7 +144,7 @@
                         {% set del_msg = "Delete this auto-group AND its rule? Membership will be cleared." %}
                       {% endif %}
                       <a class="btn btn-danger btn-sm ml-1 {% if not is_editor %}disabled{% endif %}"
-                         onclick="return postTo('{% if is_editor %}/system_groups/delete/{{ group.id }}{% else %}#{% endif %}', '{{ del_msg }}')"
+                         onclick="postTo('{% if is_editor %}/system_groups/delete/{{ group.id }}{% else %}#{% endif %}', '{{ del_msg }}'); return false;"
                          href="#"
                          {% if is_editor %}title="Delete Group"{% else %}style="opacity: 0.5; cursor: not-allowed;" title="Permission Required"{% endif %}>
                         <i class="fas {% if is_editor %}fa-trash{% else %}fa-lock{% endif %}"></i>

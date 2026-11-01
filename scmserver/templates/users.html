@@ -97,7 +97,7 @@
                       {# Delete — admin only, can't delete self or user ID 1 #}
                       {% if is_admin and user.id != userid and user.id != 1 %}
                       <a class="btn btn-danger btn-sm ml-1"
-                         onclick="return postTo('/users/delete/{{ user.id }}', 'Delete this user? This cannot be undone.')"
+                         onclick="postTo('/users/delete/{{ user.id }}', 'Delete this user? This cannot be undone.'); return false;"
                          href="#"
                          title="Delete User">
                          <i class="fas fa-trash"></i>
