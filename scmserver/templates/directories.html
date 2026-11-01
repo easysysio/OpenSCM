@@ -92,7 +92,7 @@
                   </a>
                   <form method="POST" action="/admin/directories/delete/{{ d.id }}" style="display:inline;"
                         data-confirm="Delete directory {{ d.name }}? Users linked to it will fail to log in."
-                        data-danger="1" onsubmit="return confirmSubmit(this)">
+                        data-danger="1" onsubmit="confirmSubmit(this); return false;">
                     <button type="submit" class="btn btn-danger btn-sm ml-1" title="Delete">
                       <i class="fas fa-trash"></i>
                     </button>

@@ -549,8 +549,8 @@ window.confirmAction = function (message, onConfirm, opts) {
   $m.modal('show');
 };
 
-// confirmSubmit — for <form onsubmit="return confirmSubmit(this)"> or a
-// submit <button onclick="return confirmSubmit(this)">: asks with the
+// confirmSubmit — for <form onsubmit="confirmSubmit(this); return false;"> or a
+// submit <button onclick="confirmSubmit(this); return false;">: asks with the
 // element's data-confirm text (data-danger="1" for a red button), then
 // submits the form. form.submit() does not fire onsubmit again.
 window.confirmSubmit = function (el) {
@@ -559,7 +559,6 @@ window.confirmSubmit = function (el) {
   window.confirmAction(attr('data-confirm') || 'Are you sure?',
                        function () { form.submit(); },
                        { danger: attr('data-danger') === '1' });
-  return false;
 };
 
 function postTo(url, confirmMessage) {
