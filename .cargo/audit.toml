@@ -15,4 +15,13 @@ ignore = [
     # otherwise sit in every report forever.
     # Re-check if a MySQL backend is ever added.
     "RUSTSEC-2023-0071",
+
+    # basic-toml and proc-macro-error2 are unmaintained (no vulnerability).
+    # Both are pulled in only by age's translation macros: age → i18n-embed-fl
+    # (a proc macro) → proc-macro-error2, and i18n-embed-fl / i18n-embed-impl
+    # → i18n-config → basic-toml. They run while compiling, reading age's
+    # i18n.toml; none of their code is in the built binaries.
+    # Re-check when upgrading age (0.12 drops proc-macro-error2).
+    "RUSTSEC-2026-0374",  # basic-toml
+    "RUSTSEC-2026-0173",  # proc-macro-error2
 ]
