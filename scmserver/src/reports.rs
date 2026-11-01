@@ -1760,7 +1760,7 @@ pub async fn system_reports_download(
         .header(
             header::CONTENT_DISPOSITION,
             format!("attachment; filename=\"OpenSCM_SystemReport_{}_{}.pdf\"",
-                data.system_name.replace(' ', "_"), id),
+                crate::handlers::filename_part(&data.system_name), id),
         )
         .body(axum::body::Body::from(buffer))
         .unwrap_or_else(|_| StatusCode::INTERNAL_SERVER_ERROR.into_response())
@@ -1810,7 +1810,7 @@ pub async fn system_report_live_download(
         .header(
             header::CONTENT_DISPOSITION,
             format!("attachment; filename=\"OpenSCM_SystemReport_{}_live.pdf\"",
-                data.system_name.replace(' ', "_")),
+                crate::handlers::filename_part(&data.system_name)),
         )
         .body(axum::body::Body::from(buffer))
         .unwrap_or_else(|_| StatusCode::INTERNAL_SERVER_ERROR.into_response())
@@ -1882,7 +1882,7 @@ pub async fn system_reports_email(
     let subject = format!("OpenSCM System Report — {}", data.system_name);
     let html_body = report_email_body(&data.system_name, "", &row.submission_date);
     let filename = format!("OpenSCM_SystemReport_{}_{}.pdf",
-        data.system_name.replace(' ', "_"), id);
+        crate::handlers::filename_part(&data.system_name), id);
 
     match mailer.send_with_attachment(&to, &subject, &html_body, &filename, "application/pdf", bytes).await {
         Ok(_) => flash_back(&back, true, &format!("Report emailed to {}.", to)),
@@ -1941,7 +1941,7 @@ pub async fn system_report_live_email(
     let subject = format!("OpenSCM System Report — {} (live)", data.system_name);
     let html_body = report_email_body(&data.system_name, "", &now);
     let filename = format!("OpenSCM_SystemReport_{}_live.pdf",
-        data.system_name.replace(' ', "_"));
+        crate::handlers::filename_part(&data.system_name));
 
     match mailer.send_with_attachment(&to, &subject, &html_body, &filename, "application/pdf", bytes).await {
         Ok(_) => flash_back(&back, true, &format!("Report emailed to {}.", to)),

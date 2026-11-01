@@ -138,24 +138,37 @@
 <script>
   // Evidence "why?" toggle — decode the per-condition breakdown stored on the
   // button's data-evidence attribute and reveal it in the sibling detail row.
+  // The agent stores a JSON array of condition outcomes (the same format the
+  // system and policy report pages render). Every value comes from the agent,
+  // so each one is escaped.
   function renderContainerEvidence(json) {
-    try {
-      var data = JSON.parse(json);
-      if (!data || !data.conditions || !data.conditions.length) {
-        return '<span class="text-muted">' + (data && data.note ? data.note : 'No detail available.') + '</span>';
-      }
-      var html = '<table class="table table-sm mb-0"><thead class="sr-only"><tr><th scope="col">Status</th><th scope="col">Condition</th></tr></thead><tbody>';
-      data.conditions.forEach(function (c) {
-        var ok = c.passed ? '<span class="text-success"><i class="fas fa-check"></i></span>'
-                          : '<span class="text-danger"><i class="fas fa-times"></i></span>';
-        html += '<tr><td style="width:24px;">' + ok + '</td><td>' + (c.note || (c.element + ' ' + c.selement)) + '</td></tr>';
-      });
-      html += '</tbody></table>';
-      if (data.note) html += '<div class="text-muted mt-1">' + data.note + '</div>';
-      return html;
-    } catch (e) {
-      return '<span class="text-muted">Could not parse evidence.</span>';
+    var esc = window.escapeHtml;
+    var rows;
+    try { rows = JSON.parse(json); } catch (e) { rows = null; }
+    if (!Array.isArray(rows) || rows.length === 0) {
+      return '<span class="text-muted">No detail available (result predates evidence capture).</span>';
     }
+    var html = '<table class="table table-sm mb-0">'
+      + '<thead><tr class="text-uppercase text-muted">'
+      + '<th>Check</th><th>Expected</th><th>Result</th><th>Note</th></tr></thead><tbody>';
+    rows.forEach(function (o) {
+      var badge = o.result === 'PASS' ? '<span class="text-success">PASS</span>'
+                : o.result === 'FAIL' ? '<span class="text-danger font-weight-bold">FAIL</span>'
+                : '<span class="text-secondary">NA</span>';
+      var check = esc(o.element)
+                + (o.input ? ' <code>' + esc(o.input) + '</code>' : '')
+                + (o.selement ? ' / ' + esc(o.selement) : '');
+      if (o.phase === 'applicability') {
+        check = '<span class="badge badge-light border mr-1">applicability</span>' + check;
+      }
+      var expected = (esc(o.operator) + ' ' + esc(o.expected)).trim();
+      html += '<tr class="' + (o.result === 'FAIL' ? 'table-danger' : '') + '">'
+        + '<td>' + check + '</td>'
+        + '<td>' + (expected ? '<code>' + expected + '</code>' : '<span class="text-muted">—</span>') + '</td>'
+        + '<td>' + badge + '</td>'
+        + '<td>' + esc(o.note) + '</td></tr>';
+    });
+    return html + '</tbody></table>';
   }
   document.querySelectorAll('.evidence-toggle').forEach(function (btn) {
     btn.addEventListener('click', function () {

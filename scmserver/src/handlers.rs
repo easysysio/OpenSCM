@@ -77,6 +77,20 @@ pub fn escape_json_for_script(json: &str) -> String {
         .replace('&', "\\u0026")
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Helper: filename_part
+// Makes a value safe inside a download filename (Content-Disposition):
+// ASCII letters, digits, '-', '_' and '.' are kept, whitespace becomes '_'
+// and anything else '_'. Policy versions and system names (the agent's
+// hostname) are free text; a quote would end the filename early and a
+// control character makes the header invalid.
+// ─────────────────────────────────────────────────────────────────────────────
+pub fn filename_part(v: &str) -> String {
+    v.chars()
+        .map(|c| if c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.') { c } else { '_' })
+        .collect()
+}
+
 
 // ─────────────────────────────────────────────────────────────────────────────
 pub async fn render_template(
@@ -584,4 +598,17 @@ pub fn resolve_client_ip(
         return ip.to_canonical().to_string();
     }
     peer.to_string()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::filename_part;
+
+    #[test]
+    fn filename_part_keeps_safe_characters_only() {
+        assert_eq!(filename_part("web-01.example.com"), "web-01.example.com");
+        assert_eq!(filename_part("1.0 beta"), "1.0_beta");
+        assert_eq!(filename_part("1.0\nx\"; y"), "1.0_x___y");
+        assert_eq!(filename_part("caf\u{e9}"), "caf_");
+    }
 }

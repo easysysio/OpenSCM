@@ -36,6 +36,10 @@ All notable changes to OpenSCM are documented here.
 - Accessibility: result tables on the report pages and the container detail page have column headers for screen readers, popup titles have default text until the page fills them in, and the Description/Rationale/Remediation captions in the test detail popup are headings rather than unattached form labels (they render slightly smaller).
 - `postTo` and `confirmSubmit` (the helpers behind POST action links and confirmed forms) no longer return a value; each link or form stops its own navigation with `return false`. Templates that call them must use `confirmSubmit(this); return false;` rather than `return confirmSubmit(this)`, or the form submits without asking; a template test fails the build if the old form comes back. No change in behaviour.
 
+### Fixed
+- The "why?" breakdown on a container's detail page always said "No detail available.": it expected a different evidence format from the one agents send. It now shows the same per-condition table as the system and policy report pages, with every value escaped.
+- Exporting a policy whose version contains a line break (possible through import or the API) crashed the request. Download and email attachment filenames now keep only letters, digits, `-`, `_` and `.` from policy versions and system names.
+
 ---
 
 ## [0.13.0] - 2026-10-29

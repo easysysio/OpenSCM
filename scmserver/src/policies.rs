@@ -1956,15 +1956,17 @@ pub async fn policies_export(
         .map(|c| if c.is_ascii_alphanumeric() || c == '-' || c == '_' { c.to_ascii_lowercase() }
                  else if c.is_whitespace() { '-' } else { '_' })
         .collect();
-    let filename = format!("{}-{}.json", slug, export.policy.version);
+    let filename = format!("{}-{}.json", slug, crate::handlers::filename_part(&export.policy.version));
 
     Response::builder()
         .status(StatusCode::OK)
         .header(header::CONTENT_TYPE, "application/json")
         .header(header::CONTENT_DISPOSITION, format!("attachment; filename=\"{}\"", filename))
         .body(axum::body::Body::from(body))
-        .unwrap()
-        .into_response()
+        .unwrap_or_else(|e| {
+            error!("Failed to build export response for policy {}: {}", id, e);
+            StatusCode::INTERNAL_SERVER_ERROR.into_response()
+        })
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
