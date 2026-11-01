@@ -188,3 +188,24 @@ fn no_template_uses_the_browser_confirm() {
     }
     assert!(bad.is_empty(), "browser confirm() still used:\n{}", bad.join("\n"));
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// postTo and confirmSubmit (base.html) return nothing. A handler written as
+// `return confirmSubmit(this)` returns undefined, so the browser submits the
+// form (or follows the link) at once, without asking. Callers must write
+// `confirmSubmit(this); return false;`.
+// ─────────────────────────────────────────────────────────────────────────────
+#[test]
+fn no_handler_returns_a_confirm_helper_result() {
+    let call = regex::Regex::new(r"return\s+(postTo|confirmSubmit)\s*\(").unwrap();
+    let mut bad = Vec::new();
+    for (name, src) in templates() {
+        for (n, line) in src.lines().enumerate() {
+            if call.is_match(line) {
+                bad.push(format!("{name}:{}: {}", n + 1, line.trim()));
+            }
+        }
+    }
+    assert!(bad.is_empty(),
+        "use `postTo(...); return false;` / `confirmSubmit(this); return false;`:\n{}", bad.join("\n"));
+}
