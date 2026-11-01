@@ -133,7 +133,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
     let db_file = db_path();
     // One server per database: a second one stops here (instance_lock.rs).
     // Held until the process exits.
-    let _instance_lock = scmserver::instance_lock::acquire(&db_file)?;
+    let _instance_lock = scmserver::instance_lock::acquire(db_file)?;
     if !std::path::Path::new(&db_file).exists() {
         tokio::fs::File::create(&db_file).await
             .map_err(|e| format!("Cannot create database file '{}': {}", db_file, e))?;
@@ -178,7 +178,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
     if db_initialized {
         run_migrations(&pool).await?;
         // After a `scmserver restore`: record it in the audit log, once.
-        scmserver::backup::record_restore(&pool, &db_file).await;
+        scmserver::backup::record_restore(&pool, db_file).await;
         // Secrets saved before encryption existed are rewritten encrypted.
         scmserver::secrets::init_from_cookie_key(&cookie_key);
         scmserver::secrets::encrypt_existing(&pool).await;
@@ -195,7 +195,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
     let worker_pool = pool.clone();
 
     tokio::spawn(async move {
-        while let Some(_) = sync_rx.recv().await {
+        while sync_rx.recv().await.is_some() {
             tokio::time::sleep(std::time::Duration::from_secs(10)).await;
             while sync_rx.try_recv().is_ok() {}
             if let Err(e) = recalculate_current_compliance(&worker_pool).await {

@@ -951,7 +951,7 @@ fn swap_in(
         let note_path = db_dir.join(RESTORE_NOTE);
         if fs::write(&note_path, json).is_ok() {
             #[cfg(unix)]
-            if let Ok(t) = owner_template(fs::metadata(&paths.db).ok().as_ref(), &db_dir, 0o600) {
+            if let Ok(t) = owner_template(fs::metadata(&paths.db).ok().as_ref(), db_dir, 0o600) {
                 let _ = apply_owner(&note_path, t);
             }
         }
@@ -1047,10 +1047,9 @@ fn read_passphrase(file: Option<&Path>, confirm: bool) -> Result<String, String>
         }
         return Ok(s);
     }
-    if let Ok(s) = std::env::var(PASSPHRASE_ENV) {
-        if !s.is_empty() {
-            return Ok(s);
-        }
+    if let Ok(s) = std::env::var(PASSPHRASE_ENV)
+        && !s.is_empty() {
+        return Ok(s);
     }
     // The server's own passphrase file (set-passphrase), when there is one.
     let server_file = crate::config::backup_passphrase_path();

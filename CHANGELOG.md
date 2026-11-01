@@ -9,6 +9,9 @@ All notable changes to OpenSCM are documented here.
 ### Security
 - SSO sign-in refuses an ID token whose `nbf` ("not before") claim is not a number. jsonwebtoken 9 treats a claim it cannot parse as absent, so an `nbf` sent as text skipped the check (CVE-2026-25537, GHSA-h395-gr6q-cpjc). Exploiting it needed a token signed by the organization's own provider, tied to one sign-in by its nonce. The jsonwebtoken 10 upgrade (new crypto backend) is planned separately.
 
+### Changed
+- Server and agent code tidied to pass `cargo clippy` without warnings (merged nested `if`s, removed unused imports, type aliases for long tuple types). No change in behavior.
+
 ---
 
 ## [1.0.0] - 2026-11-01

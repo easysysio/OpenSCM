@@ -275,9 +275,9 @@ where
 {
     type Rejection = Redirect;
 
-    fn from_request_parts<'a, 'b>(
-        parts: &'a mut Parts,
-        state: &'b S,
+    fn from_request_parts(
+        parts: &mut Parts,
+        state: &S,
     ) -> impl Future<Output = Result<Self, Self::Rejection>> + Send {
         let key = Key::from_ref(state);
         let jar = SignedCookieJar::from_headers(&parts.headers, key);
@@ -663,7 +663,7 @@ mod tests {
     fn dummy_hash_is_a_real_bcrypt_hash() {
         let h = dummy_hash();
         assert_eq!(h.len(), 60, "bcrypt hashes are 60 characters");
-        assert_eq!(verify("not-the-password", h).expect("verify must hash, not error"), false);
+        assert!(!verify("not-the-password", h).expect("verify must hash, not error"));
     }
 
     // And it must cost what a stored password costs, or the timing still differs.

@@ -344,10 +344,9 @@ impl Backups {
             *self.next.lock().unwrap() = None;
             return None;
         }
-        if let Some((sched, at)) = self.next.lock().unwrap().clone() {
-            if sched == s.schedule {
-                return Some(at);
-            }
+        if let Some((sched, at)) = self.next.lock().unwrap().clone()
+            && sched == s.schedule {
+            return Some(at);
         }
         let base = setting(pool, "backup_last_at")
             .await

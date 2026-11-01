@@ -54,6 +54,8 @@ fn reject(status: StatusCode, msg: &str) -> axum::response::Response {
 // Helper: check_protocol
 // A version this server does not speak is refused outright.
 // ─────────────────────────────────────────────────────────────────────────────
+// The Err is the finished reply, returned at once: boxing it gains nothing.
+#[allow(clippy::result_large_err)]
 fn check_protocol(protocol: Option<i64>) -> Result<(), axum::response::Response> {
     match protocol {
         Some(p) if p > PROTOCOL || p < 1 => Err(reject(
@@ -68,6 +70,8 @@ fn check_protocol(protocol: Option<i64>) -> Result<(), axum::response::Response>
 // Helper: within_clock_window
 // sent_at_ms present and within MAX_CLOCK_SKEW_MS of the server's clock.
 // ─────────────────────────────────────────────────────────────────────────────
+// The Err is the finished reply, returned at once: boxing it gains nothing.
+#[allow(clippy::result_large_err)]
 fn within_clock_window(sent_at_ms: Option<i64>) -> Result<i64, axum::response::Response> {
     let ts = sent_at_ms.ok_or_else(|| reject(StatusCode::BAD_REQUEST, "Protocol 1 requires sent_at_ms"))?;
     let now = chrono::Utc::now().timestamp_millis();
@@ -437,10 +441,9 @@ pub async fn send(
             warn!("REJECTED: registration for '{}' is not signed by the key it presents: {}", payload.hostname, err);
             return reject(StatusCode::UNAUTHORIZED, "Registration is not signed by the presented key");
         }
-        if payload.protocol.is_some() {
-            if let Err(resp) = within_clock_window(payload.sent_at_ms) {
-                return resp;
-            }
+        if payload.protocol.is_some()
+            && let Err(resp) = within_clock_window(payload.sent_at_ms) {
+            return resp;
         }
 
         // Golden enrollment token (optional, registration only). Computed once
@@ -465,34 +468,32 @@ pub async fn send(
                     // presents a valid token (covers "enrolled before minting
                     // the token, then added it"). Runs in its own short tx so
                     // the token use is consumed atomically with the status flip.
-                    if existing_status == "pending" {
-                        if let Some(tok) = token_opt {
-                            if let Ok(mut tx) = pool.begin().await {
-                                match crate::enrollment::approve_with_token(&mut tx, tenant_id, tok).await {
-                                    Ok(TokenOutcome::Approved) => {
-                                        if sqlx::query("UPDATE systems SET status = 'active' WHERE id = ? AND tenant_id = ?")
-                                            .bind(existing_id).bind(tenant_id)
-                                            .execute(&mut *tx).await.is_ok()
-                                            && tx.commit().await.is_ok()
-                                        {
-                                            existing_status = "active".into();
-                                            info!("Agent '{}' (ID {}) auto-approved via enrollment token on re-registration.",
-                                                  payload.hostname, existing_id);
-                                            crate::audit::record(
-                                                &pool, tenant_id, None, Some(payload.ip.as_str()),
-                                                "enrollment.token_approve",
-                                                Some("system"), Some(&existing_id.to_string()),
-                                                Some(serde_json::json!({"hostname": payload.hostname, "stage": "re-registration"})),
-                                            ).await;
-                                        }
-                                    }
-                                    Ok(TokenOutcome::PlanLimit(limit)) => {
-                                        let _ = tx.rollback().await;
-                                        token_blocked_by_plan(&pool, tenant_id, &payload, existing_id, &limit).await;
-                                    }
-                                    _ => { let _ = tx.rollback().await; }
+                    if existing_status == "pending"
+                        && let Some(tok) = token_opt
+                        && let Ok(mut tx) = pool.begin().await {
+                        match crate::enrollment::approve_with_token(&mut tx, tenant_id, tok).await {
+                            Ok(TokenOutcome::Approved) => {
+                                if sqlx::query("UPDATE systems SET status = 'active' WHERE id = ? AND tenant_id = ?")
+                                    .bind(existing_id).bind(tenant_id)
+                                    .execute(&mut *tx).await.is_ok()
+                                    && tx.commit().await.is_ok()
+                                {
+                                    existing_status = "active".into();
+                                    info!("Agent '{}' (ID {}) auto-approved via enrollment token on re-registration.",
+                                          payload.hostname, existing_id);
+                                    crate::audit::record(
+                                        &pool, tenant_id, None, Some(payload.ip.as_str()),
+                                        "enrollment.token_approve",
+                                        Some("system"), Some(&existing_id.to_string()),
+                                        Some(serde_json::json!({"hostname": payload.hostname, "stage": "re-registration"})),
+                                    ).await;
                                 }
                             }
+                            Ok(TokenOutcome::PlanLimit(limit)) => {
+                                let _ = tx.rollback().await;
+                                token_blocked_by_plan(&pool, tenant_id, &payload, existing_id, &limit).await;
+                            }
+                            _ => { let _ = tx.rollback().await; }
                         }
                     }
 
@@ -536,14 +537,13 @@ pub async fn send(
 
         // Without a token, a new system lands in the pending queue: limit how
         // many one client address can put there (design D6).
-        if token_opt.is_none() {
-            if let Some(left) = crate::rate_limit::REGISTER_PENDING.locked(ip.as_str()) {
-                warn!("Registration from {} refused: rate limited", ip.as_str());
-                return reject(
-                    StatusCode::TOO_MANY_REQUESTS,
-                    &crate::rate_limit::retry_message("new registrations from this address", left),
-                );
-            }
+        if token_opt.is_none()
+            && let Some(left) = crate::rate_limit::REGISTER_PENDING.locked(ip.as_str()) {
+            warn!("Registration from {} refused: rate limited", ip.as_str());
+            return reject(
+                StatusCode::TOO_MANY_REQUESTS,
+                &crate::rate_limit::retry_message("new registrations from this address", left),
+            );
         }
 
         info!(
@@ -768,16 +768,15 @@ pub async fn send(
                 // Container inventory — only act when the agent sent the field
                 // (None = old agent / non-Linux, leave existing rows alone).
                 // Some([...]) including the empty case ingests as design doc §3.
-                if let Some(ref containers) = payload.containers {
-                    if let Err(e) = ingest_containers(&mut tx, tenant_id, id, containers).await {
-                        error!("Failed to ingest containers for agent {}: {}", id, e);
-                        tx.rollback().await.ok();
-                        return (
-                            StatusCode::INTERNAL_SERVER_ERROR,
-                            Json(serde_json::json!({"error": "Database error"})),
-                        )
-                            .into_response();
-                    }
+                if let Some(ref containers) = payload.containers
+                    && let Err(e) = ingest_containers(&mut tx, tenant_id, id, containers).await {
+                    error!("Failed to ingest containers for agent {}: {}", id, e);
+                    tx.rollback().await.ok();
+                    return (
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        Json(serde_json::json!({"error": "Database error"})),
+                    )
+                        .into_response();
                 }
 
                 // Automatic group assignment — reconcile this system's

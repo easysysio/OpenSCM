@@ -33,6 +33,8 @@ use crate::models::{AuditEntry, AuthSession, UserRole};
 // triggered without an authenticated session (e.g. a failed login attempt
 // before AuthSession exists, or a background scheduler job).
 // ─────────────────────────────────────────────────────────────────────────────
+// One argument per audit_log column, called the same way at every audit site.
+#[allow(clippy::too_many_arguments)]
 pub async fn record(
     pool:        &SqlitePool,
     tenant_id:   &str,
@@ -58,6 +60,8 @@ pub async fn record(
 // username, or a background scheduler event with no human actor at all.
 // Pass actor_user_id=None + actor_username="system" for daemon-originated.
 // ─────────────────────────────────────────────────────────────────────────────
+// One argument per audit_log column, like record.
+#[allow(clippy::too_many_arguments)]
 pub async fn record_raw(
     pool:           &SqlitePool,
     tenant_id:      &str,

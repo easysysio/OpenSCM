@@ -685,46 +685,45 @@ pub async fn run_due_schedules(pool: &SqlitePool, now: chrono::DateTime<Utc>) {
         // the limit the report is skipped, the administrators are told why,
         // and the schedule moves on to its next run (it must not retry every
         // minute).
-        if schedule.schedule_type == "report" {
-            if let Some(limit) = crate::plan::limit_reached_pool(&loop_pool, &schedule.tenant_id, "reports").await {
-                let (next_run_time, _) = crate::schedule::next_run(
-                    &schedule.frequency,
-                    schedule.cron_expression.as_deref(),
-                    &schedule.next_run,
-                    now.naive_utc(),
-                );
-                if let Err(e) = sqlx::query("UPDATE policy_schedules SET next_run = ? WHERE id = ?")
-                    .bind(&next_run_time)
-                    .bind(schedule.id)
-                    .execute(&loop_pool)
-                    .await
-                {
-                    error!("Failed to update schedule for policy {}: {}", schedule.policy_id, e);
-                }
-                let policy_name: String = sqlx::query_scalar(
-                    "SELECT name FROM policies WHERE id = ? AND tenant_id = ?",
-                )
-                .bind(schedule.policy_id)
-                .bind(&schedule.tenant_id)
-                .fetch_optional(&loop_pool)
+        if schedule.schedule_type == "report"
+            && let Some(limit) = crate::plan::limit_reached_pool(&loop_pool, &schedule.tenant_id, "reports").await {
+            let (next_run_time, _) = crate::schedule::next_run(
+                &schedule.frequency,
+                schedule.cron_expression.as_deref(),
+                &schedule.next_run,
+                now.naive_utc(),
+            );
+            if let Err(e) = sqlx::query("UPDATE policy_schedules SET next_run = ? WHERE id = ?")
+                .bind(&next_run_time)
+                .bind(schedule.id)
+                .execute(&loop_pool)
                 .await
-                .ok()
-                .flatten()
-                .unwrap_or_else(|| format!("ID {}", schedule.policy_id));
-                crate::plan::notify_admins_once(
-                    &loop_pool,
-                    &schedule.tenant_id,
-                    "warning",
-                    &format!(
-                        "The scheduled report for policy '{}' was not saved. {} \
-                         Deleting older reports also makes room.",
-                        policy_name,
-                        limit.message()
-                    ),
-                )
-                .await;
-                continue;
+            {
+                error!("Failed to update schedule for policy {}: {}", schedule.policy_id, e);
             }
+            let policy_name: String = sqlx::query_scalar(
+                "SELECT name FROM policies WHERE id = ? AND tenant_id = ?",
+            )
+            .bind(schedule.policy_id)
+            .bind(&schedule.tenant_id)
+            .fetch_optional(&loop_pool)
+            .await
+            .ok()
+            .flatten()
+            .unwrap_or_else(|| format!("ID {}", schedule.policy_id));
+            crate::plan::notify_admins_once(
+                &loop_pool,
+                &schedule.tenant_id,
+                "warning",
+                &format!(
+                    "The scheduled report for policy '{}' was not saved. {} \
+                     Deleting older reports also makes room.",
+                    policy_name,
+                    limit.message()
+                ),
+            )
+            .await;
+            continue;
         }
 
         let result = match schedule.schedule_type.as_str() {

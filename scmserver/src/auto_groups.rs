@@ -226,6 +226,8 @@ impl SystemSnapshot {
     /// `uptime_secs` therefore relies on the once-per-tick recalc cadence
     /// rather than instant reconciliation; acceptable given uptime crosses
     /// any threshold exactly once (it's monotonic between reboots).
+    // Only ever compared for equality, so a named type would add nothing.
+    #[allow(clippy::type_complexity)]
     pub fn rule_relevant_fingerprint(&self) -> (
         Option<&str>, Option<&str>, Option<&str>, Option<&str>, Option<&str>, Option<&str>,
         Option<i64>, Option<i64>, bool, Vec<&str>, Vec<&str>,

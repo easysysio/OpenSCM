@@ -20,6 +20,7 @@
 //!   * migrations are idempotent,
 //!   * every migration step is guarded, so it is safe to re-run against a
 //!     database that already has the objects it creates.
+//!
 //! That last one is the property that actually breaks real upgrades.
 
 use sqlx::SqlitePool;

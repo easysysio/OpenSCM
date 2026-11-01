@@ -768,13 +768,13 @@ fn get_package_version(package: &str) -> Option<String> {
         .output()
         .ok();
 
-    if let Some(o) = output {
-        if o.status.success() {
-            // "brew list --versions <pkg>" returns "package version" e.g. "nginx 1.25.3"
-            let out = String::from_utf8_lossy(&o.stdout);
-            if let Some(ver) = out.split_whitespace().nth(1) {
-                return Some(ver.to_string());
-            }
+    if let Some(o) = output
+        && o.status.success()
+    {
+        // "brew list --versions <pkg>" returns "package version" e.g. "nginx 1.25.3"
+        let out = String::from_utf8_lossy(&o.stdout);
+        if let Some(ver) = out.split_whitespace().nth(1) {
+            return Some(ver.to_string());
         }
     }
 
@@ -784,25 +784,25 @@ fn get_package_version(package: &str) -> Option<String> {
         .output()
         .ok();
 
-    if let Some(o) = output_cask {
-        if o.status.success() {
-            let out = String::from_utf8_lossy(&o.stdout);
-            if let Some(ver) = out.split_whitespace().nth(1) {
-                return Some(ver.to_string());
-            }
+    if let Some(o) = output_cask
+        && o.status.success()
+    {
+        let out = String::from_utf8_lossy(&o.stdout);
+        if let Some(ver) = out.split_whitespace().nth(1) {
+            return Some(ver.to_string());
         }
     }
 
     // Try pkgutil — find matching package ID then fetch its version
     if let Ok(list_output) = Command::new("pkgutil").args(["--pkgs"]).output() {
         let list = String::from_utf8_lossy(&list_output.stdout);
-        if let Some(pkg_id) = list.lines().find(|l| *l == package || l.contains(package)) {
-            if let Ok(info) = Command::new("pkgutil").args(["--pkg-info", pkg_id]).output() {
-                let info_str = String::from_utf8_lossy(&info.stdout);
-                for line in info_str.lines() {
-                    if let Some(ver) = line.strip_prefix("version: ") {
-                        return Some(ver.trim().to_string());
-                    }
+        if let Some(pkg_id) = list.lines().find(|l| *l == package || l.contains(package))
+            && let Ok(info) = Command::new("pkgutil").args(["--pkg-info", pkg_id]).output()
+        {
+            let info_str = String::from_utf8_lossy(&info.stdout);
+            for line in info_str.lines() {
+                if let Some(ver) = line.strip_prefix("version: ") {
+                    return Some(ver.trim().to_string());
                 }
             }
         }
@@ -900,13 +900,9 @@ fn win_installed_packages() -> Vec<(String, Option<String>)> {
 
 #[cfg(unix)]
 fn get_system_domain() -> Option<String> {
-    dns_lookup::get_hostname().ok().and_then(|h| {
-        if h.contains('.') {
-            h.splitn(2, '.').nth(1).map(|s| s.to_string())
-        } else {
-            None
-        }
-    })
+    dns_lookup::get_hostname()
+        .ok()
+        .and_then(|h| h.split_once('.').map(|(_, domain)| domain.to_string()))
 }
 
 #[cfg(windows)]
@@ -1102,12 +1098,12 @@ pub fn combine_verdict(results: &[EvalResult], filter: &str) -> String {
     if results.is_empty() { return "NA".to_string(); }
     match filter {
         "any" => {
-            if results.iter().any(|r| *r == EvalResult::Pass) { "PASS".to_string() }
+            if results.contains(&EvalResult::Pass) { "PASS".to_string() }
             else if results.iter().all(|r| *r == EvalResult::Na) { "NA".to_string() }
             else { "FAIL".to_string() }
         }
         _ => {
-            if results.iter().any(|r| *r == EvalResult::Fail) { "FAIL".to_string() }
+            if results.contains(&EvalResult::Fail) { "FAIL".to_string() }
             else if results.iter().all(|r| *r == EvalResult::Na) { "NA".to_string() }
             else { "PASS".to_string() }
         }
@@ -1153,13 +1149,12 @@ pub fn reset_cmd_cache() {
 /// in this scan. Returns (combined stdout+stderr, exit code); an exit code of
 /// -1 means the command could not be spawned at all.
 fn run_cmd_cached(input: &str) -> Option<(String, i32)> {
-    if let Ok(g) = CMD_CACHE.lock() {
-        if let Some(map) = g.as_ref() {
-            if let Some(hit) = map.get(input) {
-                debug!("CMD '{}' served from scan cache", input);
-                return Some(hit.clone());
-            }
-        }
+    if let Ok(g) = CMD_CACHE.lock()
+        && let Some(map) = g.as_ref()
+        && let Some(hit) = map.get(input)
+    {
+        debug!("CMD '{}' served from scan cache", input);
+        return Some(hit.clone());
     }
 
     #[cfg(unix)]
@@ -1261,6 +1256,8 @@ pub fn build_evidence(
     serde_json::to_string(&outcomes).ok()
 }
 
+// One argument per test-condition field, plus the scan switches and target.
+#[allow(clippy::too_many_arguments)]
 pub fn evaluate(
     element: &str,
     input: &str,
@@ -2103,7 +2100,7 @@ pub fn evaluate(
             #[cfg(not(target_os = "windows"))]
             {
                 let _ = ps_enabled; // suppress unused-variable warning
-                return EvalResult::Na;
+                EvalResult::Na
             }
 
             #[cfg(target_os = "windows")]

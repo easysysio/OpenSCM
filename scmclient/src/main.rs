@@ -297,7 +297,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     loop {
         debug!("Starting heartbeat cycle");
 
-        match agent::send_system_info(&mut config, &http_client).await {
+        match agent::send_system_info(&config, &http_client).await {
             Ok(_)  => debug!("Heartbeat completed successfully"),
             Err(e) => warn!("Heartbeat failed: {}", e),
         }
@@ -309,12 +309,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             .unwrap_or(300);
 
         // Only reload log level if it actually changed
-        if let Some(level) = &config.client.loglevel {
-            if *level != last_log_level {
-                let _ = reload_handle.reload(EnvFilter::new(level));
-                info!("Log level changed to '{}'", level);
-                last_log_level = level.clone();
-            }
+        if let Some(level) = &config.client.loglevel
+            && *level != last_log_level
+        {
+            let _ = reload_handle.reload(EnvFilter::new(level));
+            info!("Log level changed to '{}'", level);
+            last_log_level = level.clone();
         }
 
         // Apply jitter (0-9 seconds) to prevent thundering herd
@@ -337,6 +337,8 @@ fn acquire_instance_lock() -> std::io::Result<Option<std::fs::File>> {
     let lock_path = config::lock_path();
     let mut file = std::fs::OpenOptions::new()
         .create(true).read(true).write(true)
+        // Not truncated on open: another agent may hold it and its PID is inside.
+        .truncate(false)
         .open(lock_path)
         .map_err(|e| { error!("Cannot open lock file {}: {}", lock_path, e); e })?;
     if file.try_lock_exclusive().is_err() {

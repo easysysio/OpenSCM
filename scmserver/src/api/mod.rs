@@ -97,10 +97,9 @@ impl IntoResponse for ApiError {
     fn into_response(self) -> Response {
         let mut resp = (self.status, Json(json!({"error": {"code": self.code, "message": self.message}})))
             .into_response();
-        if let Some(secs) = self.retry_after {
-            if let Ok(v) = HeaderValue::from_str(&secs.to_string()) {
-                resp.headers_mut().insert(axum::http::header::RETRY_AFTER, v);
-            }
+        if let Some(secs) = self.retry_after
+            && let Ok(v) = HeaderValue::from_str(&secs.to_string()) {
+            resp.headers_mut().insert(axum::http::header::RETRY_AFTER, v);
         }
         resp
     }

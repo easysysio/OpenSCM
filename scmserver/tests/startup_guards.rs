@@ -31,7 +31,7 @@ fn temp_dir(tag: &str) -> PathBuf {
 // Helper: file_pool
 // A database file in `dir`, with the pool settings main.rs uses.
 // ─────────────────────────────────────────────────────────────────────────────
-async fn file_pool(dir: &PathBuf) -> SqlitePool {
+async fn file_pool(dir: &std::path::Path) -> SqlitePool {
     let path = dir.join("scm.db");
     std::fs::File::create(&path).unwrap();
     SqlitePoolOptions::new()

@@ -273,10 +273,9 @@ pub async fn dashboard(auth: AuthSession, Query(params): Query<DashboardParams>,
 
     // Backups needing attention (off, not runnable, or last one failed):
     // superusers only, as Settings → Backup.
-    if crate::models::UserRole::from(auth.role.as_str()) >= crate::models::UserRole::Superuser {
-        if let Some(n) = crate::backup_jobs::global().dashboard_notice(&pool).await {
-            context.insert("backup_notice", &n);
-        }
+    if crate::models::UserRole::from(auth.role.as_str()) >= crate::models::UserRole::Superuser
+        && let Some(n) = crate::backup_jobs::global().dashboard_notice(&pool).await {
+        context.insert("backup_notice", &n);
     }
 
     // Guided first-run tour. Only ever offered on the dashboard: a modal that

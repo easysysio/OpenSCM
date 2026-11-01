@@ -808,6 +808,8 @@ pub(crate) async fn fetch_archive_policy_report(
 // Public so `tests/pdf_render.rs` can render golden fixtures for visual
 // before/after comparison across renderer changes.
 // ─────────────────────────────────────────────────────────────────────────────
+// Callers only need "it failed" (a 500); the cause is logged where it happens.
+#[allow(clippy::result_unit_err)]
 pub fn build_archive_policy_pdf(
     report: &Report,
     system_reports: &[SystemReport],
@@ -1576,6 +1578,8 @@ pub async fn system_reports_bulk_delete(
 // Public so `tests/pdf_render.rs` can render golden fixtures for visual
 // before/after comparison across renderer changes.
 // ─────────────────────────────────────────────────────────────────────────────
+// Callers only need "it failed" (a 500); the cause is logged where it happens.
+#[allow(clippy::result_unit_err)]
 pub fn build_system_report_pdf(data: &SystemReportData, subtitle: &str) -> Result<Vec<u8>, ()> {
     const FONT_REGULAR:     &[u8] = include_bytes!("../static/dist/fonts/LiberationSans-Regular.ttf");
     const FONT_BOLD:        &[u8] = include_bytes!("../static/dist/fonts/LiberationSans-Bold.ttf");
@@ -1651,11 +1655,10 @@ pub fn build_system_report_pdf(data: &SystemReportData, subtitle: &str) -> Resul
             &format!("{} — v{}", policy.policy_name, policy.policy_version),
             Style::new().size(13.0).bold(),
         );
-        if let Some(desc) = &policy.policy_description {
-            if !desc.is_empty() {
-                doc.space(0.2);
-                doc.text(desc, Style::new().size(9.0).color(100, 100, 100));
-            }
+        if let Some(desc) = &policy.policy_description
+            && !desc.is_empty() {
+            doc.space(0.2);
+            doc.text(desc, Style::new().size(9.0).color(100, 100, 100));
         }
         doc.space(0.3);
         doc.text(
@@ -1784,7 +1787,7 @@ pub async fn system_report_live_download(
 
     let data = match fetch_system_report_data(id, &auth.tenant_id, &pool).await {
         Ok(d) => d,
-        Err(e) if matches!(e, sqlx::Error::RowNotFound) => {
+        Err(sqlx::Error::RowNotFound) => {
             return Redirect::to("/systems?error_message=System+not+found").into_response();
         }
         Err(e) => {
@@ -1920,7 +1923,7 @@ pub async fn system_report_live_email(
 
     let data = match fetch_system_report_data(id, &auth.tenant_id, &pool).await {
         Ok(d) => d,
-        Err(e) if matches!(e, sqlx::Error::RowNotFound) => {
+        Err(sqlx::Error::RowNotFound) => {
             return Redirect::to("/systems?error_message=System+not+found").into_response();
         }
         Err(e) => {

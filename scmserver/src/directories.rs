@@ -113,6 +113,7 @@ pub fn test_bind(dir: &Directory) -> Result<(), String> {
 ///   1. Bind as the service account
 ///   2. Search for the user under base_dn by user_attribute
 ///   3. Re-bind as the user's DN with the submitted password
+///
 /// Returns true if all three succeed.
 pub fn verify_user(dir: &Directory, login: &str, password: &str) -> bool {
     if password.is_empty() {

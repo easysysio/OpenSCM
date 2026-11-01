@@ -7,7 +7,6 @@
 
 use axum::extract::{Extension, Path, Query, RawForm};
 use axum::response::{IntoResponse, Redirect};
-use bytes::Bytes;
 use serde::Serialize;
 use sqlx::{Row, SqlitePool};
 use std::sync::Arc;
@@ -453,12 +452,11 @@ pub async fn alerts_save(
     if let Some(redir) = auth::authorize(&auth.role, UserRole::Admin) {
         return redir;
     }
-    if let Some(Path(alert_id)) = &id {
-        if let Some(r) = guard_server_rule(&pool, &auth, *alert_id).await {
-            return r;
-        }
+    if let Some(Path(alert_id)) = &id
+        && let Some(r) = guard_server_rule(&pool, &auth, *alert_id).await {
+        return r;
     }
-    let body = String::from_utf8_lossy(&Bytes::from(raw.0)).to_string();
+    let body = String::from_utf8_lossy(&raw.0).to_string();
     let superuser = UserRole::from(auth.role.as_str()) >= UserRole::Superuser;
     let v = match read_form(&body, superuser) {
         Ok(v) => v,

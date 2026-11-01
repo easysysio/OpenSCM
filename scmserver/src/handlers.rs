@@ -148,7 +148,7 @@ pub async fn render_template(
                  ORDER BY nts DESC
                  LIMIT 10",
             )
-            .bind(&session.userid)
+            .bind(session.userid)
             .bind(&session.tenant_id)
             .fetch_all(db_pool)
             .await
@@ -323,7 +323,7 @@ pub async fn clear_notifications(
     Extension(pool): Extension<SqlitePool>,
 ) -> Redirect {
     let result = sqlx::query("DELETE FROM notify WHERE owner_id = ? AND tenant_id = ?")
-        .bind(&auth.userid)
+        .bind(auth.userid)
         .bind(&auth.tenant_id)
         .execute(&pool)
         .await;

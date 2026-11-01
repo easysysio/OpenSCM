@@ -21,7 +21,6 @@ use sqlx::{SqlitePool, Sqlite, Transaction, Row};
 use std::sync::Arc;
 use tera::{Tera, Context};
 use tracing::{info, error};
-use bytes::Bytes;
 
 use crate::auth;
 use crate::audit;
@@ -257,7 +256,7 @@ pub async fn tokens_create(
         return redir;
     }
 
-    let raw_string = String::from_utf8_lossy(&Bytes::from(raw_form.0)).to_string();
+    let raw_string = String::from_utf8_lossy(&raw_form.0).to_string();
     let form = parse_form_data(&raw_string);
 
     let name = match form.get("name").and_then(|v| v.first()).filter(|s| !s.is_empty()) {

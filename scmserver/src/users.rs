@@ -324,7 +324,7 @@ pub async fn users_delete(
 
     info!("User ID {} deleted by '{}' (Tenant: {}).", id, auth.username, auth.tenant_id);
     crate::audit::record(
-        &*pool, &auth.tenant_id,
+        &pool, &auth.tenant_id,
         Some(&auth), Some(ip.as_str()),
         "user.delete",
         Some("user"), Some(&id.to_string()),
@@ -550,7 +550,7 @@ pub async fn users_edit_save(
     // a role change we use a distinct action so auditors can filter cleanly.
     let action = if is_admin && !is_owner { "user.edit_by_admin" } else { "user.edit_self" };
     crate::audit::record(
-        &*pool, &auth.tenant_id,
+        &pool, &auth.tenant_id,
         Some(&auth), Some(ip.as_str()),
         action,
         Some("user"), Some(&id.to_string()),

@@ -3,11 +3,8 @@ use ed25519_dalek::{SigningKey, VerifyingKey, Signer, Verifier, Signature};
 use std::fs;
 use std::path::PathBuf;
 use base64::{engine::general_purpose, Engine as _};
-use reqwest;
-use chrono;
 use sha2::{Sha256, Digest};
 use rand::rngs::OsRng;
-use self_replace;
 
 use crate::models::{UnsignedPayload, SignedRequest, SignedResponse, Test, ComplianceResult};
 use crate::config::{Config, key_path};
@@ -152,6 +149,8 @@ fn write_private_file(path: &PathBuf, contents: &str) -> Result<(), Box<dyn std:
 
 
 /// Send a compliance result to the server.
+// One argument per field of the signed result.
+#[allow(clippy::too_many_arguments)]
 async fn send_result(
     client_id_int: i64,
     organization: &str,
@@ -206,6 +205,8 @@ async fn send_result(
 // COMPLIANCE TEST PROCESSING
 // ============================================================
 
+// Identity, transport and config switches, passed down from the heartbeat.
+#[allow(clippy::too_many_arguments)]
 async fn process_compliance_tests(
     tests: Vec<Test>,
     client_id: &str,
@@ -274,10 +275,10 @@ async fn process_compliance_tests(
                 }
 
                 let is_applicable = match test.app_filter.as_deref().unwrap_or("all") {
-                    "any" => app_results.iter().any(|r| *r == EvalResult::Pass),
+                    "any" => app_results.contains(&EvalResult::Pass),
                     _ => {
                         app_results.iter().all(|r| *r == EvalResult::Pass || *r == EvalResult::Na)
-                        && app_results.iter().any(|r| *r == EvalResult::Pass)
+                        && app_results.contains(&EvalResult::Pass)
                     }
                 };
 
@@ -826,23 +827,23 @@ async fn dispatch_server_command(
         // Nothing pinned yet: the registration reply hands us the key to pin
         // (trust on first use — the one moment it is unavoidable).
         Trust::Unpinned => {
-            if let Some(server_key) = inner_json.get("server_public_key").and_then(|k| k.as_str()) {
-                if decode_public_key(server_key.trim()).is_ok() {
-                    tokio::fs::write(&identity.server_pub_path, server_key.trim()).await?;
-                    info!("Server public key pinned for namespace '{}'.", identity.namespace);
-                }
+            if let Some(server_key) = inner_json.get("server_public_key").and_then(|k| k.as_str())
+                && decode_public_key(server_key.trim()).is_ok()
+            {
+                tokio::fs::write(&identity.server_pub_path, server_key.trim()).await?;
+                info!("Server public key pinned for namespace '{}'.", identity.namespace);
             }
         }
         // A reply signed by the key we trust may hand over its successor
         // (rotation, design D2). `server_public_key` is never taken from a
         // verified reply: the pin only changes this way.
         Trust::Verified => {
-            if let Some(next) = inner_json.get("next_server_public_key").and_then(|k| k.as_str()) {
-                if decode_public_key(next.trim()).is_ok() {
-                    tokio::fs::write(&identity.server_pub_path, next.trim()).await?;
-                    info!("Server signing key rotated; now trusting the new key for namespace '{}'.",
-                          identity.namespace);
-                }
+            if let Some(next) = inner_json.get("next_server_public_key").and_then(|k| k.as_str())
+                && decode_public_key(next.trim()).is_ok()
+            {
+                tokio::fs::write(&identity.server_pub_path, next.trim()).await?;
+                info!("Server signing key rotated; now trusting the new key for namespace '{}'.",
+                      identity.namespace);
             }
         }
         Trust::Rejected => return Ok(()),

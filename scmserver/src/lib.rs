@@ -168,12 +168,11 @@ pub fn init_tera_with_overrides(overrides: &[(&str, &str)]) -> Result<Tera, Box<
     // .files() iterator yields files in alphabetical order, so a child whose
     // name sorts before "base.html" (e.g. "audit_log.html") would otherwise
     // be added first and trip MissingParent.
-    if !overrides.iter().any(|(name, _)| *name == "base.html") {
-        if let Some(base) = TEMPLATES_DIR.get_file("base.html") {
-            let content = std::str::from_utf8(base.contents())
-                .map_err(|e| format!("base.html contains invalid UTF-8: {}", e))?;
-            tera.add_raw_template("base.html", content)?;
-        }
+    if !overrides.iter().any(|(name, _)| *name == "base.html")
+        && let Some(base) = TEMPLATES_DIR.get_file("base.html") {
+        let content = std::str::from_utf8(base.contents())
+            .map_err(|e| format!("base.html contains invalid UTF-8: {}", e))?;
+        tera.add_raw_template("base.html", content)?;
     }
 
     // Load the remaining CE templates. Skipped: (1) base.html, already loaded
@@ -273,15 +272,14 @@ pub async fn serve_embedded_static_file(
             );
 
             // Conditional request → 304 with no body.
-            if let Some(inm) = req_headers.get(header::IF_NONE_MATCH).and_then(|v| v.to_str().ok()) {
-                if inm.split(',').any(|t| t.trim() == etag) {
-                    return axum::response::Response::builder()
-                        .status(StatusCode::NOT_MODIFIED)
-                        .header(header::ETAG, &etag)
-                        .header(header::CACHE_CONTROL, "public, max-age=3600")
-                        .body(Body::empty())
-                        .unwrap();
-                }
+            if let Some(inm) = req_headers.get(header::IF_NONE_MATCH).and_then(|v| v.to_str().ok())
+                && inm.split(',').any(|t| t.trim() == etag) {
+                return axum::response::Response::builder()
+                    .status(StatusCode::NOT_MODIFIED)
+                    .header(header::ETAG, &etag)
+                    .header(header::CACHE_CONTROL, "public, max-age=3600")
+                    .body(Body::empty())
+                    .unwrap();
             }
 
             let mime_type = mime_guess::from_path(path).first_or_octet_stream();

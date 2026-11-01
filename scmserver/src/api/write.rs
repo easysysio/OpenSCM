@@ -169,7 +169,9 @@ pub async fn systems_upgrade(auth: ApiAuth, Extension(pool): Extension<SqlitePoo
     -> Result<Response, ApiError>
 {
     auth.require(UserRole::Admin)?;
-    let row: Option<(String, Option<String>, Option<String>, Option<String>)> = sqlx::query_as(
+    // status, ver, arch, os
+    type UpgradeRow = (String, Option<String>, Option<String>, Option<String>);
+    let row: Option<UpgradeRow> = sqlx::query_as(
         "SELECT status, ver, arch, os FROM systems WHERE id = ? AND tenant_id = ?")
         .bind(id).bind(&auth.tenant_id).fetch_optional(&pool).await.map_err(db_err)?;
     let Some((status, ver, arch, os)) = row else {
@@ -297,10 +299,9 @@ pub async fn policies_import(auth: ApiAuth, Extension(pool): Extension<SqlitePoo
         Err(msg) => {
             // The import refuses a new policy past the plan's limit with the
             // limit's own message; report that one as 422, like the pages.
-            if let Some(limit) = crate::plan::limit_reached_pool(&pool, &auth.tenant_id, "policies").await {
-                if msg == limit.message() {
-                    return Err(ApiError::new(StatusCode::UNPROCESSABLE_ENTITY, "plan_limit", msg));
-                }
+            if let Some(limit) = crate::plan::limit_reached_pool(&pool, &auth.tenant_id, "policies").await
+                && msg == limit.message() {
+                return Err(ApiError::new(StatusCode::UNPROCESSABLE_ENTITY, "plan_limit", msg));
             }
             Err(ApiError::bad_request(msg))
         }

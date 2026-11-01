@@ -403,8 +403,8 @@ pub async fn policies_add_save(
 
     // Insert tests
     for test_id_str in tests {
-        if let Ok(test_id) = test_id_str.parse::<i32>() {
-            if let Err(e) = sqlx::query(
+        if let Ok(test_id) = test_id_str.parse::<i32>()
+            && let Err(e) = sqlx::query(
                 "INSERT OR IGNORE INTO tests_in_policy (tenant_id, policy_id, test_id) VALUES (?, ?, ?)",
             )
             .bind(&auth.tenant_id)
@@ -412,18 +412,17 @@ pub async fn policies_add_save(
             .bind(test_id)
             .execute(&mut *tx)
             .await
-            {
-                let encoded = urlencoding::encode(&format!("Failed to add test: {}", e)).to_string();
-                tx.rollback().await.ok();
-                return Redirect::to(&format!("/policies?error_message={}", encoded)).into_response();
-            }
+        {
+            let encoded = urlencoding::encode(&format!("Failed to add test: {}", e)).to_string();
+            tx.rollback().await.ok();
+            return Redirect::to(&format!("/policies?error_message={}", encoded)).into_response();
         }
     }
 
     // Insert system groups
     for group_id_str in system_groups {
-        if let Ok(group_id) = group_id_str.parse::<i32>() {
-            if let Err(e) = sqlx::query(
+        if let Ok(group_id) = group_id_str.parse::<i32>()
+            && let Err(e) = sqlx::query(
                 "INSERT OR IGNORE INTO systems_in_policy (tenant_id, policy_id, group_id) VALUES (?, ?, ?)",
             )
             .bind(&auth.tenant_id)
@@ -431,11 +430,10 @@ pub async fn policies_add_save(
             .bind(group_id)
             .execute(&mut *tx)
             .await
-            {
-                let encoded = urlencoding::encode(&format!("Failed to add system group: {}", e)).to_string();
-                tx.rollback().await.ok();
-                return Redirect::to(&format!("/policies?error_message={}", encoded)).into_response();
-            }
+        {
+            let encoded = urlencoding::encode(&format!("Failed to add system group: {}", e)).to_string();
+            tx.rollback().await.ok();
+            return Redirect::to(&format!("/policies?error_message={}", encoded)).into_response();
         }
     }
 
@@ -724,16 +722,15 @@ pub async fn policies_edit_save(
     }
 
     for test_id_str in form_data.get("tests").cloned().unwrap_or_default() {
-        if let Ok(test_id) = test_id_str.parse::<i32>() {
-            if let Err(e) = sqlx::query(
+        if let Ok(test_id) = test_id_str.parse::<i32>()
+            && let Err(e) = sqlx::query(
                 "INSERT OR IGNORE INTO tests_in_policy (tenant_id, policy_id, test_id) VALUES (?, ?, ?)",
             )
             .bind(&auth.tenant_id).bind(id).bind(test_id).execute(&mut *tx).await
-            {
-                let encoded = urlencoding::encode(&format!("Error adding test: {}", e)).to_string();
-                tx.rollback().await.ok();
-                return Redirect::to(&format!("/policies?error_message={}", encoded)).into_response();
-            }
+        {
+            let encoded = urlencoding::encode(&format!("Error adding test: {}", e)).to_string();
+            tx.rollback().await.ok();
+            return Redirect::to(&format!("/policies?error_message={}", encoded)).into_response();
         }
     }
 
@@ -747,16 +744,15 @@ pub async fn policies_edit_save(
     }
 
     for group_id_str in form_data.get("system_groups").cloned().unwrap_or_default() {
-        if let Ok(group_id) = group_id_str.parse::<i32>() {
-            if let Err(e) = sqlx::query(
+        if let Ok(group_id) = group_id_str.parse::<i32>()
+            && let Err(e) = sqlx::query(
                 "INSERT OR IGNORE INTO systems_in_policy (tenant_id, policy_id, group_id) VALUES (?, ?, ?)",
             )
             .bind(&auth.tenant_id).bind(id).bind(group_id).execute(&mut *tx).await
-            {
-                let encoded = urlencoding::encode(&format!("Error adding system group: {}", e)).to_string();
-                tx.rollback().await.ok();
-                return Redirect::to(&format!("/policies?error_message={}", encoded)).into_response();
-            }
+        {
+            let encoded = urlencoding::encode(&format!("Error adding system group: {}", e)).to_string();
+            tx.rollback().await.ok();
+            return Redirect::to(&format!("/policies?error_message={}", encoded)).into_response();
         }
     }
 
@@ -1135,7 +1131,7 @@ pub async fn policies_report(
         let excluded_reason: Option<String> = row.try_get("excluded_reason").ok().flatten();
         let system_id: Option<i64> = row.try_get("system_id").ok();
         let test_id:   Option<i64> = row.try_get("test_id").ok();
-        system_map.entry(system_name).or_insert_with(Vec::new).push(IndividualResult {
+        system_map.entry(system_name).or_default().push(IndividualResult {
             test_name,
             status,
             is_excluded,
@@ -1509,7 +1505,7 @@ pub(crate) async fn fetch_live_policy_report_data(
         let excluded_reason: Option<String> = row.try_get("excluded_reason").ok().flatten();
         let system_id: Option<i64> = row.try_get("system_id").ok();
         let test_id:   Option<i64> = row.try_get("test_id").ok();
-        system_map.entry(system_name).or_insert_with(Vec::new).push(IndividualResult {
+        system_map.entry(system_name).or_default().push(IndividualResult {
             test_name,
             status,
             is_excluded,
@@ -1576,6 +1572,8 @@ pub(crate) async fn fetch_live_policy_report_data(
 // Public so `tests/pdf_render.rs` can render golden fixtures for visual
 // before/after comparison across renderer changes.
 // ─────────────────────────────────────────────────────────────────────────────
+// Callers only need "it failed" (a 500); the cause is logged where it happens.
+#[allow(clippy::result_unit_err)]
 pub fn build_live_policy_pdf(report_data: &ReportData) -> Result<Vec<u8>, ()> {
     const FONT_REGULAR: &[u8] = include_bytes!("../static/dist/fonts/LiberationSans-Regular.ttf");
     const FONT_BOLD: &[u8] = include_bytes!("../static/dist/fonts/LiberationSans-Bold.ttf");

@@ -354,7 +354,7 @@ async fn the_browser_is_sent_to_the_provider_with_the_right_request() {
     assert_eq!(nonce, p["nonce"]);
     assert_eq!(pkce_challenge(&verifier), p["code_challenge"]);
     assert!(!started.location.contains(&verifier), "the PKCE verifier must not leave the server");
-    assert_eq!(started.cookies["sso_flow"].is_empty(), false);
+    assert!(!started.cookies["sso_flow"].is_empty());
 }
 
 #[tokio::test]

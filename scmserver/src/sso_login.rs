@@ -283,14 +283,13 @@ fn pick_key(keys: &[Jwk], kid: Option<&str>) -> Option<Jwk> {
 async fn signing_key(jwks_uri: &str, kid: Option<&str>, strict: bool) -> Result<Jwk, String> {
     let cache_key = (jwks_uri.to_string(), strict);
     let cached = KEY_CACHE.lock().ok().and_then(|c| c.get(&cache_key).cloned());
-    if let Some((at, keys)) = &cached {
-        if at.elapsed() < sso::CACHE_TTL {
-            if let Some(k) = pick_key(keys, kid) {
-                return Ok(k);
-            }
-            if at.elapsed() < KEY_REFETCH_EVERY {
-                return Err("the token names a signing key the provider does not publish".into());
-            }
+    if let Some((at, keys)) = &cached
+        && at.elapsed() < sso::CACHE_TTL {
+        if let Some(k) = pick_key(keys, kid) {
+            return Ok(k);
+        }
+        if at.elapsed() < KEY_REFETCH_EVERY {
+            return Err("the token names a signing key the provider does not publish".into());
         }
     }
     let keys = fetch_keys(jwks_uri, strict).await?;
@@ -360,10 +359,9 @@ async fn verify_id_token(
         return Err("token's nbf is not a number".into());
     }
 
-    if let Some(azp) = &claims.azp {
-        if azp != &provider.client_id {
-            return Err("token was issued to a different application (azp)".into());
-        }
+    if let Some(azp) = &claims.azp
+        && azp != &provider.client_id {
+        return Err("token was issued to a different application (azp)".into());
     }
     match &claims.nonce {
         Some(n) if n == expected_nonce => {}
@@ -478,16 +476,14 @@ async fn resolve_user(
     // The provider vouching for the address IS a verification of it. Without
     // this, a SaaS user who never clicked the confirmation link would sign in
     // here and be turned away by the session check on the next request.
-    if email_ok {
-        if let (Some(theirs), Some(ours)) = (claims.email.as_deref(), user_email.as_deref()) {
-            if theirs.trim().eq_ignore_ascii_case(ours.trim()) {
-                let _ = sqlx::query("UPDATE users SET email_verified = 1 WHERE id = ? AND tenant_id = ?")
-                    .bind(user.user_id)
-                    .bind(tenant_id)
-                    .execute(pool)
-                    .await;
-            }
-        }
+    if email_ok
+        && let (Some(theirs), Some(ours)) = (claims.email.as_deref(), user_email.as_deref())
+        && theirs.trim().eq_ignore_ascii_case(ours.trim()) {
+        let _ = sqlx::query("UPDATE users SET email_verified = 1 WHERE id = ? AND tenant_id = ?")
+            .bind(user.user_id)
+            .bind(tenant_id)
+            .execute(pool)
+            .await;
     }
     Ok(user)
 }

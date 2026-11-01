@@ -72,6 +72,13 @@ async fn fetch_lookup_tables(
 }
 
 
+// Test fields from the form: name, description, severity, rational,
+// remediation, filter, app_filter.
+type TestMetadata = (String, String, String, String, String, String, String);
+
+// One condition row: element, input, selement, condition, sinput.
+type ConditionRow = (String, String, String, Option<String>, Option<String>);
+
 // ─────────────────────────────────────────────────────────────────────────────
 // extract_test_metadata
 // Pull name, description, severity, rational, remediation, filter, and
@@ -80,7 +87,7 @@ async fn fetch_lookup_tables(
 // ─────────────────────────────────────────────────────────────────────────────
 fn extract_test_metadata(
     form_data: &HashMap<String, Vec<String>>,
-) -> Result<(String, String, String, String, String, String, String), String> {
+) -> Result<TestMetadata, String> {
     let name = form_data
         .get("name")
         .and_then(|v| v.first())
@@ -112,7 +119,7 @@ fn extract_test_metadata(
 fn extract_conditions_from_form(
     form_data: &HashMap<String, Vec<String>>,
     max: usize,
-) -> Vec<(String, String, String, Option<String>, Option<String>)> {
+) -> Vec<ConditionRow> {
     let mut result = Vec::new();
     for i in 1..=max {
         let element = form_data
@@ -265,7 +272,7 @@ pub async fn tests_add(
 
     let mut context = Context::new();
 
-    match fetch_lookup_tables(&*pool).await {
+    match fetch_lookup_tables(&pool).await {
         Ok((elements, selements, conditions)) => {
             // Split into two lists so the template can render <optgroup>s.
             // The combined `elements` list stays for any code path that
@@ -514,7 +521,7 @@ pub async fn tests_edit(
     .unwrap_or_else(|e| { error!("Failed to fetch applicability for test {}: {}", id, e); Vec::new() });
 
     let mut context = Context::new();
-    match fetch_lookup_tables(&*pool).await {
+    match fetch_lookup_tables(&pool).await {
         Ok((elements, selements, conditions)) => {
             // Split into two lists so the template can render <optgroup>s.
             // The combined `elements` list stays for any code path that

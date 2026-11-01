@@ -204,6 +204,7 @@ impl Doc {
     // Returns Err(()) if any face fails to parse, matching the builders'
     // existing error type.
     // ─────────────────────────────────────────────────────────────────────────
+    #[allow(clippy::result_unit_err)]
     pub fn new(
         title: &str,
         regular: &[u8],

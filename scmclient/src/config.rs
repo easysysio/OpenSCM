@@ -9,7 +9,6 @@ cfg_if! {
         use std::path::Path;
         use std::fs;
         use std::path::PathBuf;
-        use toml;
     } else if #[cfg(target_os = "windows")] {
         use winreg::enums::*;
         use winreg::RegKey;
@@ -317,10 +316,10 @@ fn load_from_toml(path: &Path) -> Result<Config, Box<dyn Error>> {
     // Save only when normalize filled in something missing (or to migrate a
     // legacy field rename — handled by serde aliases during deserialisation
     // and surfaced here by comparing the post-load text).
-    if changed {
-        if let Err(e) = config.save() {
-            warn!("Failed to update config file: {}.", e);
-        }
+    if changed
+        && let Err(e) = config.save()
+    {
+        warn!("Failed to update config file: {}.", e);
     }
 
     Ok(config)

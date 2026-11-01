@@ -84,10 +84,9 @@ pub async fn security_headers(
 // query fails, and the answer is false.
 // ─────────────────────────────────────────────────────────────────────────────
 async fn https_cached(pool: &SqlitePool) -> bool {
-    if let Some((at, value)) = *HTTPS_CACHE.lock().unwrap() {
-        if at.elapsed() < HTTPS_CACHE_TTL {
-            return value;
-        }
+    if let Some((at, value)) = *HTTPS_CACHE.lock().unwrap()
+        && at.elapsed() < HTTPS_CACHE_TTL {
+        return value;
     }
     let value = sqlx::query_scalar::<_, String>(
         "SELECT value FROM settings WHERE skey = 'app_url' AND tenant_id = 'default'",

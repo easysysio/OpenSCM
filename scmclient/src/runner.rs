@@ -175,10 +175,10 @@ fn evaluate_test(t: &LocalTest, cmd_enabled: bool, ps_enabled: bool) -> Vec<Test
             .collect();
 
         let is_applicable = match t.app_filter.as_deref().unwrap_or("all") {
-            "any" => app_results.iter().any(|r| *r == EvalResult::Pass),
+            "any" => app_results.contains(&EvalResult::Pass),
             _ => {
                 app_results.iter().all(|r| *r == EvalResult::Pass || *r == EvalResult::Na)
-                    && app_results.iter().any(|r| *r == EvalResult::Pass)
+                    && app_results.contains(&EvalResult::Pass)
             }
         };
 

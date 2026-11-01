@@ -276,7 +276,7 @@ pub async fn systems(
     let containers_by_system_json: String = if host_ids.is_empty() {
         "{}".to_string()
     } else {
-        let placeholders = std::iter::repeat("?").take(host_ids.len()).collect::<Vec<_>>().join(",");
+        let placeholders = std::iter::repeat_n("?", host_ids.len()).collect::<Vec<_>>().join(",");
         // Only columns the list/modal actually use. Deliberately excludes the
         // v35 `compliance_score` column (not rendered here) so a database that
         // hasn't reached v35 still returns its inventory rather than silently
@@ -600,8 +600,8 @@ pub async fn systems_edit_save(
 
     if let Some(group_ids) = selected_groups {
         for g_id_str in group_ids {
-            if let Ok(g_id) = g_id_str.parse::<i32>() {
-                if let Err(e) = sqlx::query(
+            if let Ok(g_id) = g_id_str.parse::<i32>()
+                && let Err(e) = sqlx::query(
                     "INSERT INTO systems_in_groups (system_id, group_id, tenant_id) VALUES (?, ?, ?)",
                 )
                 .bind(id)
@@ -609,14 +609,13 @@ pub async fn systems_edit_save(
                 .bind(&auth.tenant_id)
                 .execute(&mut *tx)
                 .await
-                {
-                    let encoded =
-                        urlencoding::encode(&format!("Failed to link group {}: {}", g_id, e))
-                            .to_string();
-                    tx.rollback().await.ok();
-                    return Redirect::to(&format!("/systems?error_message={}", encoded))
-                        .into_response();
-                }
+            {
+                let encoded =
+                    urlencoding::encode(&format!("Failed to link group {}: {}", g_id, e))
+                        .to_string();
+                tx.rollback().await.ok();
+                return Redirect::to(&format!("/systems?error_message={}", encoded))
+                    .into_response();
             }
         }
     }
@@ -1210,7 +1209,7 @@ pub async fn system_report(
 
     let mut report = match fetch_system_report_data(id, &auth.tenant_id, &pool).await {
         Ok(r) => r,
-        Err(e) if matches!(e, sqlx::Error::RowNotFound) => {
+        Err(sqlx::Error::RowNotFound) => {
             return Redirect::to("/systems?error_message=System+not+found").into_response();
         }
         Err(e) => {

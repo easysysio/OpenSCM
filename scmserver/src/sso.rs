@@ -267,12 +267,10 @@ static DISCOVERY_CACHE: std::sync::LazyLock<DiscoveryCache> =
 // ─────────────────────────────────────────────────────────────────────────────
 pub async fn discover_cached(issuer_url: &str, strict: bool) -> Result<Discovery, String> {
     let key = (normalize_issuer(issuer_url), strict);
-    if let Ok(cache) = DISCOVERY_CACHE.lock() {
-        if let Some((at, doc)) = cache.get(&key) {
-            if at.elapsed() < CACHE_TTL {
-                return Ok(doc.clone());
-            }
-        }
+    if let Ok(cache) = DISCOVERY_CACHE.lock()
+        && let Some((at, doc)) = cache.get(&key)
+        && at.elapsed() < CACHE_TTL {
+        return Ok(doc.clone());
     }
     let doc = discover(issuer_url, strict).await?;
     if let Ok(mut cache) = DISCOVERY_CACHE.lock() {
