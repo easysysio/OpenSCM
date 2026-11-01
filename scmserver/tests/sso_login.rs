@@ -420,6 +420,9 @@ async fn an_expired_or_not_yet_valid_token_is_refused() {
     let now = chrono::Utc::now().timestamp();
     w.refused(&w.sign_in(move |c| c["exp"] = json!(now - 600)).await, "expired", "ExpiredSignature").await;
     w.refused(&w.sign_in(move |c| c["nbf"] = json!(now + 600)).await, "not yet valid", "ImmatureSignature").await;
+    // nbf written as text must not skip the check (CVE-2026-25537: jsonwebtoken
+    // treats a claim it cannot parse as absent).
+    w.refused(&w.sign_in(move |c| c["nbf"] = json!((now + 600).to_string())).await, "nbf as text", "nbf").await;
     w.refused(&w.sign_in(|c| { c.as_object_mut().unwrap().remove("exp"); }).await, "no exp", "exp").await;
     // A few seconds of clock difference is tolerated.
     assert!(w.sign_in(move |c| c["exp"] = json!(now - 5)).await.signed_in());

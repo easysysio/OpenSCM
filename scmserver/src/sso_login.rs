@@ -184,6 +184,10 @@ struct IdClaims {
     email_verified: Option<serde_json::Value>,
     #[serde(default)]
     azp: Option<String>,
+    // Read only to check its type: jsonwebtoken validates nbf when it is a
+    // number but treats any other type as absent (CVE-2026-25537).
+    #[serde(default)]
+    nbf: Option<serde_json::Value>,
 }
 
 impl IdClaims {
@@ -310,6 +314,7 @@ async fn signing_key(jwks_uri: &str, kid: Option<&str>, strict: bool) -> Result<
 //   aud         contains our client id — a token minted for another
 //               application at the same provider is not acceptable.
 //   exp         not expired (CLOCK_LEEWAY_SECS of tolerance).
+//   nbf         when present, a number and not in the future.
 //   azp         when present, is our client id.
 //   nonce       the one stored when THIS sign-in started — a token replayed
 //               from another sign-in is not acceptable.
@@ -347,6 +352,13 @@ async fn verify_id_token(
     let claims = jsonwebtoken::decode::<IdClaims>(token, &key, &v)
         .map_err(|e| format!("token rejected: {e}"))?
         .claims;
+
+    // jsonwebtoken 9 skips the "not before" check when nbf is not a number
+    // (CVE-2026-25537, fixed in 10.3). A NumericDate is always a number, so
+    // anything else is refused here.
+    if claims.nbf.as_ref().is_some_and(|n| !n.is_number()) {
+        return Err("token's nbf is not a number".into());
+    }
 
     if let Some(azp) = &claims.azp {
         if azp != &provider.client_id {
