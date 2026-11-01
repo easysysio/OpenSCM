@@ -6,6 +6,10 @@ All notable changes to OpenSCM are documented here.
 
 ## [Unreleased]
 
+---
+
+## [1.0.0] - 2026-11-01
+
 ### Added
 - **REST API v1 at `/api/v1`**: the same endpoints, tokens and roles as `/api/v1beta1`, with answers fixed where the beta was awkward (`docs/design/1.0.0-api-v1.md`):
   - Scores are rounded to 2 decimals, and "not scanned" is `null` instead of `-1`.
