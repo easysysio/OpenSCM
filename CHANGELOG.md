@@ -33,6 +33,7 @@ All notable changes to OpenSCM are documented here.
 - An agent that upgrades itself gives the new binary the same file mode as the one it replaces, instead of always `0755`.
 - A scheduled or "Back up now" backup no longer ties up the server while it compresses and encrypts: that work, and the verify that follows, now runs on a separate thread, so pages and agent check-ins keep being answered. Restore and the remaining file reads and writes in the agent and server startup moved off the async threads the same way.
 - Accessibility: every form field now has a label a screen reader can announce (visible labels are linked to their fields, so clicking one focuses the field; fields without a visible label get a hidden one), and the close button on alerts is no longer hidden from screen readers. Page scripts use `Number.parseInt`/`parseFloat`/`isNaN`; the scheduled-time helper now checks dates with `getTime()`. Nothing changes visually.
+- Accessibility: result tables on the report pages and the container detail page have column headers for screen readers, popup titles have default text until the page fills them in, and the Description/Rationale/Remediation captions in the test detail popup are headings rather than unattached form labels (they render slightly smaller).
 
 ---
 

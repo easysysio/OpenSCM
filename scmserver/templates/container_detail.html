@@ -144,7 +144,7 @@
       if (!data || !data.conditions || !data.conditions.length) {
         return '<span class="text-muted">' + (data && data.note ? data.note : 'No detail available.') + '</span>';
       }
-      var html = '<table class="table table-sm mb-0"><tbody>';
+      var html = '<table class="table table-sm mb-0"><thead class="sr-only"><tr><th scope="col">Status</th><th scope="col">Condition</th></tr></thead><tbody>';
       data.conditions.forEach(function (c) {
         var ok = c.passed ? '<span class="text-success"><i class="fas fa-check"></i></span>'
                           : '<span class="text-danger"><i class="fas fa-times"></i></span>';

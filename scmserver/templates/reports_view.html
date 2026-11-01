@@ -246,6 +246,7 @@
               </div>
               <div class="card-body p-0">
                 <table class="table table-sm table-valign-middle mb-0">
+                  <thead class="sr-only"><tr><th scope="col">Test</th><th scope="col">Result</th></tr></thead>
                   <tbody>
                     {% for res in c.results %}
                     <tr>
@@ -330,7 +331,7 @@
       <div class="modal-header">
         <h5 class="modal-title" id="testDetailModalLabel">
           <i class="fas fa-clipboard-list mr-2"></i>
-          <span id="modal-test-name"></span>
+          <span id="modal-test-name">Test details</span>
         </h5>
         <button type="button" class="close" data-dismiss="modal" aria-label="Close">
           <span aria-hidden="true">&times;</span>
