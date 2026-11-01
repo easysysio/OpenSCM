@@ -24,6 +24,7 @@ All notable changes to OpenSCM are documented here.
 - `/api/v1beta1` answers as before, with a `Deprecation: true` header and a `Link` to the migration notes. It will be removed in 1.1.0.
 
 ### Changed
+- `sonar-project.properties` names the SonarQube project for the Build workflow's code analysis.
 - `cargo audit` reports clean: the two "unmaintained" notices (`basic-toml`, `proc-macro-error2`) are recorded as reviewed in `.cargo/audit.toml`. Both are build-time only, pulled in by `age`'s translation macros.
 - Database schema v51, the first step of REST API v1 (`docs/design/1.0.0-api-v1.md`):
   - Policies now store both kinds of pass/fail count, whatever the compliance mode: test results passed and failed, and systems compliant and failing. The existing counts the pages show are unchanged.
