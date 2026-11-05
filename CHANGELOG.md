@@ -9,6 +9,9 @@ All notable changes to OpenSCM are documented here.
 ### Fixed
 - **Docker: backups failed every time.** The image has no `/tmp`, and each backup run checks the new file by unpacking it into the system temp folder, so the check failed and the backup was deleted ("The backup was written but did not verify"). Runs now check the backup in the backup folder itself, and the image sets `TMPDIR` to the data volume so `scmserver backup verify` works inside the container too.
 
+### Changed
+- Single sign-on verifies ID tokens with jsonwebtoken 11 (was 9), which includes the upstream fix for CVE-2026-25537. It runs on `ring`, the crypto library the server already uses for TLS, through a small verify-only backend (`src/jwt_ring.rs`), so no C code and no `rsa` crate are added. OpenSCM's own check that `nbf` is a number stays as a second line of defence.
+
 ---
 
 ## [1.0.1] - 2026-11-01

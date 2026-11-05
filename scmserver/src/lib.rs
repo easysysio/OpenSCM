@@ -35,6 +35,7 @@ pub mod users;
 pub mod settings;
 pub mod sso;
 pub mod sso_login;
+pub mod jwt_ring;
 pub mod schedule;
 pub mod scheduler;
 pub mod install;

@@ -22,7 +22,7 @@ use axum::routing::{get, post};
 use axum::{Json, Router};
 use axum_extra::extract::cookie::Key;
 use base64::{engine::general_purpose::{STANDARD, URL_SAFE_NO_PAD}, Engine as _};
-use jsonwebtoken::{Algorithm, EncodingKey, Header};
+use ring::signature::{EcdsaKeyPair, Ed25519KeyPair, KeyPair, RsaKeyPair};
 use scmserver::models::AuthSession;
 use scmserver::sso_login::{pkce_challenge, SsoUrlRules};
 use serde_json::{json, Value};
@@ -41,7 +41,13 @@ const APP_URL: &str = "http://scm.test";
 #[derive(Clone, Copy, PartialEq, Debug)]
 enum Signer {
     Rsa,
+    /// RSA-PSS with the same RSA key.
+    Ps256,
     Ed,
+    /// ECDSA P-256.
+    Ec,
+    /// An ES256 signature under the RSA key's id: the key type does not fit.
+    EcUnderRsaKid,
     /// An Ed25519 key the provider does NOT publish, under the published key id.
     Forged,
     /// A key id the provider does not publish at all.
@@ -68,28 +74,56 @@ struct Idp {
     base: String,
     state: Arc<Mutex<IdpState>>,
     ed_seed: [u8; 32],
+    ec_pkcs8: Arc<Vec<u8>>,
 }
 
-fn ed_pkcs8(seed: &[u8; 32]) -> Vec<u8> {
-    // PKCS#8 v1 wrapper for an Ed25519 seed.
-    let mut der = vec![0x30, 0x2e, 0x02, 0x01, 0x00, 0x30, 0x05, 0x06, 0x03, 0x2b, 0x65, 0x70, 0x04, 0x22, 0x04, 0x20];
-    der.extend_from_slice(seed);
-    der
+// The ES256 key pair, as ring loads it.
+fn ec_key(pkcs8: &[u8]) -> EcdsaKeyPair {
+    let rng = ring::rand::SystemRandom::new();
+    EcdsaKeyPair::from_pkcs8(&ring::signature::ECDSA_P256_SHA256_FIXED_SIGNING, pkcs8, &rng).unwrap()
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Helper: jwt
+// A compact JWT signed by `sign` over header.claims. Signed with ring
+// directly: the server's jsonwebtoken backend only verifies.
+// ─────────────────────────────────────────────────────────────────────────────
+fn jwt(alg: &str, kid: &str, claims: &Value, sign: impl FnOnce(&[u8]) -> Vec<u8>) -> String {
+    let header = json!({ "alg": alg, "typ": "JWT", "kid": kid });
+    let input = format!("{}.{}", URL_SAFE_NO_PAD.encode(header.to_string()), URL_SAFE_NO_PAD.encode(claims.to_string()));
+    let sig = sign(input.as_bytes());
+    format!("{input}.{}", URL_SAFE_NO_PAD.encode(sig))
 }
 
 impl Idp {
     fn sign(&self, claims: &Value, signer: Signer) -> String {
-        let with = |alg, kid: &str, key: EncodingKey| {
-            let mut h = Header::new(alg);
-            h.kid = Some(kid.to_string());
-            jsonwebtoken::encode(&h, claims, &key).unwrap()
+        let rng = ring::rand::SystemRandom::new();
+        let rsa = |pad: &'static dyn ring::signature::RsaEncoding| {
+            let der = STANDARD.decode(RSA_DER_B64.trim()).unwrap();
+            let key = RsaKeyPair::from_der(&der).unwrap();
+            let rng = ring::rand::SystemRandom::new();
+            move |msg: &[u8]| {
+                let mut sig = vec![0; key.public().modulus_len()];
+                key.sign(pad, &rng, msg, &mut sig).unwrap();
+                sig
+            }
         };
+        let ed = |seed: [u8; 32]| move |msg: &[u8]| {
+            Ed25519KeyPair::from_seed_unchecked(&seed).unwrap().sign(msg).as_ref().to_vec()
+        };
+        let ec = |msg: &[u8]| ec_key(&self.ec_pkcs8).sign(&rng, msg).unwrap().as_ref().to_vec();
         match signer {
-            Signer::Rsa => with(Algorithm::RS256, "rsa-1", EncodingKey::from_rsa_der(&STANDARD.decode(RSA_DER_B64.trim()).unwrap())),
-            Signer::Ed => with(Algorithm::EdDSA, "ed-1", EncodingKey::from_ed_der(&ed_pkcs8(&self.ed_seed))),
-            Signer::Forged => with(Algorithm::EdDSA, "ed-1", EncodingKey::from_ed_der(&ed_pkcs8(&[9u8; 32]))),
-            Signer::UnknownKid => with(Algorithm::EdDSA, "ghost", EncodingKey::from_ed_der(&ed_pkcs8(&self.ed_seed))),
-            Signer::Hs256 => with(Algorithm::HS256, "rsa-1", EncodingKey::from_secret(CLIENT_SECRET.as_bytes())),
+            Signer::Rsa => jwt("RS256", "rsa-1", claims, rsa(&ring::signature::RSA_PKCS1_SHA256)),
+            Signer::Ps256 => jwt("PS256", "rsa-1", claims, rsa(&ring::signature::RSA_PSS_SHA256)),
+            Signer::Ed => jwt("EdDSA", "ed-1", claims, ed(self.ed_seed)),
+            Signer::Ec => jwt("ES256", "ec-1", claims, ec),
+            Signer::EcUnderRsaKid => jwt("ES256", "rsa-1", claims, ec),
+            Signer::Forged => jwt("EdDSA", "ed-1", claims, ed([9u8; 32])),
+            Signer::UnknownKid => jwt("EdDSA", "ghost", claims, ed(self.ed_seed)),
+            Signer::Hs256 => jwt("HS256", "rsa-1", claims, |msg| {
+                let key = ring::hmac::Key::new(ring::hmac::HMAC_SHA256, CLIENT_SECRET.as_bytes());
+                ring::hmac::sign(&key, msg).as_ref().to_vec()
+            }),
             Signer::Unsigned => format!(
                 "{}.{}.",
                 URL_SAFE_NO_PAD.encode(r#"{"alg":"none","typ":"JWT"}"#),
@@ -126,9 +160,15 @@ async fn start_idp(auth_methods: Option<Vec<&'static str>>) -> Idp {
     let base = format!("http://127.0.0.1:{}", listener.local_addr().unwrap().port());
     let ed_seed = rand::random::<[u8; 32]>();
     let ed_public = ed25519_dalek::SigningKey::from_bytes(&ed_seed).verifying_key().to_bytes();
+    let ec_pkcs8 = EcdsaKeyPair::generate_pkcs8(
+        &ring::signature::ECDSA_P256_SHA256_FIXED_SIGNING, &ring::rand::SystemRandom::new(),
+    ).unwrap().as_ref().to_vec();
+    // Uncompressed point: 0x04 || x || y, 32 bytes each.
+    let ec_point = ec_key(&ec_pkcs8).public_key().as_ref().to_vec();
     let idp = Idp {
         base: base.clone(),
         ed_seed,
+        ec_pkcs8: Arc::new(ec_pkcs8),
         state: Arc::new(Mutex::new(IdpState {
             claims: json!({}), signer: Signer::Rsa, expected_challenge: String::new(), token_status: 200,
             omit_id_token: false, token_calls: 0, last_form: HashMap::new(), last_authorization: None,
@@ -137,7 +177,7 @@ async fn start_idp(auth_methods: Option<Vec<&'static str>>) -> Idp {
     let mut doc = json!({
         "issuer": base, "authorization_endpoint": format!("{base}/authorize"),
         "token_endpoint": format!("{base}/token"), "jwks_uri": format!("{base}/keys"),
-        "id_token_signing_alg_values_supported": ["RS256", "EdDSA"]
+        "id_token_signing_alg_values_supported": ["RS256", "PS256", "ES256", "EdDSA"]
     });
     if let Some(m) = auth_methods {
         doc["token_endpoint_auth_methods_supported"] = json!(m);
@@ -145,6 +185,8 @@ async fn start_idp(auth_methods: Option<Vec<&'static str>>) -> Idp {
     let keys = json!({ "keys": [
         { "kty": "RSA", "kid": "rsa-1", "use": "sig", "alg": "RS256", "n": RSA_MODULUS.trim(), "e": "AQAB" },
         { "kty": "OKP", "crv": "Ed25519", "kid": "ed-1", "use": "sig", "alg": "EdDSA", "x": URL_SAFE_NO_PAD.encode(ed_public) },
+        { "kty": "EC", "crv": "P-256", "kid": "ec-1", "use": "sig", "alg": "ES256",
+          "x": URL_SAFE_NO_PAD.encode(&ec_point[1..33]), "y": URL_SAFE_NO_PAD.encode(&ec_point[33..]) },
         // A key this server cannot represent must not hide the usable ones.
         { "kty": "RSA", "kid": "enc-1", "use": "enc", "alg": "RSA-OAEP-512", "n": RSA_MODULUS.trim(), "e": "AQAB" },
         { "kty": "weird", "kid": "w-1" }
@@ -426,6 +468,20 @@ async fn an_expired_or_not_yet_valid_token_is_refused() {
     w.refused(&w.sign_in(|c| { c.as_object_mut().unwrap().remove("exp"); }).await, "no exp", "exp").await;
     // A few seconds of clock difference is tolerated.
     assert!(w.sign_in(move |c| c["exp"] = json!(now - 5)).await.signed_in());
+}
+
+// Every key type goes through the ring backend (src/jwt_ring.rs).
+#[tokio::test]
+async fn rsa_pss_and_ecdsa_signed_tokens_are_accepted() {
+    let w = world().await;
+    assert!(w.sign_in_as(Signer::Ps256, |_| {}).await.signed_in(), "PS256");
+    assert!(w.sign_in_as(Signer::Ec, |_| {}).await.signed_in(), "ES256");
+}
+
+#[tokio::test]
+async fn a_signature_that_does_not_fit_the_key_type_is_refused() {
+    let w = world().await;
+    w.refused(&w.sign_in_as(Signer::EcUnderRsaKid, |_| {}).await, "ES256 under an RSA key", "InvalidKeyFormat").await;
 }
 
 #[tokio::test]

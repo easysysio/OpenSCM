@@ -326,6 +326,7 @@ async fn verify_id_token(
     expected_nonce: &str,
     strict: bool,
 ) -> Result<IdClaims, String> {
+    crate::jwt_ring::install();
     let header = jsonwebtoken::decode_header(token).map_err(|e| format!("unreadable token header: {e}"))?;
     let alg = header.alg;
     if !matches!(
@@ -352,9 +353,9 @@ async fn verify_id_token(
         .map_err(|e| format!("token rejected: {e}"))?
         .claims;
 
-    // jsonwebtoken 9 skips the "not before" check when nbf is not a number
-    // (CVE-2026-25537, fixed in 10.3). A NumericDate is always a number, so
-    // anything else is refused here.
+    // A NumericDate is always a number. jsonwebtoken before 10.3 skipped the
+    // "not before" check when nbf was text (CVE-2026-25537); kept here as a
+    // second line of defence.
     if claims.nbf.as_ref().is_some_and(|n| !n.is_number()) {
         return Err("token's nbf is not a number".into());
     }

@@ -21,7 +21,9 @@ ignore = [
     # (a proc macro) → proc-macro-error2, and i18n-embed-fl / i18n-embed-impl
     # → i18n-config → basic-toml. They run while compiling, reading age's
     # i18n.toml; none of their code is in the built binaries.
-    # Re-check when upgrading age (0.12 drops proc-macro-error2).
+    # Re-check when upgrading age. 0.12 drops proc-macro-error2 but still has
+    # basic-toml and adds crypto-bigint (RUSTSEC-2026-0387, timing), so we
+    # stayed on 0.11.5 (checked 2026-11-05).
     "RUSTSEC-2026-0374",  # basic-toml
     "RUSTSEC-2026-0173",  # proc-macro-error2
 ]
