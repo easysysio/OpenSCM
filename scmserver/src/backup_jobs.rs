@@ -413,7 +413,8 @@ impl Backups {
             n += 1;
         }
         let created = backup::create(&self.paths, &out, &pass, self.work_factor).await?;
-        if let Err(e) = backup::verify(&out, &pass, Some(&self.paths.public_key)).await {
+        // Checked in the backup folder, not /tmp: the Docker image has none.
+        if let Err(e) = backup::verify_in(&out, &pass, Some(&self.paths.public_key), &self.dir).await {
             let _ = tokio::fs::remove_file(&out).await;
             return Err(format!("The backup was written but did not verify ({e}); it was deleted."));
         }

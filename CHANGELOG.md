@@ -6,6 +6,9 @@ All notable changes to OpenSCM are documented here.
 
 ## [Unreleased]
 
+### Fixed
+- **Docker: backups failed every time.** The image has no `/tmp`, and each backup run checks the new file by unpacking it into the system temp folder, so the check failed and the backup was deleted ("The backup was written but did not verify"). Runs now check the backup in the backup folder itself, and the image sets `TMPDIR` to the data volume so `scmserver backup verify` works inside the container too.
+
 ---
 
 ## [1.0.1] - 2026-11-01

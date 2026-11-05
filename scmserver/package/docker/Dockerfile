@@ -14,6 +14,10 @@ LABEL org.opencontainers.image.title="OpenSCM Server" \
 # Binary is staged at the build context root by the CI workflow
 COPY scmserver /usr/bin/scmserver
 
+# The image has no /tmp (FROM scratch). Temporary files, such as the
+# unpacked copy `scmserver backup verify` checks, go in the data volume.
+ENV TMPDIR=/var/lib/openscm
+
 EXPOSE 8000
 
 VOLUME ["/etc/openscm", "/var/lib/openscm"]

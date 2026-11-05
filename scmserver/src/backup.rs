@@ -591,6 +591,25 @@ pub async fn verify(file: &Path, passphrase: &str, live_public_key: Option<&Path
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Function: verify_in
+// verify, unpacking under `work_dir` instead of the system temp folder.
+// For the server's own backup runs: the Docker image has no /tmp, and the
+// backup folder is known to be writable (the backup was just written there).
+// ─────────────────────────────────────────────────────────────────────────────
+pub async fn verify_in(
+    file: &Path,
+    passphrase: &str,
+    live_public_key: Option<&Path>,
+    work_dir: &Path,
+) -> Result<Verified, String> {
+    let tmp = tempfile::Builder::new()
+        .prefix(".oscm-verify-")
+        .tempdir_in(work_dir)
+        .map_err(|e| format!("Cannot create a temporary directory in {}: {e}", work_dir.display()))?;
+    check(file, passphrase, tmp.path(), live_public_key).await
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Helper: check
 // The work of verify, unpacking into `dir` (left there for restore to use).
 // ─────────────────────────────────────────────────────────────────────────────
