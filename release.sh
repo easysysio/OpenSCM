@@ -12,9 +12,9 @@
 #   ./release.sh 0.7.12 --dry-run       # show what would change
 #   ./release.sh 0.7.12 --no-test       # skip the suite (not recommended)
 #
-# Before touching any file it also runs `cargo clippy -D warnings` and
-# `cargo audit` on CE; either failing stops the release (--no-test does not
-# skip them).
+# Before touching any file it also runs `cargo clippy -D warnings` on CE and
+# SaaS, and `cargo audit` on CE; any failure stops the release (--no-test
+# does not skip them).
 #
 # CE and SaaS carry the SAME version. Every SaaS release exists to pick up a
 # CE release, so a separate SaaS number was translation overhead — and a third
@@ -111,8 +111,11 @@ fi
 # so a failure explains itself. Accepted advisories live in .cargo/audit.toml.
 info "Running clippy"
 ( cd "$CE_DIR" && cargo clippy --workspace --all-targets --locked -- -D warnings ) \
-    || die "clippy found warnings — not releasing"
-ok "clippy clean"
+    || die "clippy found warnings in CE — not releasing"
+ok "CE clippy clean"
+( cd "$SAAS_DIR" && cargo clippy --all-targets --locked -- -D warnings ) \
+    || die "clippy found warnings in SaaS — not releasing"
+ok "SaaS clippy clean"
 
 info "Running cargo audit"
 command -v cargo-audit >/dev/null \
