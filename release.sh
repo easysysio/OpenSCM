@@ -12,6 +12,10 @@
 #   ./release.sh 0.7.12 --dry-run       # show what would change
 #   ./release.sh 0.7.12 --no-test       # skip the suite (not recommended)
 #
+# Before touching any file it also runs `cargo clippy -D warnings` and
+# `cargo audit` on CE; either failing stops the release (--no-test does not
+# skip them).
+#
 # CE and SaaS carry the SAME version. Every SaaS release exists to pick up a
 # CE release, so a separate SaaS number was translation overhead — and a third
 # number to keep aligned with CE_TAG, which is how 0.3.2-0.3.4 shipped stale
@@ -102,6 +106,20 @@ if [[ $RUN_TESTS -eq 1 ]]; then
 else
     warn "tests skipped (--no-test)"
 fi
+
+# Lint and advisory checks always run, even with --no-test. Output is shown
+# so a failure explains itself. Accepted advisories live in .cargo/audit.toml.
+info "Running clippy"
+( cd "$CE_DIR" && cargo clippy --workspace --all-targets --locked -- -D warnings ) \
+    || die "clippy found warnings — not releasing"
+ok "clippy clean"
+
+info "Running cargo audit"
+command -v cargo-audit >/dev/null \
+    || die "cargo-audit not installed (cargo install cargo-audit --locked)"
+( cd "$CE_DIR" && cargo audit ) \
+    || die "cargo audit found problems — not releasing"
+ok "audit clean"
 
 if [[ $DRY_RUN -eq 1 ]]; then
     echo
