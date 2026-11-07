@@ -91,7 +91,8 @@ fn a_disabled_button_says_why_and_cannot_be_clicked() {
     let fix = FixView { reason: Some("Fix scripts are off on this system: set cmd_enabled = true".into()), ..view("disabled") };
     for tpl in PAGES {
         let h = render(tpl, true, Some(fix.clone()));
-        assert!(h.contains("fix-disabled\" disabled"), "{tpl}");
+        assert!(h.contains("fix-disabled disabled\"") && h.contains(r#"aria-disabled="true""#), "{tpl}");
+        assert!(!h.contains(r#"tabindex="0""#), "{tpl}: no tabindex on a non-interactive wrapper");
         assert!(h.contains("set cmd_enabled = true"), "{tpl}: reason in the tooltip");
         assert!(!h.contains("fix-open\""), "{tpl}");
     }

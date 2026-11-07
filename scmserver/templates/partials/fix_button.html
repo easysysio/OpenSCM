@@ -11,11 +11,12 @@
       <i class="fas fa-wrench"></i> Fix
     </button>
   {% elif res.fix.state == "disabled" %}
-    <span class="d-inline-block ml-2" tabindex="0" title="{{ res.fix.reason }}">
-      <button type="button" class="btn btn-outline-secondary btn-xs fix-disabled" disabled style="pointer-events:none;">
-        <i class="fas fa-wrench"></i> Fix
-      </button>
-    </span>
+    {# aria-disabled, not disabled: the button keeps focus, so keyboard users
+       reach the reason too. It has no fix-open class, so a click does nothing. #}
+    <button type="button" class="btn btn-outline-secondary btn-xs ml-2 fix-disabled disabled"
+            aria-disabled="true" title="{{ res.fix.reason }}">
+      <i class="fas fa-wrench"></i> Fix
+    </button>
   {% elif res.fix.state == "queued" %}
     <span class="badge badge-info ml-2" title="Runs when the agent next checks in"><i class="fas fa-clock mr-1"></i>Fix queued</span>
     {% if is_editor %}
