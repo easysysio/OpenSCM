@@ -736,7 +736,7 @@ pub async fn send(
                 if let Err(e) = sqlx::query(
                     "UPDATE systems SET name=?, ver=?, os=?, ip=?, arch=?, status='active', last_seen=CURRENT_TIMESTAMP,
                      cpu_usage=?, mem_used_mb=?, mem_total_mb=?, disk_used_gb=?, disk_total_gb=?, uptime_secs=?,
-                     agent_server_key=?
+                     agent_server_key=?, cmd_enabled=?, ps_enabled=?
                      WHERE id=? AND tenant_id=?",
                 )
                 .bind(&payload.hostname)
@@ -751,6 +751,8 @@ pub async fn send(
                 .bind(payload.disk_total_gb)
                 .bind(payload.uptime_secs)
                 .bind(&payload.server_key)
+                .bind(payload.cmd_enabled)
+                .bind(payload.ps_enabled)
                 .bind(id)
                 .bind(tenant_id)
                 .execute(&mut *tx)
@@ -976,6 +978,27 @@ pub async fn send(
                         .into_response();
                 }
 
+                // Queued fix scripts (1.1.0 remediation). Not during an
+                // upgrade: the agent restarts and would drop them. Only agents
+                // that report their CMD/PS settings understand `fixes`.
+                let fixes = if upgrade_pkg.is_some() {
+                    Vec::new()
+                } else {
+                    let agent_can_fix = payload.cmd_enabled.is_some() || payload.ps_enabled.is_some();
+                    match crate::fixes::take_queued_fixes(&mut tx, tenant_id, id, agent_can_fix).await {
+                        Ok(f) => f,
+                        Err(e) => {
+                            error!("Failed to fetch fixes for agent {}: {}", id, e);
+                            tx.rollback().await.ok();
+                            return (
+                                StatusCode::INTERNAL_SERVER_ERROR,
+                                Json(serde_json::json!({"error": "Database error"})),
+                            )
+                                .into_response();
+                        }
+                    }
+                };
+
                 // How many tests are still waiting (0 in the usual case). On
                 // an UPGRADE dispatch nothing was sent, so all of them are.
                 let remaining: i64 = sqlx::query_scalar(
@@ -1047,6 +1070,12 @@ pub async fn send(
                         "command": if test_payloads.is_empty() { "NONE" } else { "TEST" },
                         "data": test_payloads
                     });
+                    // Only when there are some, so a reply without fixes is
+                    // exactly what older agents have always received.
+                    if !fixes.is_empty() {
+                        info!("{} fix(es) dispatched to Agent ID {}.", fixes.len(), id);
+                        response_data["fixes"] = serde_json::json!(fixes);
+                    }
                 }
 
                 // Only send the server public key when the client explicitly
@@ -1446,4 +1475,100 @@ async fn ingest_containers(
         .await?;
 
     Ok(())
+}
+
+
+// ─────────────────────────────────────────────────────────────────────────────
+// POST /fix_result  [Agent API — no session auth, Ed25519 signed]
+// Records what the agent did with a fix it was sent (docs/design/
+// 1.1.0-remediation.md §4): done, failed, timeout or refused, with the exit
+// code and output. Only the system the fix was sent to can report it, and
+// only once (the run must still be `sent`).
+// ─────────────────────────────────────────────────────────────────────────────
+pub async fn receive_fix_result(
+    Extension(pool): Extension<SqlitePool>,
+    Json(signed_req): Json<SignedResult>,
+) -> impl IntoResponse {
+    let payload: crate::fixes::FixResult = match serde_json::from_str(signed_req.payload.get()) {
+        Ok(p) => p,
+        Err(e) => {
+            warn!("Failed to parse fix result payload: {}", e);
+            return reject(StatusCode::BAD_REQUEST, "Invalid payload");
+        }
+    };
+    let tenant_id = if payload.organization.is_empty() { "default" } else { &payload.organization };
+
+    let auth_check = match sqlx::query_as::<_, AuthCheck>(
+        "SELECT key, status, agent_protocol FROM systems WHERE id = ? AND tenant_id = ?",
+    )
+    .bind(payload.client_id).bind(tenant_id)
+    .fetch_optional(&pool).await
+    {
+        Ok(Some(a)) => a,
+        Ok(None) => return reject(StatusCode::UNAUTHORIZED, "Unknown Agent"),
+        Err(e) => {
+            error!("DB error fetching key for Agent ID {}: {}", payload.client_id, e);
+            return reject(StatusCode::INTERNAL_SERVER_ERROR, "Database error");
+        }
+    };
+    if !matches!(auth_check.status.as_deref(), Some("active") | Some("approved")) {
+        return reject(StatusCode::FORBIDDEN, "Agent is not active");
+    }
+    if let Err(err) = verify_signature(&signed_req.payload, &signed_req.signature, &auth_check.key) {
+        error!(
+            "SECURITY ALERT: Invalid signature on fix result from Agent ID {} (Tenant: '{}'): {}",
+            payload.client_id, tenant_id, err
+        );
+        return reject(StatusCode::UNAUTHORIZED, "Fix Result Auth Failed");
+    }
+    if let Err(resp) = check_protocol(payload.protocol) {
+        return resp;
+    }
+    if let Err(resp) = claim_request(
+        &pool, tenant_id, payload.client_id, auth_check.agent_protocol, payload.protocol, payload.sent_at_ms,
+    ).await {
+        return resp;
+    }
+    if !crate::fixes::FIX_OUTCOMES.contains(&payload.status.as_str()) {
+        return reject(StatusCode::BAD_REQUEST, "Invalid fix status");
+    }
+
+    let output = payload.output.as_deref().map(crate::fixes::cap_output);
+    let updated = sqlx::query(
+        "UPDATE fix_runs SET status = ?, exit_code = ?, output = ?, finished_at = CURRENT_TIMESTAMP
+          WHERE id = ? AND tenant_id = ? AND system_id = ? AND status = 'sent'",
+    )
+    .bind(&payload.status).bind(payload.exit_code).bind(&output)
+    .bind(payload.fix_id).bind(tenant_id).bind(payload.client_id)
+    .execute(&pool).await;
+    match updated {
+        Ok(r) if r.rows_affected() == 1 => {}
+        Ok(_) => {
+            warn!(
+                "Fix result from Agent ID {} for fix {} ignored — not a fix sent to this system.",
+                payload.client_id, payload.fix_id
+            );
+            return reject(StatusCode::NOT_FOUND, "Unknown fix");
+        }
+        Err(e) => {
+            error!("Failed to store fix result {}: {}", payload.fix_id, e);
+            return reject(StatusCode::INTERNAL_SERVER_ERROR, "Database error");
+        }
+    }
+
+    let test_id: Option<i64> = sqlx::query_scalar("SELECT test_id FROM fix_runs WHERE id = ?")
+        .bind(payload.fix_id).fetch_optional(&pool).await.ok().flatten();
+    info!(
+        "Fix {} on Agent ID {} (Tenant: '{}'): {} (exit code {:?}).",
+        payload.fix_id, payload.client_id, tenant_id, payload.status, payload.exit_code
+    );
+    crate::audit::record(
+        &pool, tenant_id, None, None, "fix.result",
+        Some("system"), Some(&payload.client_id.to_string()),
+        Some(serde_json::json!({
+            "fix_id": payload.fix_id, "test_id": test_id,
+            "status": payload.status, "exit_code": payload.exit_code,
+        })),
+    ).await;
+    (StatusCode::OK, Json(serde_json::json!({"status": "ok"}))).into_response()
 }

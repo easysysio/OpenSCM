@@ -8,6 +8,7 @@ All notable changes to OpenSCM are documented here.
 
 ### Added
 - **Fix scripts on tests (remediation, part 1).** A test can now carry an optional shell fix script (Linux, Unix, macOS) and an optional PowerShell fix script (Windows), next to the Remediation text. Policy export and import carry them; importing a file without scripts keeps the ones a test already has. Running a fix from a failed result comes in a later 1.1.0 step (`docs/design/1.1.0-remediation.md`). Schema v52.
+- **Agents run fix scripts (remediation, part 2).** The agent now reports its `cmd_enabled` / `ps_enabled` settings on each check-in. When a fix is queued for it, it checks its own config, the platform and the script's SHA-256, runs the script (shell with `/bin/sh`, PowerShell on Windows) with a 300-second limit, reports the exit code and output to the new signed `POST /fix_result`, and checks the test again straight away. A fix not picked up within 24 hours expires. Agents before 1.1.0 are never sent fixes. Each reported fix is in the audit log (`fix.result`). The Fix button that queues one comes in the next step.
 
 ---
 

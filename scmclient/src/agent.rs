@@ -201,6 +201,98 @@ async fn send_result(
 }
 
 
+// ─────────────────────────────────────────────────────────────────────────────
+// send_fix_result — report one fix's outcome, signed, to POST /fix_result.
+// ─────────────────────────────────────────────────────────────────────────────
+async fn send_fix_result(
+    payload:     crate::fixes::FixResult,
+    signing_key: &SigningKey,
+    http_client: &reqwest::Client,
+    fix_url:     &str,
+) {
+    let fix_id = payload.fix_id;
+    let signature = match sign_payload(&payload, signing_key) {
+        Ok(sig) => sig,
+        Err(e) => {
+            error!("Failed to sign the result of fix {}: {}", fix_id, e);
+            return;
+        }
+    };
+    let req = SignedRequest { payload, signature };
+    match http_client.post(fix_url).json(&req).send().await {
+        Ok(resp) if resp.status().is_success() => debug!("Fix {} result sent.", fix_id),
+        Ok(resp) => {
+            let status = resp.status();
+            error!("Server rejected the result of fix {} with status {}: {}", fix_id, status, server_error(resp).await);
+        }
+        Err(e) => error!("Failed to send the result of fix {}: {}", fix_id, e),
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// run_fixes — run each fix in the heartbeat reply's `fixes` list, report it,
+// then check its test again so the server sees whether the fix worked
+// (docs/design/1.1.0-remediation.md §4).
+// ─────────────────────────────────────────────────────────────────────────────
+async fn run_fixes(
+    config:      &Config,
+    identity:    &AgentIdentity,
+    http_client: &reqwest::Client,
+    base_url:    &str,
+    result_url:  &str,
+    list:        &[serde_json::Value],
+) {
+    let client_id: i64 = match identity.current_id.parse() {
+        Ok(id) if id > 0 => id,
+        _ => {
+            error!("Invalid client_id '{}' — cannot run fixes.", identity.current_id);
+            return;
+        }
+    };
+    let cmd_enabled = config.client.cmd_enabled.unwrap_or(false);
+    let ps_enabled  = config.client.ps_enabled.unwrap_or(false);
+    let fix_url = format!("{}/fix_result", base_url.trim_end_matches('/'));
+
+    for value in list {
+        let job: crate::fixes::FixJob = match serde_json::from_value(value.clone()) {
+            Ok(j) => j,
+            Err(e) => {
+                error!("Ignoring a fix the server sent: {}", e);
+                continue;
+            }
+        };
+        info!("Running fix {} ({}) for test {}.", job.id, job.kind, job.test_id);
+        let out = crate::fixes::run_job(&job, cmd_enabled, ps_enabled).await;
+        match out.status {
+            "refused" => warn!("Fix {} refused: {}.", job.id, out.output),
+            status    => info!("Fix {} finished: {} (exit code {:?}).", job.id, status, out.exit_code),
+        }
+        let refused = out.status == "refused";
+        send_fix_result(
+            crate::fixes::FixResult {
+                client_id,
+                organization: config.server.organization.clone(),
+                fix_id:       job.id,
+                status:       out.status.to_string(),
+                exit_code:    out.exit_code,
+                output:       Some(out.output).filter(|o| !o.is_empty()),
+                protocol:     Some(PROTOCOL),
+                sent_at_ms:   Some(next_sent_at_ms()),
+            },
+            &identity.signing_key, http_client, &fix_url,
+        ).await;
+
+        // Nothing changed if nothing ran.
+        if !refused {
+            process_compliance_tests(
+                vec![job.test], &identity.current_id, &config.server.organization,
+                &identity.signing_key, http_client, result_url, cmd_enabled, ps_enabled,
+            ).await;
+        }
+    }
+}
+
+
 // ============================================================
 // COMPLIANCE TEST PROCESSING
 // ============================================================
@@ -616,6 +708,8 @@ async fn post_heartbeat(
         protocol:     Some(PROTOCOL),
         nonce:        Some(nonce.to_string()),
         sent_at_ms:   Some(next_sent_at_ms()),
+        cmd_enabled:  Some(config.client.cmd_enabled.unwrap_or(false)),
+        ps_enabled:   Some(config.client.ps_enabled.unwrap_or(false)),
         cpu_usage:    sys.cpu_usage,
         mem_used_mb:  sys.mem_used_mb,
         mem_total_mb: sys.mem_total_mb,
@@ -997,6 +1091,13 @@ async fn dispatch_server_command(
         }
         Some("NONE") | None => debug!("Heartbeat OK — no commands pending."),
         Some(unknown)       => warn!("Unknown command received from server: '{}'.", unknown),
+    }
+
+    // Fix scripts (1.1.0) — only ever from a reply signed by the pinned key.
+    if *trust == Trust::Verified
+        && let Some(list) = inner_json.get("fixes").and_then(|f| f.as_array())
+    {
+        run_fixes(config, identity, http_client, base_url, result_url, list).await;
     }
     Ok(())
 }

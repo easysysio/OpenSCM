@@ -37,6 +37,13 @@ pub struct UnsignedPayload {
     /// Send time in ms since the epoch, never going backwards (agent::next_sent_at_ms).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub sent_at_ms: Option<i64>,
+    /// This agent's cmd_enabled / ps_enabled, so the server knows which fix
+    /// scripts it may offer (1.1.0, docs/design/1.1.0-remediation.md). The
+    /// agent still checks its own config before running any fix.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cmd_enabled:  Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub ps_enabled:   Option<bool>,
     // Telemetry — optional so old servers ignore unknown fields gracefully.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub cpu_usage:    Option<f32>,

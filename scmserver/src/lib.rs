@@ -26,6 +26,7 @@ pub mod auto_groups;
 pub mod auto_groups_admin;
 pub mod enrollment;
 pub mod tests;
+pub mod fixes;
 pub mod pdf;
 pub mod tour;
 pub mod plan;
@@ -495,6 +496,7 @@ pub fn create_core_router(state: AppState, cookie_key: axum_extra::extract::cook
         .merge(api::router())
         .route("/send", post(client::send))
         .route("/result", post(client::receive_result))
+        .route("/fix_result", post(client::receive_fix_result))
         .route("/{*path}", get(|axum::extract::Path(path): axum::extract::Path<String>,
                                 headers: axum::http::HeaderMap| async move {
             serve_embedded_static_file(PathBuf::from(path), headers).await

@@ -4,6 +4,7 @@ mod config;
 mod compliance;
 mod runner;
 mod containers;
+mod fixes;
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Version stamp — machine-readable from the outside.

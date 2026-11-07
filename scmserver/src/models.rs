@@ -352,6 +352,13 @@ pub struct UnsignedPayload {
     /// than the last request accepted from the agent (protocol 1, D3).
     #[serde(default)]
     pub sent_at_ms: Option<i64>,
+    /// Whether the agent's config allows CMD (shell) and PS (PowerShell)
+    /// commands — and so fix scripts of that kind. None from agents before
+    /// 1.1.0. See docs/design/1.1.0-remediation.md.
+    #[serde(default)]
+    pub cmd_enabled:  Option<bool>,
+    #[serde(default)]
+    pub ps_enabled:   Option<bool>,
     // Telemetry — all optional; absent from old clients defaults to None.
     #[serde(default)]
     pub cpu_usage:    Option<f32>,

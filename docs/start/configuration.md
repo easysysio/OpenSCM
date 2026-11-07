@@ -188,11 +188,13 @@ proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
 | `server.enrollment_token` | _(none)_ | Optional golden token (`oscm_…`) that auto-approves this system at enrollment. See [Enrollment Tokens](../guide/systems.md#enrollment-tokens-auto-approval). Sent only at first registration. |
 | `client.heartbeat` | `300` | Check-in interval in seconds |
 | `client.loglevel` | `info` | Log verbosity: `error`, `warn`, `info`, `debug` |
-| `client.cmd_enabled` | `false` | Allow CMD tests to run. When `false`, all CMD tests return `NA`. |
-| `client.ps_enabled` | `false` | Allow PowerShell tests to run (Windows only). When `false`, all PowerShell tests return `NA`. |
+| `client.cmd_enabled` | `false` | Allow CMD tests to run. When `false`, all CMD tests return `NA`. From 1.1.0 it also allows shell **fix scripts** (Linux, Unix, macOS). |
+| `client.ps_enabled` | `false` | Allow PowerShell tests to run (Windows only). When `false`, all PowerShell tests return `NA`. From 1.1.0 it also allows PowerShell **fix scripts**. |
 
 !!! warning "CMD and PowerShell element security"
     Enabling `cmd_enabled` or `ps_enabled` permits the agent to run shell/PowerShell commands as defined in your compliance tests. Only enable these if you trust the tests assigned to the agent and understand the security implications.
+
+    From 1.1.0 the same settings also let **Editors run a test's fix script** on this system from a failed result. A fix script changes the system and runs as the agent's user (root or SYSTEM). The agent checks its own setting before every fix, so the server cannot turn this on remotely.
 
 ---
 
