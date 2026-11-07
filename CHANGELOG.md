@@ -6,6 +6,10 @@ All notable changes to OpenSCM are documented here.
 
 ## [Unreleased]
 
+---
+
+## [1.1.0] - 2026-11-07
+
 ### Upgrade notes
 - **Docker: the image now runs as user 65532, not root.** New installs need nothing. **Existing installs:** your volumes belong to root, and the new image stops at startup with a message saying so. Stop the container and give the volumes to the new user once (use your own volume names):
 
