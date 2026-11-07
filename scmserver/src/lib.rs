@@ -210,11 +210,83 @@ pub fn init_tera_with_overrides(overrides: &[(&str, &str)]) -> Result<Tera, Box<
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Struct: StartupError
+// A startup failure whose message is meant for a person: main returns it, and
+// its Debug (what `fn main() -> Result` prints) is the plain text, not a
+// quoted string with escaped newlines.
+// ─────────────────────────────────────────────────────────────────────────────
+pub struct StartupError(pub String);
+
+impl std::fmt::Debug for StartupError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result { f.write_str(&self.0) }
+}
+impl std::fmt::Display for StartupError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result { f.write_str(&self.0) }
+}
+impl Error for StartupError {}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Helper: access_problem
+// Why the server cannot use its folders and files, or None if it can: each
+// folder must take a new file, and each existing file must open for reading
+// (and writing, for the ones in `rw`). From 1.1.0 the Docker image runs as
+// user 65532, so volumes created by an older image (owned by root) fail here
+// — with the fix in the message rather than a SQLite or key error later.
+// ─────────────────────────────────────────────────────────────────────────────
+pub fn access_problem(dirs: &[&std::path::Path], read: &[&std::path::Path], rw: &[&std::path::Path]) -> Option<String> {
+    let probe_name = format!(".oscm-write-test-{}", std::process::id());
+    for dir in dirs {
+        let probe = dir.join(&probe_name);
+        match std::fs::OpenOptions::new().write(true).create_new(true).open(&probe) {
+            Ok(_) => { let _ = std::fs::remove_file(&probe); }
+            Err(e) => return Some(access_message("write to", dir, &e)),
+        }
+    }
+    for (files, write) in [(read, false), (rw, true)] {
+        for file in files.iter().filter(|f| f.exists()) {
+            if let Err(e) = std::fs::OpenOptions::new().read(true).write(write).open(file) {
+                return Some(access_message(if write { "write to" } else { "read" }, file, &e));
+            }
+        }
+    }
+    None
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Helper: access_message
+// The startup error for access_problem, with the commands that fix it.
+// ─────────────────────────────────────────────────────────────────────────────
+fn access_message(what: &str, path: &std::path::Path, e: &std::io::Error) -> String {
+    // The effective user, where the system tells it without libc.
+    #[cfg(target_os = "linux")]
+    let who = {
+        use std::os::unix::fs::MetadataExt;
+        std::fs::metadata("/proc/self").map(|m| format!("user {}", m.uid())).unwrap_or_else(|_| "this user".into())
+    };
+    #[cfg(not(target_os = "linux"))]
+    let who = "this user".to_string();
+    format!(
+        "OpenSCM cannot {what} {}: {e}.\n\n\
+         The server runs as {who}. Give it its folders, then start it again:\n\n\
+         \u{2022} Docker: from 1.1.0 the image runs as user 65532, not root. Volumes made by an\n\
+         \x20 older image belong to root. With the server stopped, run once:\n\n\
+         \x20   docker run --rm -v openscm_config:/etc/openscm -v openscm_data:/var/lib/openscm \\\n\
+         \x20     busybox chown -R 65532:65532 /etc/openscm /var/lib/openscm\n\n\
+         \x20 (use your own volume names; for folders mounted from the host:\n\
+         \x20 sudo chown -R 65532:65532 <folder>). To keep running as root instead,\n\
+         \x20 start the container with --user 0 (Compose: user: \"0\").\n\n\
+         \u{2022} Packages: sudo chown -R <the service's user> on the config and data folders.",
+        path.display()
+    )
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Helper: check_required_directories
-// Ensures config, DB, and key parent directories exist; creates them if not.
+// Ensures config, DB, and key parent directories exist (creating them if
+// not), then that the server can use them (access_problem).
 // ─────────────────────────────────────────────────────────────────────────────
 pub fn check_required_directories() -> Result<(), Box<dyn Error>> {
-    use crate::config::{config_path, private_key_path, db_path};
+    use crate::config::{config_path, private_key_path, public_key_path, db_path};
     let targets = [config_path(), db_path(), private_key_path()];
 
     for target in targets {
@@ -230,6 +302,18 @@ pub fn check_required_directories() -> Result<(), Box<dyn Error>> {
                 let _ = std::fs::set_permissions(parent, std::fs::Permissions::from_mode(mode));
             }
         }
+    }
+    let path = |p: &'static str| std::path::Path::new(p);
+    let dirs: Vec<&std::path::Path> = targets.iter().filter_map(|t| path(t).parent()).collect();
+    let db = path(db_path());
+    // SQLite also writes -wal / -shm files next to the database.
+    let (wal, shm) = (format!("{}-wal", db_path()), format!("{}-shm", db_path()));
+    if let Some(problem) = access_problem(
+        &dirs,
+        &[path(config_path()), path(private_key_path()), path(public_key_path())],
+        &[db, std::path::Path::new(&wal), std::path::Path::new(&shm)],
+    ) {
+        return Err(Box::new(StartupError(problem)));
     }
     Ok(())
 }

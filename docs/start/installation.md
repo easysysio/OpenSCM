@@ -106,6 +106,24 @@ The server only needs to be installed once on a central host.
         0.10.4 on refuse the server until `scmclient --reset-server-key` is <!-- version-pin -->
         run on each host.
 
+    !!! note "The container runs as user 65532"
+        Since 1.1.0 the image runs as an unprivileged user (UID 65532), not <!-- version-pin -->
+        root. New named volumes are set up for it automatically. For folders
+        mounted from the host (`-v /srv/openscm/data:/var/lib/openscm`), give
+        them to that user first: `sudo chown -R 65532:65532 /srv/openscm`.
+
+        **Upgrading from an earlier image:** the existing volumes belong to
+        root, and the server stops at startup with a message saying so. Stop
+        the container and run once (with your own volume names):
+
+        ```bash
+        docker run --rm -v openscm_config:/etc/openscm -v openscm_data:/var/lib/openscm \
+          busybox chown -R 65532:65532 /etc/openscm /var/lib/openscm
+        ```
+
+        To keep running as root instead, add `--user 0` to `docker run`
+        (Compose: `user: "0"`).
+
 === "Windows"
 
     Download the installer from the [Downloads](downloads.md) page and run the

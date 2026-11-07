@@ -6,6 +6,19 @@ All notable changes to OpenSCM are documented here.
 
 ## [Unreleased]
 
+### Upgrade notes
+- **Docker: the image now runs as user 65532, not root.** New installs need nothing. **Existing installs:** your volumes belong to root, and the new image stops at startup with a message saying so. Stop the container and give the volumes to the new user once (use your own volume names):
+
+  ```bash
+  docker run --rm -v openscm_config:/etc/openscm -v openscm_data:/var/lib/openscm \
+    busybox chown -R 65532:65532 /etc/openscm /var/lib/openscm
+  ```
+
+  For folders mounted from the host, run `sudo chown -R 65532:65532 <folder>` instead. To keep running as root, start the container with `--user 0` (Compose: `user: "0"`).
+
+### Security
+- **The Docker image runs as an unprivileged user (65532) instead of root**, so a flaw in the server no longer runs as root inside the container. At startup the server now checks it can use its config and data folders, and if not, stops with the exact command that fixes it instead of a database or key error (package installs too). See **Upgrade notes** above.
+
 ### Added
 - **Fix scripts on tests (remediation, part 1).** A test can now carry an optional shell fix script (Linux, Unix, macOS) and an optional PowerShell fix script (Windows), next to the Remediation text. Policy export and import carry them; importing a file without scripts keeps the ones a test already has. Running a fix from a failed result comes in a later 1.1.0 step (`docs/design/1.1.0-remediation.md`). Schema v52.
 - **Agents run fix scripts (remediation, part 2).** The agent now reports its `cmd_enabled` / `ps_enabled` settings on each check-in. When a fix is queued for it, it checks its own config, the platform and the script's SHA-256, runs the script (shell with `/bin/sh`, PowerShell on Windows) with a 300-second limit, reports the exit code and output to the new signed `POST /fix_result`, and checks the test again straight away. A fix not picked up within 24 hours expires. Agents before 1.1.0 are never sent fixes. Each reported fix is in the audit log (`fix.result`). The Fix button that queues one comes in the next step.

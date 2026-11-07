@@ -701,6 +701,8 @@ jobs:
           VERSION=$(grep -m1 '^version =' scmserver/Cargo.toml | sed 's/.*"\(.*\)".*/\1/')
           mkdir -p /tmp/docker-stage
           cp target/${{ matrix.target }}/release/scmserver /tmp/docker-stage/scmserver
+          # The data folders the image runs as user 65532 in (see the Dockerfile).
+          mkdir -p /tmp/docker-stage/rootfs/etc/openscm /tmp/docker-stage/rootfs/var/lib/openscm
 
           docker buildx build \
             --platform ${{ matrix.platform }} \
