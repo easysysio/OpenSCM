@@ -1,0 +1,59 @@
+{# Confirm dialog for the Fix button, and the output toggle (1.1.0
+   remediation). Text goes in with textContent only: the script is shown,
+   never interpreted. #}
+{% if is_editor %}
+<div class="modal fade" id="fixModal" tabindex="-1" role="dialog" aria-labelledby="fixModalTitle">
+  <div class="modal-dialog modal-lg" role="document">
+    <form id="fix-form" method="POST">
+      <div class="modal-content">
+        <div class="modal-header">
+          <h5 class="modal-title" id="fixModalTitle"><i class="fas fa-wrench text-primary mr-2"></i>Run fix script</h5>
+          <button type="button" class="close" data-dismiss="modal" aria-label="Close"><span aria-hidden="true">&times;</span></button>
+        </div>
+        <div class="modal-body">
+          <p class="mb-1"><strong id="fix-test"></strong></p>
+          <p class="text-muted mb-2">on <strong id="fix-system"></strong> · <span id="fix-kind"></span></p>
+          <pre id="fix-script" class="bg-dark text-light rounded p-2 mb-3" style="white-space:pre-wrap; max-height:320px; overflow:auto;"></pre>
+          <div class="alert alert-warning small mb-0">
+            <i class="fas fa-exclamation-triangle mr-1"></i>
+            This script changes the system. It runs as the agent's user (root or SYSTEM)
+            when the agent next checks in, for at most 5 minutes, and then the test is
+            checked again. The fix is recorded in the audit log.
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-outline-secondary btn-sm" data-dismiss="modal">Cancel</button>
+          <button type="submit" class="btn btn-primary btn-sm"><i class="fas fa-wrench mr-1"></i> Run fix</button>
+        </div>
+      </div>
+    </form>
+  </div>
+</div>
+{% endif %}
+<script>
+  (function () {
+    document.addEventListener('click', function (e) {
+      var toggle = e.target.closest('.fix-output-toggle');
+      if (toggle) {
+        var pre = toggle.parentElement.querySelector('.fix-output');
+        if (pre) pre.style.display = pre.style.display === 'none' ? 'block' : 'none';
+        return;
+      }
+      var btn = e.target.closest('.fix-open');
+      var form = document.getElementById('fix-form');
+      if (!btn || !form) return;
+      e.preventDefault();
+      e.stopPropagation();
+      form.setAttribute('action', btn.getAttribute('data-action'));
+      var row = btn.closest('tr');
+      var nameCell = row ? row.querySelector('td') : null;
+      var name = nameCell ? (nameCell.querySelector('.test-name-link') || nameCell) : null;
+      document.getElementById('fix-test').textContent = name ? name.textContent.trim() : '';
+      document.getElementById('fix-system').textContent = btn.getAttribute('data-system');
+      document.getElementById('fix-kind').textContent =
+        btn.getAttribute('data-kind') === 'ps' ? 'PowerShell' : 'shell (/bin/sh)';
+      document.getElementById('fix-script').textContent = btn.getAttribute('data-script');
+      $('#fixModal').modal('show');
+    });
+  })();
+</script>

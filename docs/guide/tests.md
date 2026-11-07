@@ -385,6 +385,50 @@ across your infrastructure.
 
 ---
 
+## Fix Scripts *(1.1.0)*
+
+A test can carry a script that fixes a failure, next to its Remediation text:
+
+- **Fix script (shell)** — runs with `/bin/sh` on Linux, Unix and macOS
+- **Fix script (PowerShell)** — runs on Windows
+
+Both are optional. When a test with a script fails on a system, the live
+**policy report** and **system report** show a **Fix** button on that result.
+Clicking it shows the exact script and the system it will run on; **Run fix**
+queues it.
+
+1. The agent picks the fix up on its next check-in (a fix not picked up within
+   24 hours expires).
+2. It runs the script as the agent's user — root, or SYSTEM on Windows — for
+   at most 5 minutes.
+3. It reports the exit code and output, then checks the test again, so the
+   result shows whether the fix worked. The result row shows the last fix and
+   its output.
+
+A queued fix can be cancelled until the agent picks it up.
+
+**When the button is gray.** Hover over it to see why:
+
+| Reason | What to do |
+|---|---|
+| Fix scripts are off on this system | Set `cmd_enabled = true` (shell) or `ps_enabled = true` (PowerShell) in the agent's config — see [Configuration](../start/configuration.md) |
+| The agent is older than 1.1.0 | Upgrade the agent |
+| Editors and above can run fixes | Ask an Editor or Administrator |
+
+The button appears only on **failed** results that are not excluded. Every
+fix queued, cancelled or reported is recorded in the audit log
+(`fix.queue`, `fix.cancel`, `fix.result`).
+
+!!! warning "A fix script changes the system"
+    Test a script on one system before relying on it. The agent checks its
+    own `cmd_enabled` / `ps_enabled` before running any fix, so the server
+    cannot run scripts on a system whose owner has not turned them on.
+
+Policy export and import carry fix scripts. Policies installed from the
+**Policy Store** (SaaS) never bring fix scripts.
+
+---
+
 ## Bulk Actions
 
 Select multiple tests using the checkboxes on the left of each row, then use

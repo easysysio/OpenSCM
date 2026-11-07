@@ -1110,6 +1110,7 @@ pub async fn fetch_system_report_data(
         let evidence: Option<String> = row.try_get("evidence").ok().flatten();
         let excluded_reason: Option<String> = row.try_get("excluded_reason").ok().flatten();
         entry.results.push(IndividualResult {
+            fix: None,
             test_name,
             status,
             is_excluded,
@@ -1226,6 +1227,12 @@ pub async fn system_report(
             r.is_excludable = true;
         }
     }
+    // Fix buttons and last fixes (1.1.0 remediation) — live page only.
+    let is_editor = auth::authorize(&auth.role, UserRole::Editor).is_none();
+    crate::fixes::annotate_results(
+        &pool, &auth.tenant_id, is_editor,
+        report.policy_groups.iter_mut().flat_map(|p| p.results.iter_mut()),
+    ).await;
 
     let compliance_sat: i64 = sqlx::query_scalar(
         "SELECT CAST(value AS INTEGER) FROM settings WHERE tenant_id = ? AND skey = 'compliance_sat'"
@@ -1329,6 +1336,7 @@ pub async fn container_detail(
     });
 
     let results: Vec<IndividualResult> = result_rows.iter().map(|rr| IndividualResult {
+        fix: None,
         test_name: rr.get("test_name"),
         status: normalize_status(&rr.get::<String, _>("status")).to_string(),
         is_excluded: rr.try_get::<i64, _>("is_excluded").unwrap_or(0) != 0,

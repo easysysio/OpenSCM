@@ -255,7 +255,7 @@
             <thead>
               <tr class="text-xs text-muted text-uppercase">
                 <th style="padding-left: 20px;">Security Requirement</th>
-                <th class="text-center" style="width: 150px;">Status</th>
+                <th class="text-center" style="width: 190px;">Status</th>
               </tr>
             </thead>
             <tbody>
@@ -298,6 +298,7 @@
                       <i class="fas fa-quote-left mr-1"></i>{{ res.excluded_reason }}
                     </div>
                   {% endif %}
+                  {% include "partials/fix_last.html" %}
                 </td>
                 <td class="text-center">
                   {% if res.is_excluded %}
@@ -321,6 +322,9 @@
                       <i class="fas {% if res.is_excluded %}fa-rotate-left{% else %}fa-ban{% endif %}"></i>
                     </button>
                   {% endif %}
+                  {% set fix_url = "/systems/report/" ~ report.system_id ~ "/fix/" ~ res.test_id %}
+                  {% set fix_system = report.system_name %}
+                  {% include "partials/fix_button.html" %}
                   {# "Why?" — show the per-condition breakdown for failed / NA rows that have evidence #}
                   {% if res.evidence and (res.status == "FAIL" or res.status == "NA") %}
                     <button type="button" class="btn btn-link btn-xs p-0 ml-2 evidence-toggle"
@@ -808,4 +812,5 @@
     });
   })();
 </script>
+{% include "partials/fix_modal.html" %}
 {% endblock %}

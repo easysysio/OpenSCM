@@ -677,6 +677,10 @@ pub struct IndividualResult {
     /// reports from before the field existed deserialising cleanly.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub excluded_reason: Option<String>,
+    /// The Fix button and last fix for this row (1.1.0). Set only on the live
+    /// reports (crate::fixes::annotate_results); never in a saved snapshot.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub fix: Option<crate::fixes::FixView>,
 }
 
 

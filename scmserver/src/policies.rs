@@ -1132,6 +1132,7 @@ pub async fn policies_report(
         let system_id: Option<i64> = row.try_get("system_id").ok();
         let test_id:   Option<i64> = row.try_get("test_id").ok();
         system_map.entry(system_name).or_default().push(IndividualResult {
+            fix: None,
             test_name,
             status,
             is_excluded,
@@ -1151,6 +1152,13 @@ pub async fn policies_report(
             error!("Failed to fetch container results for policy {}: {}", id, e);
             Default::default()
         });
+
+    // Fix buttons and last fixes (1.1.0 remediation) — live page only.
+    let is_editor = auth::authorize(&auth.role, UserRole::Editor).is_none();
+    crate::fixes::annotate_results(
+        &pool, &auth.tenant_id, is_editor,
+        system_map.values_mut().flat_map(|v| v.iter_mut()),
+    ).await;
 
     // Excluded findings count as NA: removed from both numerator and denominator.
     let system_reports: Vec<SystemReport> = system_map.into_iter().map(|(name, results)| {
@@ -1275,6 +1283,7 @@ pub(crate) fn assemble_container_groups(
             }
         });
         grp.results.push(IndividualResult {
+            fix: None,
             test_name: row.get("test_name"),
             status: normalize_status(&row.get::<String, _>("status")).to_string(),
             is_excluded: row.try_get::<i64, _>("is_excluded").unwrap_or(0) != 0,
@@ -1506,6 +1515,7 @@ pub(crate) async fn fetch_live_policy_report_data(
         let system_id: Option<i64> = row.try_get("system_id").ok();
         let test_id:   Option<i64> = row.try_get("test_id").ok();
         system_map.entry(system_name).or_default().push(IndividualResult {
+            fix: None,
             test_name,
             status,
             is_excluded,

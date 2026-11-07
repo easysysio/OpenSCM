@@ -1,0 +1,29 @@
+{# The Fix control in the Status cell (1.1.0 remediation). Needs `fix_url`
+   (the queue URL for this row) and `fix_system` (the system's name). The
+   gating is decided server-side in fixes::annotate_results and checked again
+   when the fix is queued. #}
+{% if res.fix and res.fix.state %}
+  {% if res.fix.state == "ready" %}
+    <button type="button" class="btn btn-outline-primary btn-xs ml-2 fix-open"
+            data-action="{{ fix_url }}" data-system="{{ fix_system }}"
+            data-kind="{{ res.fix.kind }}" data-script="{{ res.fix.script }}"
+            title="Run this test's fix script on the system">
+      <i class="fas fa-wrench"></i> Fix
+    </button>
+  {% elif res.fix.state == "disabled" %}
+    <span class="d-inline-block ml-2" tabindex="0" title="{{ res.fix.reason }}">
+      <button type="button" class="btn btn-outline-secondary btn-xs fix-disabled" disabled style="pointer-events:none;">
+        <i class="fas fa-wrench"></i> Fix
+      </button>
+    </span>
+  {% elif res.fix.state == "queued" %}
+    <span class="badge badge-info ml-2" title="Runs when the agent next checks in"><i class="fas fa-clock mr-1"></i>Fix queued</span>
+    {% if is_editor %}
+      <form method="POST" action="{{ fix_url }}/cancel" class="d-inline">
+        <button type="submit" class="btn btn-link btn-xs p-0 ml-1 text-muted fix-cancel" title="Cancel the queued fix">cancel</button>
+      </form>
+    {% endif %}
+  {% elif res.fix.state == "sent" %}
+    <span class="badge badge-warning ml-2" title="The agent is running the fix; the test is checked again when it finishes"><i class="fas fa-spinner fa-spin mr-1"></i>Fixing…</span>
+  {% endif %}
+{% endif %}

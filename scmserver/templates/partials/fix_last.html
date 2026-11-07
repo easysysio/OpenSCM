@@ -1,0 +1,18 @@
+{# The last finished fix for this result (1.1.0 remediation), under the test
+   name. Output is collapsed; the page's fix script toggles it. #}
+{% if res.fix and res.fix.last %}
+  <div class="text-xs mt-1 fix-last" style="white-space:normal;">
+    <i class="fas fa-wrench text-muted mr-1"></i>Last fix:
+    {% if res.fix.last.status == "done" %}<span class="text-success">done</span>
+    {% elif res.fix.last.status == "expired" %}<span class="text-muted">expired before the agent checked in</span>
+    {% elif res.fix.last.status == "refused" %}<span class="text-warning">refused by the agent</span>
+    {% elif res.fix.last.status == "timeout" %}<span class="text-danger">stopped after 5 minutes</span>
+    {% else %}<span class="text-danger">{{ res.fix.last.status }}</span>{% endif %}
+    {% if res.fix.last.exit_code is number %}(exit code {{ res.fix.last.exit_code }}){% endif %}
+    {% if res.fix.last.finished_at %}<span class="text-muted">· <span class="datetime" data-utc="{{ res.fix.last.finished_at }}">{{ res.fix.last.finished_at }}</span></span>{% endif %}
+    {% if res.fix.last.output %}
+      <button type="button" class="btn btn-link btn-xs p-0 ml-1 fix-output-toggle">output</button>
+      <pre class="fix-output bg-light border rounded p-2 mt-1 mb-0 text-left" style="display:none; white-space:pre-wrap; max-height:300px; overflow:auto;">{{ res.fix.last.output }}</pre>
+    {% endif %}
+  </div>
+{% endif %}
