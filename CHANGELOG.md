@@ -6,6 +6,9 @@ All notable changes to OpenSCM are documented here.
 
 ## [Unreleased]
 
+### Added
+- **Fix scripts on tests (remediation, part 1).** A test can now carry an optional shell fix script (Linux, Unix, macOS) and an optional PowerShell fix script (Windows), next to the Remediation text. Policy export and import carry them; importing a file without scripts keeps the ones a test already has. Running a fix from a failed result comes in a later 1.1.0 step (`docs/design/1.1.0-remediation.md`). Schema v52.
+
 ---
 
 ## [1.0.2] - 2026-11-05

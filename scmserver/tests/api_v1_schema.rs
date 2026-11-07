@@ -122,5 +122,5 @@ async fn upgrading_from_v50_names_the_policy_of_old_reports_only_when_certain() 
         assert_eq!(n, 0, "{col} added with default 0");
     }
     let v: i64 = sqlx::query_scalar("SELECT version FROM schema_info").fetch_one(&pool).await.unwrap();
-    assert_eq!(v, 51);
+    assert_eq!(v, scmserver::schema::SCHEMA_VERSION, "the chain runs on to the newest version");
 }

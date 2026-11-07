@@ -17,7 +17,7 @@ use sqlx::SqlitePool;
 use std::path::PathBuf;
 
 // Bump with every migration (also in tests/schema_migration.rs).
-const CURRENT_SCHEMA_VERSION: i64 = 51;
+const CURRENT_SCHEMA_VERSION: i64 = 52;
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Helper: file_pool

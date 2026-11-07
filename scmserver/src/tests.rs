@@ -112,6 +112,24 @@ fn extract_test_metadata(
 
 
 // ─────────────────────────────────────────────────────────────────────────────
+// extract_fix_scripts
+// The two optional fix scripts (shell, PowerShell) from the form. A blank box
+// is NULL. Browsers send textarea lines ending in CRLF; /bin/sh would read
+// the CR as part of each command, so line endings become LF.
+// ─────────────────────────────────────────────────────────────────────────────
+pub fn extract_fix_scripts(
+    form_data: &HashMap<String, Vec<String>>,
+) -> (Option<String>, Option<String>) {
+    let get = |key: &str| -> Option<String> {
+        form_data.get(key).and_then(|v| v.first())
+            .map(|s| s.replace("\r\n", "\n").replace('\r', "\n"))
+            .filter(|s| !s.trim().is_empty())
+    };
+    (get("fix_sh"), get("fix_ps"))
+}
+
+
+// ─────────────────────────────────────────────────────────────────────────────
 // extract_conditions_from_form
 // Parse up to `max` test-condition rows from form data; skips rows whose
 // element field is blank or the placeholder "-- Select --".
@@ -342,19 +360,21 @@ pub async fn tests_add_save(
             }
         };
 
+    let (fix_sh, fix_ps) = extract_fix_scripts(&form_data);
+
     let app_type = form_data.get("app_type")
         .and_then(|v| v.first()).map(|s| s.as_str()).unwrap_or("always");
 
     // Insert test (with auto-generated external_id for stable cross-system identity).
     let external_id = crate::schema::generate_external_id();
     let result = sqlx::query(
-        "INSERT INTO tests (tenant_id, name, description, severity, rational, remediation, filter, app_filter, external_id)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        "INSERT INTO tests (tenant_id, name, description, severity, rational, remediation, filter, app_filter, external_id, fix_sh, fix_ps)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
     )
     .bind(&auth.tenant_id)
     .bind(&name).bind(&description).bind(&severity)
     .bind(&rational).bind(&remediation).bind(&filter).bind(&app_filter)
-    .bind(&external_id)
+    .bind(&external_id).bind(&fix_sh).bind(&fix_ps)
     .execute(&mut *tx)
     .await;
 
@@ -541,6 +561,19 @@ pub async fn tests_edit(
         }
     }
 
+    // Fix scripts are not on `Test`: that struct is also the agent's TEST
+    // payload, and scripts must reach an agent only as a queued fix.
+    let (fix_sh, fix_ps): (Option<String>, Option<String>) = sqlx::query_as(
+        "SELECT fix_sh, fix_ps FROM tests WHERE id = ? AND tenant_id = ?",
+    )
+    .bind(id).bind(&auth.tenant_id)
+    .fetch_one(&*pool).await
+    .unwrap_or_else(|e| {
+        error!("Database error fetching fix scripts for test {}: {}", id, e);
+        (None, None)
+    });
+    context.insert("fix_sh", &fix_sh.unwrap_or_default());
+    context.insert("fix_ps", &fix_ps.unwrap_or_default());
     context.insert("test", &test);
     context.insert("test_conds", &test_conds);
     context.insert("app_conditions", &app_conditions);
@@ -596,16 +629,20 @@ pub async fn tests_edit_save(
             }
         };
 
+    let (fix_sh, fix_ps) = extract_fix_scripts(&form_data);
+
     let app_type = form_data.get("app_type")
         .and_then(|v| v.first()).map(|s| s.as_str()).unwrap_or("always");
 
     // Update test metadata
     if let Err(e) = sqlx::query(
-        "UPDATE tests SET name=?, description=?, severity=?, rational=?, remediation=?, filter=?, app_filter=?
+        "UPDATE tests SET name=?, description=?, severity=?, rational=?, remediation=?, filter=?, app_filter=?,
+                          fix_sh=?, fix_ps=?
          WHERE id=? AND tenant_id=?",
     )
     .bind(&name).bind(&description).bind(&severity)
     .bind(&rational).bind(&remediation).bind(&filter).bind(&app_filter)
+    .bind(&fix_sh).bind(&fix_ps)
     .bind(id).bind(&auth.tenant_id)
     .execute(&mut *tx).await
     {

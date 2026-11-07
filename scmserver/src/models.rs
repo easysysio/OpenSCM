@@ -224,6 +224,12 @@ pub struct PolicyExportTest {
     pub severity: Option<String>,
     pub filter: Option<String>,
     pub app_filter: Option<String>,
+    // Fix scripts (1.1.0). Absent in older files; an import leaves a test's
+    // existing scripts alone when the file has none.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub fix_sh: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub fix_ps: Option<String>,
     #[serde(default)]
     pub conditions: Vec<PolicyExportTestCondition>,
     #[serde(default)]

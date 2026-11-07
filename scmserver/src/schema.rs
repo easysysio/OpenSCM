@@ -972,7 +972,7 @@ pub async fn seed_plan_limits(pool: &SqlitePool) -> Result<(), sqlx::Error> {
 // a higher version was migrated by a newer OpenSCM, and this build refuses
 // to run on it rather than write to tables it does not understand.
 // ─────────────────────────────────────────────────────────────────────────────
-pub const SCHEMA_VERSION: i64 = 51;
+pub const SCHEMA_VERSION: i64 = 52;
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Helper: run_migrations
@@ -3155,6 +3155,62 @@ async fn run_migrations_on(pool: &SqlitePool) -> Result<(), sqlx::Error> {
         }
         sqlx::query("UPDATE schema_info SET version = 51").execute(pool).await?;
         info!("Schema migration v50 → v51 complete.");
+    }
+
+    // v51 → v52: remediation fix scripts (docs/design/1.1.0-remediation.md).
+    //   • tests.fix_sh / fix_ps: optional scripts that fix a failure (shell on
+    //     Linux/Unix/macOS, PowerShell on Windows). NULL = none.
+    //   • systems.cmd_enabled / ps_enabled: what the agent last reported. NULL
+    //     until an agent 1.1.0+ reports them; the Fix button stays gray.
+    //   • fix_runs: one row per fix an Editor queued, with the script copied
+    //     at queue time and the outcome the agent reported.
+    if version < 52 {
+        info!("Running schema migration v51 → v52 (remediation fix scripts)...");
+        if table_exists(pool, "tests").await {
+            for col in ["fix_sh", "fix_ps"] {
+                if !column_exists(pool, "tests", col).await {
+                    sqlx::query(&format!("ALTER TABLE tests ADD COLUMN {col} TEXT"))
+                        .execute(pool).await?;
+                }
+            }
+        }
+        if table_exists(pool, "systems").await {
+            for col in ["cmd_enabled", "ps_enabled"] {
+                if !column_exists(pool, "systems", col).await {
+                    sqlx::query(&format!("ALTER TABLE systems ADD COLUMN {col} INTEGER"))
+                        .execute(pool).await?;
+                }
+            }
+        }
+        sqlx::query(
+            "CREATE TABLE IF NOT EXISTS fix_runs (
+                id            INTEGER PRIMARY KEY AUTOINCREMENT,
+                tenant_id     VARCHAR(191) NOT NULL DEFAULT 'default',
+                system_id     INTEGER NOT NULL,
+                test_id       INTEGER NOT NULL,
+                kind          TEXT NOT NULL,
+                script        TEXT NOT NULL,
+                script_sha256 TEXT NOT NULL,
+                requested_by  INTEGER,
+                requested_at  DATETIME DEFAULT CURRENT_TIMESTAMP,
+                status        TEXT NOT NULL DEFAULT 'queued',
+                sent_at       DATETIME,
+                finished_at   DATETIME,
+                exit_code     INTEGER,
+                output        TEXT,
+                FOREIGN KEY (tenant_id) REFERENCES tenants (id) ON DELETE CASCADE,
+                FOREIGN KEY (system_id) REFERENCES systems (id) ON DELETE CASCADE,
+                FOREIGN KEY (test_id)   REFERENCES tests   (id) ON DELETE CASCADE
+            )",
+        )
+        .execute(pool).await?;
+        sqlx::query(
+            "CREATE INDEX IF NOT EXISTS idx_fix_runs_system
+                 ON fix_runs (tenant_id, system_id, status)",
+        )
+        .execute(pool).await?;
+        sqlx::query("UPDATE schema_info SET version = 52").execute(pool).await?;
+        info!("Schema migration v51 → v52 complete.");
     }
 
     Ok(())
