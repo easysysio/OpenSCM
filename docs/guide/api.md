@@ -14,14 +14,13 @@ https://your-openscm-server/api/v1
     added, but nothing is renamed or removed, or changes type or meaning. A
     breaking change would be a new version, `/api/v2`.
 
-!!! warning "`/api/v1beta1` is deprecated"
-    The beta API still answers in 1.0, exactly as before, with a
-    `Deprecation: true` header. It is removed in 1.1.0. See
-    [Moving from v1beta1](#moving-from-v1beta1).
+!!! warning "`/api/v1beta1` was removed in 1.1.0"
+    Since 1.1.0 every `/api/v1beta1` path answers `410 Gone`, with a `Link`
+    header pointing to [Moving from v1beta1](#moving-from-v1beta1). Change
+    the address to `/api/v1` and check your scripts against that table.
 
 The full reference is the OpenAPI file, [`openapi.yaml`](../api/openapi.yaml).
-Load it into any OpenAPI viewer or client generator. The beta's is
-[`openapi-v1beta1.yaml`](../api/openapi-v1beta1.yaml).
+Load it into any OpenAPI viewer or client generator.
 
 ---
 
@@ -665,6 +664,10 @@ list; anything not in it is unchanged.
 | Empty `description`, `rationale`, `remediation` of a test | `null` or `""`, depending on how the test was saved | Always `null` |
 | Saved policy reports | `policy: {name, version}` | Also `policy.id` |
 
-Every `/api/v1beta1` answer carries `Deprecation: true` and a `Link` header
-pointing here, so you can find scripts still using it in your logs before
-1.1.0 removes it.
+In 1.0, every `/api/v1beta1` answer carried `Deprecation: true`. Since
+1.1.0 every `/api/v1beta1` path answers `410 Gone` in JSON, with a `Link`
+header pointing here:
+
+```json
+{"error": {"code": "gone", "message": "/api/v1beta1 was removed in 1.1.0. Use /api/v1 — see https://openscm.io/guide/api/#moving-from-v1beta1"}}
+```

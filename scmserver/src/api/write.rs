@@ -1,5 +1,5 @@
 // =============================================================================
-// api/write.rs — write endpoints of /api/v1 and v1beta1
+// api/write.rs — write endpoints of /api/v1
 //
 // Each does what the matching page button does, through the same shared
 // function (approve_system, delete_system, set_exclusion, the upgrade queue,
@@ -252,9 +252,6 @@ pub async fn policies_run(auth: ApiAuth, Extension(pool): Extension<SqlitePool>,
     let queued_at = super::shape::now();
     crate::policies::execute_policy_run_logic(id as i32, &pool, &auth.tenant_id).await.map_err(db_err)?;
     audit(&pool, &auth, "policy.run", ("policy", id.to_string()), json!({})).await;
-    if !auth.v1() {
-        return Ok(accepted(json!({"policy_id": id, "queued": true})));
-    }
     let offline = super::read::offline_secs(&pool, &auth.tenant_id).await;
     let systems: Vec<Value> = sqlx::query(
         "SELECT DISTINCT s.id, s.name,

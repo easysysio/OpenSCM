@@ -1,14 +1,13 @@
 // =============================================================================
-// api/read.rs — read endpoints of /api/v1 and v1beta1 (Viewer, unless noted)
+// api/read.rs — read endpoints of /api/v1 (Viewer, unless noted)
 //
 // Systems, groups, tests, policies, compliance, saved reports and the audit
 // log of the token's organization. Lists use cursor pagination (api::Page).
 // Compliance comes from the same functions as the pages, PDFs and saved
 // reports — fetch_system_report_data and fetch_live_policy_report_data — so
 // the API can never compute it differently from what people see.
-// See docs/design/0.12.0-rest-api.md, D3 and D4. For /api/v1 each endpoint
-// shapes its answer through api::shape (docs/design/1.0.0-api-v1.md); the
-// v1beta1 answers are unchanged.
+// See docs/design/0.12.0-rest-api.md, D3 and D4. Each endpoint shapes its
+// answer through api::shape (docs/design/1.0.0-api-v1.md).
 // =============================================================================
 
 use std::collections::HashMap;
@@ -117,12 +116,10 @@ async fn systems_json(auth: &ApiAuth, pool: &SqlitePool, rows: Vec<sqlx::sqlite:
             "created_at": opt_iso(r.get("created_date")),
             "last_seen": opt_iso(r.get("last_seen")),
         });
-        if auth.v1() {
-            v["compliance"]["score"] = json!(opt_score(r.get("compliance_score")));
-            if let Some(o) = v.as_object_mut() {
-                let seen = o.remove("last_seen").unwrap_or(Value::Null);
-                o.insert("last_seen_at".into(), seen);
-            }
+        v["compliance"]["score"] = json!(opt_score(r.get("compliance_score")));
+        if let Some(o) = v.as_object_mut() {
+            let seen = o.remove("last_seen").unwrap_or(Value::Null);
+            o.insert("last_seen_at".into(), seen);
         }
         v
     }).collect();
@@ -168,7 +165,7 @@ pub async fn systems_list(auth: ApiAuth, Extension(pool): Extension<SqlitePool>,
     qb.push(" ORDER BY s.id LIMIT ").push_bind(limit + 1);
     let rows = qb.build().fetch_all(&pool).await.map_err(db_err)?;
     let (data, ids) = systems_json(&auth, &pool, rows).await?;
-    Ok(page_of(&auth, &page, data, ids, limit))
+    Ok(page_of(&page, data, ids, limit))
 }
 
 // GET /systems/{id}
@@ -191,18 +188,15 @@ pub async fn systems_compliance(auth: ApiAuth, Extension(pool): Extension<Sqlite
     exists(&pool, "systems", &auth.tenant_id, id, "No such system").await?;
     let data = crate::systems::fetch_system_report_data(id as i32, &auth.tenant_id, &pool)
         .await.map_err(db_err)?;
-    if auth.v1() {
-        let checked = shape::Checked::for_system(&pool, &auth.tenant_id, id).await.map_err(db_err)?;
-        let mut body = shape::system_compliance(data, When::Live(&checked), Some(shape::now()));
-        // The report data holds last_seen as page text, to the minute; the
-        // live answer gives it to the second, as GET /systems/{id} does.
-        let seen: Option<String> = sqlx::query_scalar(
-            "SELECT CAST(last_seen AS TEXT) FROM systems WHERE id = ? AND tenant_id = ?")
-            .bind(id).bind(&auth.tenant_id).fetch_one(&pool).await.map_err(db_err)?;
-        body.last_seen_at = shape::opt_timestamp(seen.as_deref());
-        return Ok(Json(serde_json::to_value(body).map_err(|_| ApiError::internal())?));
-    }
-    Ok(Json(serde_json::to_value(data).map_err(|_| ApiError::internal())?))
+    let checked = shape::Checked::for_system(&pool, &auth.tenant_id, id).await.map_err(db_err)?;
+    let mut body = shape::system_compliance(data, When::Live(&checked), Some(shape::now()));
+    // The report data holds last_seen as page text, to the minute; the
+    // live answer gives it to the second, as GET /systems/{id} does.
+    let seen: Option<String> = sqlx::query_scalar(
+        "SELECT CAST(last_seen AS TEXT) FROM systems WHERE id = ? AND tenant_id = ?")
+        .bind(id).bind(&auth.tenant_id).fetch_one(&pool).await.map_err(db_err)?;
+    body.last_seen_at = shape::opt_timestamp(seen.as_deref());
+    Ok(Json(serde_json::to_value(body).map_err(|_| ApiError::internal())?))
 }
 
 async fn exists(pool: &SqlitePool, table: &str, tenant_id: &str, id: i64, missing: &str) -> Result<(), ApiError> {
@@ -236,7 +230,7 @@ pub async fn groups_list(auth: ApiAuth, Extension(pool): Extension<SqlitePool>, 
         .bind(&auth.tenant_id).bind(after).bind(limit + 1)
         .fetch_all(&pool).await.map_err(db_err)?;
     let ids = rows.iter().map(|r| r.get::<i64, _>("id")).collect();
-    Ok(page_of(&auth, &page, rows.iter().map(group_json).collect(), ids, limit))
+    Ok(page_of(&page, rows.iter().map(group_json).collect(), ids, limit))
 }
 
 // GET /groups/{id} — with its member systems and the policies it is linked to.
@@ -265,21 +259,24 @@ pub async fn groups_get(auth: ApiAuth, Extension(pool): Extension<SqlitePool>, P
 const TEST_SELECT: &str = "SELECT id, name, description, rational, remediation, severity, filter, app_filter,
         external_id, compliance_score, systems_passed, systems_failed FROM tests WHERE tenant_id = ?";
 
-fn test_json(r: &sqlx::sqlite::SqliteRow, v1: bool) -> Value {
-    if v1 {
-        let mut v = test_json(r, false);
-        for (key, col) in [("description", "description"), ("rationale", "rational"), ("remediation", "remediation")] {
-            v[key] = json!(shape::text(r.get::<Option<String>, _>(col)));
-        }
-        v["compliance"] = json!({
-            "score": opt_score(r.get("compliance_score")),
-            "systems": {
-                "passed": r.get::<Option<i64>, _>("systems_passed"),
-                "failed": r.get::<Option<i64>, _>("systems_failed"),
-            },
-        });
-        return v;
+fn test_json(r: &sqlx::sqlite::SqliteRow) -> Value {
+    let mut v = test_base(r);
+    for (key, col) in [("description", "description"), ("rationale", "rational"), ("remediation", "remediation")] {
+        v[key] = json!(shape::text(r.get::<Option<String>, _>(col)));
     }
+    v["compliance"] = json!({
+        "score": opt_score(r.get("compliance_score")),
+        "systems": {
+            "passed": r.get::<Option<i64>, _>("systems_passed"),
+            "failed": r.get::<Option<i64>, _>("systems_failed"),
+        },
+    });
+    v
+}
+
+// The fields test_json builds on (the 0.12.0 shape; test_json replaces
+// the text fields and `compliance`).
+fn test_base(r: &sqlx::sqlite::SqliteRow) -> Value {
     json!({
         "id": r.get::<i64, _>("id"),
         "name": r.get::<String, _>("name"),
@@ -307,7 +304,7 @@ pub async fn tests_list(auth: ApiAuth, Extension(pool): Extension<SqlitePool>, Q
         .bind(&auth.tenant_id).bind(after).bind(limit + 1)
         .fetch_all(&pool).await.map_err(db_err)?;
     let ids = rows.iter().map(|r| r.get::<i64, _>("id")).collect();
-    Ok(page_of(&auth, &page, rows.iter().map(|r| test_json(r, auth.v1())).collect(), ids, limit))
+    Ok(page_of(&page, rows.iter().map(test_json).collect(), ids, limit))
 }
 
 // GET /tests/{id} — with its conditions and applicability conditions.
@@ -317,7 +314,7 @@ pub async fn tests_get(auth: ApiAuth, Extension(pool): Extension<SqlitePool>, Pa
     let row = sqlx::query(&format!("{TEST_SELECT} AND id = ?"))
         .bind(&auth.tenant_id).bind(id).fetch_optional(&pool).await.map_err(db_err)?
         .ok_or_else(|| ApiError::not_found("No such test"))?;
-    let mut t = test_json(&row, auth.v1());
+    let mut t = test_json(&row);
     let conds = sqlx::query(
         "SELECT `type`, element, input, selement, condition, sinput FROM test_conditions
           WHERE tenant_id = ? AND test_id = ? ORDER BY id")
@@ -357,26 +354,29 @@ async fn scoring_mode(pool: &SqlitePool, tenant_id: &str) -> String {
 }
 
 // `mode` is Some for v1: both kinds of count, whatever the mode (design D7).
-fn policy_json(r: &sqlx::sqlite::SqliteRow, mode: Option<&str>) -> Value {
-    if let Some(mode) = mode {
-        let mut v = policy_json(r, None);
-        v["compliance"] = json!({
-            "score": opt_score(r.get("compliance_score")),
-            "score_by_test": opt_score(r.get("score_test")),
-            "score_by_system": opt_score(r.get("score_system")),
-            "score_by_container": opt_score(r.get("score_container")),
-            "scoring_mode": mode,
-            "systems": {
-                "passed": r.get::<Option<i64>, _>("compliant_systems"),
-                "failed": r.get::<Option<i64>, _>("failing_systems"),
-            },
-            "tests": {
-                "passed": r.get::<Option<i64>, _>("tests_passed"),
-                "failed": r.get::<Option<i64>, _>("tests_failed"),
-            },
-        });
-        return v;
-    }
+fn policy_json(r: &sqlx::sqlite::SqliteRow, mode: &str) -> Value {
+    let mut v = policy_base(r);
+    v["compliance"] = json!({
+        "score": opt_score(r.get("compliance_score")),
+        "score_by_test": opt_score(r.get("score_test")),
+        "score_by_system": opt_score(r.get("score_system")),
+        "score_by_container": opt_score(r.get("score_container")),
+        "scoring_mode": mode,
+        "systems": {
+            "passed": r.get::<Option<i64>, _>("compliant_systems"),
+            "failed": r.get::<Option<i64>, _>("failing_systems"),
+        },
+        "tests": {
+            "passed": r.get::<Option<i64>, _>("tests_passed"),
+            "failed": r.get::<Option<i64>, _>("tests_failed"),
+        },
+    });
+    v
+}
+
+// The fields policy_json builds on (the 0.12.0 shape; policy_json replaces
+// `compliance`).
+fn policy_base(r: &sqlx::sqlite::SqliteRow) -> Value {
     json!({
         "id": r.get::<i64, _>("id"),
         "name": r.get::<String, _>("name"),
@@ -404,8 +404,8 @@ pub async fn policies_list(auth: ApiAuth, Extension(pool): Extension<SqlitePool>
         .bind(&auth.tenant_id).bind(after).bind(limit + 1)
         .fetch_all(&pool).await.map_err(db_err)?;
     let ids = rows.iter().map(|r| r.get::<i64, _>("id")).collect();
-    let mode = if auth.v1() { Some(scoring_mode(&pool, &auth.tenant_id).await) } else { None };
-    Ok(page_of(&auth, &page, rows.iter().map(|r| policy_json(r, mode.as_deref())).collect(), ids, limit))
+    let mode = scoring_mode(&pool, &auth.tenant_id).await;
+    Ok(page_of(&page, rows.iter().map(|r| policy_json(r, &mode)).collect(), ids, limit))
 }
 
 // GET /policies/{id} — with its tests and the groups it applies to.
@@ -415,8 +415,8 @@ pub async fn policies_get(auth: ApiAuth, Extension(pool): Extension<SqlitePool>,
     let row = sqlx::query(&format!("{POLICY_SELECT} AND id = ?"))
         .bind(&auth.tenant_id).bind(id).fetch_optional(&pool).await.map_err(db_err)?
         .ok_or_else(|| ApiError::not_found("No such policy"))?;
-    let mode = if auth.v1() { Some(scoring_mode(&pool, &auth.tenant_id).await) } else { None };
-    let mut p = policy_json(&row, mode.as_deref());
+    let mode = scoring_mode(&pool, &auth.tenant_id).await;
+    let mut p = policy_json(&row, &mode);
     p["tests"] = json!(sqlx::query(
         "SELECT t.id, t.name, t.severity FROM tests_in_policy tp JOIN tests t ON t.id = tp.test_id AND t.tenant_id = tp.tenant_id
           WHERE tp.tenant_id = ? AND tp.policy_id = ? ORDER BY t.id")
@@ -439,12 +439,9 @@ pub async fn policies_compliance(auth: ApiAuth, Extension(pool): Extension<Sqlit
     let data = crate::policies::fetch_live_policy_report_data(&pool, &auth.tenant_id, &auth.username, id)
         .await.map_err(db_err)?
         .ok_or_else(|| ApiError::not_found("No such policy"))?;
-    if auth.v1() {
-        let checked = shape::Checked::for_policy(&pool, &auth.tenant_id, id).await.map_err(db_err)?;
-        let body = shape::policy_compliance(data, &checked);
-        return Ok(Json(serde_json::to_value(body).map_err(|_| ApiError::internal())?));
-    }
-    Ok(Json(serde_json::to_value(data).map_err(|_| ApiError::internal())?))
+    let checked = shape::Checked::for_policy(&pool, &auth.tenant_id, id).await.map_err(db_err)?;
+    let body = shape::policy_compliance(data, &checked);
+    Ok(Json(serde_json::to_value(body).map_err(|_| ApiError::internal())?))
 }
 
 // ── Saved reports ────────────────────────────────────────────────────────────
@@ -483,15 +480,13 @@ pub async fn reports_list(auth: ApiAuth, Extension(pool): Extension<SqlitePool>,
         });
         if policy {
             v["policy"] = json!({"name": r.get::<Option<String>, _>("name"), "version": r.get::<Option<String>, _>("v")});
-            if auth.v1() {
-                v["policy"]["id"] = json!(r.get::<Option<i64>, _>("pid"));
-            }
+            v["policy"]["id"] = json!(r.get::<Option<i64>, _>("pid"));
         } else {
             v["system"] = json!({"id": r.get::<Option<i64>, _>("sid"), "name": r.get::<Option<String>, _>("name")});
         }
         v
     }).collect();
-    Ok(page_of(&auth, &page, data, ids, limit))
+    Ok(page_of(&page, data, ids, limit))
 }
 
 // GET /reports/{policy|system}/{id} — one saved snapshot, as saved.
@@ -502,35 +497,17 @@ pub async fn reports_get(auth: ApiAuth, Extension(pool): Extension<SqlitePool>, 
         let (report, systems, tests) = crate::reports::fetch_archive_policy_report(&pool, &auth.tenant_id, id)
             .await.map_err(db_err)?
             .ok_or_else(|| ApiError::not_found("No such report"))?;
-        if auth.v1() {
-            let policy_id: Option<i64> = sqlx::query_scalar("SELECT policy_id FROM reports WHERE id = ? AND tenant_id = ?")
-                .bind(id).bind(&auth.tenant_id).fetch_one(&pool).await.map_err(db_err)?;
-            return Ok(Json(json!({
-                "id": report.id,
-                "kind": "policy",
-                "saved_at": iso(&report.submission_date),
-                "saved_by": report.submitter_name,
-                "policy": {"id": policy_id, "name": report.policy_name, "version": report.policy_version,
-                           "description": report.policy_description},
-                "tests": shape::test_meta(tests),
-                "systems": systems.into_iter().map(|s| shape::system_report(s, When::Saved)).collect::<Vec<_>>(),
-            })));
-        }
-        // Policy reports saved from 1.0 record each result's ids; the beta
-        // answers as it did before they did.
-        let mut systems = systems;
-        for r in systems.iter_mut().flat_map(|s| s.results.iter_mut()) {
-            r.system_id = None;
-            r.test_id = None;
-        }
+        let policy_id: Option<i64> = sqlx::query_scalar("SELECT policy_id FROM reports WHERE id = ? AND tenant_id = ?")
+            .bind(id).bind(&auth.tenant_id).fetch_one(&pool).await.map_err(db_err)?;
         return Ok(Json(json!({
             "id": report.id,
             "kind": "policy",
             "saved_at": iso(&report.submission_date),
             "saved_by": report.submitter_name,
-            "policy": {"name": report.policy_name, "version": report.policy_version, "description": report.policy_description},
-            "tests": tests,
-            "systems": systems,
+            "policy": {"id": policy_id, "name": report.policy_name, "version": report.policy_version,
+                       "description": report.policy_description},
+            "tests": shape::test_meta(tests),
+            "systems": systems.into_iter().map(|s| shape::system_report(s, When::Saved)).collect::<Vec<_>>(),
         })));
     }
     let row = sqlx::query(
@@ -539,16 +516,12 @@ pub async fn reports_get(auth: ApiAuth, Extension(pool): Extension<SqlitePool>, 
         .bind(id).bind(&auth.tenant_id).fetch_optional(&pool).await.map_err(db_err)?
         .ok_or_else(|| ApiError::not_found("No such report"))?;
     let raw = row.get::<Option<String>, _>("report_data");
-    let data: Value = if auth.v1() {
-        // Snapshots from every release deserialise (serde defaults); one that
-        // does not is served as null rather than failing the request.
-        raw.as_deref()
-            .and_then(|r| serde_json::from_str::<crate::models::SystemReportData>(r).ok())
-            .map(|d| json!(shape::system_compliance(d, When::Saved, None)))
-            .unwrap_or(Value::Null)
-    } else {
-        serde_json::from_str(raw.as_deref().unwrap_or("{}")).unwrap_or(Value::Null)
-    };
+    // Snapshots from every release deserialise (serde defaults); one that
+    // does not is served as null rather than failing the request.
+    let data: Value = raw.as_deref()
+        .and_then(|r| serde_json::from_str::<crate::models::SystemReportData>(r).ok())
+        .map(|d| json!(shape::system_compliance(d, When::Saved, None)))
+        .unwrap_or(Value::Null);
     Ok(Json(json!({
         "id": row.get::<i64, _>("id"),
         "kind": "system",
@@ -624,27 +597,15 @@ pub async fn audit_log(auth: ApiAuth, Extension(pool): Extension<SqlitePool>, Qu
     let ids = rows.iter().map(|r| r.get::<i64, _>("id")).collect();
     let data = rows.iter().map(|r| {
         let details: Option<String> = r.get("details");
-        if auth.v1() {
-            return json!({
-                "id": r.get::<i64, _>("id"),
-                "created_at": opt_iso(r.get("at")),
-                "actor": {"id": r.get::<Option<i64>, _>("actor_user_id"), "username": r.get::<String, _>("actor_username")},
-                "action": r.get::<String, _>("action"),
-                "target": {"type": r.get::<Option<String>, _>("target_type"), "id": r.get::<Option<String>, _>("target_id")},
-                "details": shape::audit_details(details),
-                "ip": r.get::<Option<String>, _>("ip_address"),
-            });
-        }
         json!({
             "id": r.get::<i64, _>("id"),
-            "at": opt_iso(r.get("at")),
+            "created_at": opt_iso(r.get("at")),
             "actor": {"id": r.get::<Option<i64>, _>("actor_user_id"), "username": r.get::<String, _>("actor_username")},
             "action": r.get::<String, _>("action"),
             "target": {"type": r.get::<Option<String>, _>("target_type"), "id": r.get::<Option<String>, _>("target_id")},
-            // Structured details are returned as JSON, anything else as text.
-            "details": details.map(|d| serde_json::from_str::<Value>(&d).unwrap_or(Value::String(d))),
+            "details": shape::audit_details(details),
             "ip": r.get::<Option<String>, _>("ip_address"),
         })
     }).collect();
-    Ok(page_of(&auth, &page, data, ids, limit))
+    Ok(page_of(&page, data, ids, limit))
 }

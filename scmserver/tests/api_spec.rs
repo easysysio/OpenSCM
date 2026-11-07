@@ -1,10 +1,9 @@
 // api_spec.rs — the published OpenAPI files and the API routes agree.
 //
-// docs/api/openapi.yaml (/api/v1) and docs/api/openapi-v1beta1.yaml are
-// hand-written (0.12.0 design D7, 1.0.0 design D11). Both versions serve the
-// same route list, so this fails when a route exists in src/api/mod.rs but
-// not in either spec, or the other way round: the documentation cannot drift
-// from what the server answers.
+// docs/api/openapi.yaml (/api/v1) is hand-written (0.12.0 design D7, 1.0.0
+// design D11), so this fails when a route exists in src/api/mod.rs but not
+// in the spec, or the other way round: the documentation cannot drift from
+// what the server answers.
 //
 // Both sides are read as text by layout, not parsed: routes are the
 // `.route(&p("/path"), get(..).post(..))` calls in api::router; the spec
@@ -53,26 +52,17 @@ fn spec(yaml: &str) -> BTreeSet<(String, String)> {
 #[test]
 fn every_route_is_documented_and_every_documented_route_exists() {
     let routes = routes();
-    for (file, yaml) in [
-        ("openapi.yaml", include_str!("../../docs/api/openapi.yaml")),
-        ("openapi-v1beta1.yaml", include_str!("../../docs/api/openapi-v1beta1.yaml")),
-    ] {
-        let spec = spec(yaml);
-        let undocumented: Vec<_> = routes.difference(&spec).collect();
-        let phantom: Vec<_> = spec.difference(&routes).collect();
-        assert!(undocumented.is_empty(), "routes missing from docs/api/{file}: {undocumented:?}");
-        assert!(phantom.is_empty(), "documented in {file} but not served: {phantom:?}");
-    }
+    let spec = spec(include_str!("../../docs/api/openapi.yaml"));
+    let undocumented: Vec<_> = routes.difference(&spec).collect();
+    let phantom: Vec<_> = spec.difference(&routes).collect();
+    assert!(undocumented.is_empty(), "routes missing from docs/api/openapi.yaml: {undocumented:?}");
+    assert!(phantom.is_empty(), "documented in openapi.yaml but not served: {phantom:?}");
 }
 
-// The v1 file describes /api/v1 and the beta file the deprecated beta, with
-// every beta operation marked deprecated.
+// The file describes /api/v1, and nothing in it is deprecated.
 #[test]
-fn each_file_names_its_version() {
+fn the_file_names_its_version() {
     let v1 = include_str!("../../docs/api/openapi.yaml");
-    let beta = include_str!("../../docs/api/openapi-v1beta1.yaml");
     assert!(v1.contains("\n  - url: https://your-openscm-server/api/v1\n") && v1.contains("\n  version: v1\n"));
     assert!(!v1.contains("deprecated: true"));
-    assert!(beta.contains("\n  - url: https://your-openscm-server/api/v1beta1\n"));
-    assert_eq!(beta.matches("      deprecated: true").count(), spec(beta).len(), "every beta operation is deprecated");
 }

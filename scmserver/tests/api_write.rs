@@ -1,4 +1,4 @@
-// api_write.rs — the write endpoints of /api/v1beta1.
+// api_write.rs — the write endpoints of /api/v1.
 //
 // Each does what its page button does, through the same function, with the
 // same role; enforces SaaS plan limits like the pages; and records the write
@@ -58,7 +58,7 @@ async fn fixture() -> Fx {
 }
 
 async fn call(fx: &Fx, role: &str, method: &str, path: &str, body: Option<Value>) -> (StatusCode, Value) {
-    let mut req = Request::builder().method(method).uri(format!("/api/v1beta1{path}"))
+    let mut req = Request::builder().method(method).uri(format!("/api/v1{path}"))
         .header("authorization", format!("Bearer {}", fx.tok[role]));
     let body = match body {
         Some(b) => { req = req.header("content-type", "application/json"); Body::from(b.to_string()) }

@@ -1,11 +1,10 @@
 // api_v1.rs — /api/v1 (docs/design/1.0.0-api-v1.md).
 //
-// v1 serves the same routes as v1beta1 with answers an integration can use
-// without decoding twice or guessing: scores rounded or null, one timestamp
-// format, evidence as JSON, checked_at on every live result, both kinds of
-// policy count, audit details always an object, a resume point on every
-// list, and the policy id of a saved report. v1beta1 keeps answering exactly
-// as before, marked deprecated.
+// v1 gives answers an integration can use without decoding twice or
+// guessing: scores rounded or null, one timestamp format, evidence as JSON,
+// checked_at on every live result, both kinds of policy count, audit details
+// always an object, a resume point on every list, and the policy id of a
+// saved report. v1beta1 was removed in 1.1.0: every path answers 410 Gone.
 
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -102,11 +101,13 @@ async fn fixture() -> Fx {
 }
 
 async fn call(fx: &Fx, role: &str, method: &str, url: &str) -> (StatusCode, HeaderMap, Value) {
-    let resp = fx.app.clone().oneshot(
-        Request::builder().method(method).uri(url)
-            .header("authorization", format!("Bearer {}", fx.tokens[role]))
-            .body(Body::empty()).unwrap(),
-    ).await.unwrap();
+    // "none" sends no token; a role with no token sends a made-up one.
+    let mut req = Request::builder().method(method).uri(url);
+    if role != "none" {
+        let tok = fx.tokens.get(role).cloned().unwrap_or_else(|| "osk_not_a_real_token".into());
+        req = req.header("authorization", format!("Bearer {tok}"));
+    }
+    let resp = fx.app.clone().oneshot(req.body(Body::empty()).unwrap()).await.unwrap();
     let (status, headers) = (resp.status(), resp.headers().clone());
     let bytes = axum::body::to_bytes(resp.into_body(), usize::MAX).await.unwrap();
     (status, headers, serde_json::from_slice(&bytes).unwrap_or(Value::Null))
@@ -116,14 +117,6 @@ async fn v1(fx: &Fx, role: &str, path: &str) -> Value {
     let (s, h, v) = call(fx, role, "GET", &format!("/api/v1{path}")).await;
     assert_eq!(s, StatusCode::OK, "{path}: {v}");
     assert!(h.get("deprecation").is_none(), "{path}: v1 is not deprecated");
-    v
-}
-
-async fn beta(fx: &Fx, role: &str, path: &str) -> Value {
-    let (s, h, v) = call(fx, role, "GET", &format!("/api/v1beta1{path}")).await;
-    assert_eq!(s, StatusCode::OK, "{path}: {v}");
-    assert_eq!(h.get("deprecation").map(|v| v.to_str().unwrap()), Some("true"), "{path}");
-    assert!(h.get("link").unwrap().to_str().unwrap().contains("rel=\"deprecation\""), "{path}");
     v
 }
 
@@ -384,11 +377,6 @@ async fn saved_policy_reports_name_systems_and_tests() {
         .execute(&fx.pool).await.unwrap();
     let old = v1(&fx, "viewer", "/reports/policy/1").await;
     assert!(old["systems"][0]["system_id"].is_null() && old["systems"][0]["results"][0]["test_id"].is_null(), "{old}");
-
-    let b = beta(&fx, "viewer", &format!("/reports/policy/{}", fx.policy_report)).await;
-    for r in b["systems"].as_array().unwrap().iter().flat_map(|s| s["results"].as_array().unwrap()) {
-        assert!(r.get("system_id").is_none() && r.get("test_id").is_none(), "{r}");
-    }
 }
 
 // The compliance answer's last_seen_at is to the second, as on /systems/{id};
@@ -401,8 +389,6 @@ async fn the_compliance_answer_gives_last_seen_to_the_second() {
     let sys = v1(&fx, "viewer", "/systems/1").await;
     assert!(sys["last_seen_at"].as_str().unwrap().ends_with(":42Z"), "{sys}");
     assert_eq!(v1(&fx, "viewer", "/systems/1/compliance").await["last_seen_at"], sys["last_seen_at"]);
-    assert!(beta(&fx, "viewer", "/systems/1/compliance").await["last_seen"].as_str().unwrap().ends_with("UTC"),
-            "the beta keeps the page's text");
 }
 
 // Empty test text is null in every v1 answer, whether stored as NULL (test 6)
@@ -432,30 +418,26 @@ async fn empty_test_text_is_null_everywhere() {
             }
         }
     }
-    assert_eq!(beta(&fx, "viewer", "/tests/7").await["rationale"], "", "the beta passes the stored value through");
 }
 
+// v1beta1 is gone: every path, method and caller (no token, a bad one, a
+// good one) gets 410 in JSON with a link to the migration notes.
 #[tokio::test]
-async fn v1beta1_answers_as_before_and_says_it_is_deprecated() {
+async fn v1beta1_is_gone() {
     let fx = fixture().await;
-    let s = beta(&fx, "viewer", "/systems/1").await;
-    assert!(s["compliance"]["score"].as_f64().unwrap() != 33.33, "unrounded, as 0.12.0 shipped it");
-    assert!(s.get("last_seen").is_some() && s.get("last_seen_at").is_none());
-    assert!(beta(&fx, "viewer", "/systems").await.get("resume_cursor").is_none());
-    let sys = beta(&fx, "viewer", "/systems/1/compliance").await;
-    let t5 = sys["policy_groups"][0]["results"].as_array().unwrap().iter().find(|r| r["test_id"] == 5).unwrap().clone();
-    assert!(t5["evidence"].is_string() && t5.get("checked_at").is_none(), "{t5}");
-    assert!(sys["last_seen"].as_str().unwrap().ends_with("UTC"));
-    let pol = beta(&fx, "viewer", "/policies/7/compliance").await;
-    assert!(pol.get("submitter_name").is_some() && pol.get("generated_at").is_none());
-    let p = beta(&fx, "viewer", "/policies/7").await;
-    assert!(p["compliance"].get("systems_passed").is_some() && p["compliance"].get("tests").is_none());
-    let log = beta(&fx, "admin", "/audit-log").await;
-    assert_eq!(log["data"][0]["details"], "Logged in from the web");
-    assert!(log["data"][0].get("at").is_some());
-    assert!(beta(&fx, "viewer", "/reports/policy").await["data"][1]["policy"].get("id").is_none());
-    let (s, h, v) = call(&fx, "runner", "POST", "/api/v1beta1/policies/7/run").await;
-    assert_eq!(s, StatusCode::ACCEPTED);
-    assert_eq!(v, serde_json::json!({"policy_id": 7, "queued": true}));
-    assert!(h.get("deprecation").is_some());
+    for (role, method, path) in [
+        ("viewer", "GET", "/api/v1beta1/systems/1"),
+        ("viewer", "GET", "/api/v1beta1"),
+        ("runner", "POST", "/api/v1beta1/policies/7/run"),
+        ("admin", "DELETE", "/api/v1beta1/tokens/1"),
+        ("nobody", "GET", "/api/v1beta1/me"),
+        ("none", "GET", "/api/v1beta1/nope/at/all"),
+    ] {
+        let (s, h, v) = call(&fx, role, method, path).await;
+        assert_eq!(s, StatusCode::GONE, "{method} {path}: {v}");
+        assert_eq!(v["error"]["code"], "gone", "{path}: {v}");
+        assert!(v["error"]["message"].as_str().unwrap().contains("/api/v1"), "{v}");
+        let link = h.get("link").unwrap().to_str().unwrap();
+        assert!(link.contains(scmserver::api::MIGRATION_URL) && link.contains("rel=\"deprecation\""), "{link}");
+    }
 }

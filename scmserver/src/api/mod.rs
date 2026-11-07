@@ -1,14 +1,13 @@
 // =============================================================================
-// api/mod.rs — the REST API, /api/v1 (and /api/v1beta1 until 1.1.0)
+// api/mod.rs — the REST API, /api/v1
 //
 // Token-authenticated JSON for integrations: CI jobs, dashboards, SIEMs. The
 // design and its decisions are in docs/design/0.12.0-rest-api.md (v1beta1)
 // and docs/design/1.0.0-api-v1.md (v1).
 //
-// Both versions serve the same routes and the same handlers. A handler asks
-// `auth.v1()` and, for v1 only, shapes its answer through api::shape; the
-// v1beta1 answers are left exactly as 0.12.0 shipped them, plus a
-// Deprecation header.
+// Handlers shape their answers through api::shape. /api/v1beta1, served
+// beside v1 in 1.0 with a Deprecation header, was removed in 1.1.0: every
+// path under it answers 410 Gone (design D1).
 //
 //   • ApiAuth   — the extractor every endpoint takes. Reads
 //                 `Authorization: Bearer oscm_api_…` (never the session
@@ -44,23 +43,8 @@ pub mod write;
 pub const PREFIX: &str = "/api/v1";
 pub const PREFIX_BETA: &str = "/api/v1beta1";
 
-// Where v1beta1 responses point (Link header): the migration notes.
+// Where the 410 for /api/v1beta1 points (Link header): the migration notes.
 pub const MIGRATION_URL: &str = "https://openscm.io/guide/api/#moving-from-v1beta1";
-
-// ─────────────────────────────────────────────────────────────────────────────
-// ApiVersion — which prefix the request came in on.
-// ─────────────────────────────────────────────────────────────────────────────
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ApiVersion {
-    V1beta1,
-    V1,
-}
-
-impl ApiVersion {
-    pub fn of_path(path: &str) -> Self {
-        if path == PREFIX || path.starts_with(&format!("{PREFIX}/")) { ApiVersion::V1 } else { ApiVersion::V1beta1 }
-    }
-}
 pub const TOKEN_PREFIX: &str = "oscm_api_";
 
 // 600 requests a minute per token; past that, refused for the rest of a minute.
@@ -141,15 +125,9 @@ pub struct ApiAuth {
     /// The token's role, lowered to the owner's current role if that is less.
     pub role: UserRole,
     pub ip: String,
-    pub version: ApiVersion,
 }
 
 impl ApiAuth {
-    // True for /api/v1: the handler answers in the v1 shape.
-    pub fn v1(&self) -> bool {
-        self.version == ApiVersion::V1
-    }
-
     // ─────────────────────────────────────────────────────────────────────────
     // require — 403 unless the effective role reaches `min`.
     // ─────────────────────────────────────────────────────────────────────────
@@ -298,7 +276,6 @@ where
             username: t.username,
             role,
             ip,
-            version: ApiVersion::of_path(parts.uri.path()),
         })
     }
 }
@@ -362,7 +339,7 @@ impl Page {
 // last row returned — or the request's own cursor when the page is empty —
 // so a poller saves it and later gets only the rows added since.
 // ─────────────────────────────────────────────────────────────────────────────
-pub fn page_of(auth: &ApiAuth, page: &Page, mut rows: Vec<serde_json::Value>, ids: Vec<i64>, limit: i64)
+pub fn page_of(page: &Page, mut rows: Vec<serde_json::Value>, ids: Vec<i64>, limit: i64)
     -> Json<serde_json::Value>
 {
     use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine as _};
@@ -373,9 +350,6 @@ pub fn page_of(auth: &ApiAuth, page: &Page, mut rows: Vec<serde_json::Value>, id
     } else {
         None
     };
-    if !auth.v1() {
-        return Json(json!({"data": rows, "next_cursor": next}));
-    }
     let resume = match rows.len().checked_sub(1).and_then(|i| ids.get(i)) {
         Some(last) => URL_SAFE_NO_PAD.encode(last.to_string()),
         None => page.cursor.clone().filter(|c| !c.is_empty())
@@ -390,28 +364,33 @@ async fn not_found() -> ApiError {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Helper: deprecated — marks every v1beta1 response (design D1): a
-// Deprecation header and a Link to the migration notes.
+// Helper: gone — every /api/v1beta1 path since 1.1.0 (design D1): 410 with
+// where to go instead, and a Link to the migration notes. No token check: the
+// answer is the same for everyone, and a script with an old token should
+// still be told why.
 // ─────────────────────────────────────────────────────────────────────────────
-async fn deprecated(mut resp: Response) -> Response {
-    let h = resp.headers_mut();
-    h.insert("deprecation", HeaderValue::from_static("true"));
+async fn gone() -> Response {
+    let mut resp = ApiError::new(
+        StatusCode::GONE, "gone",
+        format!("{PREFIX_BETA} was removed in 1.1.0. Use {PREFIX} — see {MIGRATION_URL}"),
+    ).into_response();
     if let Ok(v) = HeaderValue::from_str(&format!("<{MIGRATION_URL}>; rel=\"deprecation\"")) {
-        h.insert(axum::http::header::LINK, v);
+        resp.headers_mut().insert(axum::http::header::LINK, v);
     }
     resp
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
 // router — every API route, merged into create_core_router: the route list
-// below under /api/v1, and again under /api/v1beta1 with the Deprecation
-// header. tests/api_spec.rs reads the `.route(&p(…))` calls in this file
-// after `pub fn router`, so keep routes() below it.
+// below under /api/v1, and 410 Gone for the removed /api/v1beta1.
+// tests/api_spec.rs reads the `.route(&p(…))` calls in this file after
+// `pub fn router`, so keep routes() below it.
 // ─────────────────────────────────────────────────────────────────────────────
 pub fn router<S: Clone + Send + Sync + 'static>() -> Router<S> {
     Router::new()
         .merge(routes(PREFIX))
-        .merge(routes(PREFIX_BETA).layer(axum::middleware::map_response(deprecated)))
+        .route(PREFIX_BETA, axum::routing::any(gone))
+        .route(&format!("{PREFIX_BETA}/{{*rest}}"), axum::routing::any(gone))
         .route("/api/{*rest}", axum::routing::any(not_found))
 }
 
@@ -457,13 +436,6 @@ mod tests {
         assert!(raw.starts_with(&prefix) && prefix.len() < raw.len());
         assert_eq!(hash, hash_token(&raw));
         assert_ne!(generate_token().0, raw);
-    }
-
-    #[test]
-    fn the_version_comes_from_the_prefix() {
-        assert_eq!(ApiVersion::of_path("/api/v1/systems"), ApiVersion::V1);
-        assert_eq!(ApiVersion::of_path("/api/v1"), ApiVersion::V1);
-        assert_eq!(ApiVersion::of_path("/api/v1beta1/systems"), ApiVersion::V1beta1);
     }
 
     #[test]

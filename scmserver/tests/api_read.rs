@@ -1,4 +1,4 @@
-// api_read.rs — the read endpoints of /api/v1beta1.
+// api_read.rs — the read endpoints of /api/v1.
 //
 // Lists page by cursor; nothing from another organization is ever visible
 // (it is 404, not 403, so ids cannot be probed); compliance is the same data
@@ -71,7 +71,7 @@ async fn fixture() -> Fx {
 
 async fn get(fx: &Fx, tok: &str, path: &str) -> (StatusCode, Value, Vec<u8>) {
     let resp = fx.app.clone().oneshot(
-        Request::get(format!("/api/v1beta1{path}")).header("authorization", format!("Bearer {tok}"))
+        Request::get(format!("/api/v1{path}")).header("authorization", format!("Bearer {tok}"))
             .body(Body::empty()).unwrap(),
     ).await.unwrap();
     let status = resp.status();
@@ -108,7 +108,7 @@ async fn system_filters_and_fields() {
     assert_eq!(s1["online"], true);
     assert_eq!(s1["groups"][0]["name"], "web");
     assert_eq!(s1["compliance"]["score"], 80.0);
-    assert!(s1["last_seen"].as_str().unwrap().ends_with('Z'));
+    assert!(s1["last_seen_at"].as_str().unwrap().ends_with('Z'));
     assert_eq!(get(&fx, &fx.viewer, "/systems/2").await.1["online"], false, "3 hours > 60 minutes");
     assert_eq!(get(&fx, &fx.viewer, "/systems/3").await.1["online"], true, "never seen is not offline");
 }

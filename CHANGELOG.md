@@ -15,6 +15,7 @@ All notable changes to OpenSCM are documented here.
   ```
 
   For folders mounted from the host, run `sudo chown -R 65532:65532 <folder>` instead. To keep running as root, start the container with `--user 0` (Compose: `user: "0"`).
+- **`/api/v1beta1` is gone.** Every path under it now answers `410 Gone`. Scripts still using it must move to `/api/v1`: change the address, then check them against the **Moving from v1beta1** table in the API guide. `/api/v1` answers are unchanged.
 
 ### Security
 - **The Docker image runs as an unprivileged user (65532) instead of root**, so a flaw in the server no longer runs as root inside the container. At startup the server now checks it can use its config and data folders, and if not, stops with the exact command that fixes it instead of a database or key error (package installs too). See **Upgrade notes** above.
@@ -23,6 +24,9 @@ All notable changes to OpenSCM are documented here.
 - **Fix scripts on tests (remediation, part 1).** A test can now carry an optional shell fix script (Linux, Unix, macOS) and an optional PowerShell fix script (Windows), next to the Remediation text. Policy export and import carry them; importing a file without scripts keeps the ones a test already has. Running a fix from a failed result comes in a later 1.1.0 step (`docs/design/1.1.0-remediation.md`). Schema v52.
 - **Agents run fix scripts (remediation, part 2).** The agent now reports its `cmd_enabled` / `ps_enabled` settings on each check-in. When a fix is queued for it, it checks its own config, the platform and the script's SHA-256, runs the script (shell with `/bin/sh`, PowerShell on Windows) with a 300-second limit, reports the exit code and output to the new signed `POST /fix_result`, and checks the test again straight away. A fix not picked up within 24 hours expires. Agents before 1.1.0 are never sent fixes. Each reported fix is in the audit log (`fix.result`). The Fix button that queues one comes in the next step.
 - **Fix button on the live reports (remediation, part 3).** A failed result whose test has a fix script for the system's OS gets a **Fix** button on the policy and system reports. It opens a dialog showing the exact script and system; **Run fix** queues it, and a queued fix can be cancelled until the agent picks it up. The button is gray, with the reason on hover, when the system's `cmd_enabled` / `ps_enabled` is off, its agent is older than 1.1.0, or the user is below Editor. Everything is checked again when the fix is queued. The result row shows "Fix queued", "Fixing…", and the last fix's outcome and output. Audited as `fix.queue` and `fix.cancel`. See **Compliance Tests → Fix Scripts** in the docs.
+
+### Removed
+- **`/api/v1beta1`**, deprecated since 1.0.0. Every path under it, with or without a token, now answers `410 Gone` in JSON with a `Link` header to the migration notes. The beta's OpenAPI file (`docs/api/openapi-v1beta1.yaml`) is removed. See **Upgrade notes** above.
 
 ---
 

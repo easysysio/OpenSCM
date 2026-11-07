@@ -8,8 +8,8 @@ info:
 
     **Stability.** Frozen from OpenSCM 1.0.0: fields and endpoints may be
     added, but nothing is renamed or removed, or changes type or meaning. A
-    breaking change would be `/api/v2`. The deprecated beta, `/api/v1beta1`,
-    is described in openapi-v1beta1.yaml until 1.1.0 removes it.
+    breaking change would be `/api/v2`. The beta, `/api/v1beta1`, was
+    removed in 1.1.0: every path under it answers 410 Gone.
 
     **Authentication.** Every request sends an API token, created under
     *user menu → API tokens*:

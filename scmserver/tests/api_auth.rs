@@ -72,7 +72,7 @@ async fn me(pool: &SqlitePool, tok: &str) -> (StatusCode, Value) {
 
 // Building the router parses every template; reuse one for many requests.
 async fn me_on(app: &axum::Router, tok: &str) -> (StatusCode, Value) {
-    let (s, v, _) = call(app.clone(), "/api/v1beta1/me", Some(("authorization", format!("Bearer {tok}")))).await;
+    let (s, v, _) = call(app.clone(), "/api/v1/me", Some(("authorization", format!("Bearer {tok}")))).await;
     (s, v)
 }
 
@@ -91,7 +91,7 @@ async fn a_valid_token_says_who_it_is() {
 #[tokio::test]
 async fn no_token_or_a_foreign_one_is_refused_in_json() {
     let pool = db().await;
-    let (s, v, _) = call(app(&pool, true), "/api/v1beta1/me", None).await;
+    let (s, v, _) = call(app(&pool, true), "/api/v1/me", None).await;
     assert_eq!(s, StatusCode::UNAUTHORIZED);
     assert_eq!(v["error"]["code"], "unauthorized");
     let (s, _) = me(&pool, "oscm_abc123").await;
@@ -103,7 +103,7 @@ async fn no_token_or_a_foreign_one_is_refused_in_json() {
 #[tokio::test]
 async fn the_session_cookie_is_not_accepted() {
     let pool = db().await;
-    let (s, _, _) = call(app(&pool, true), "/api/v1beta1/me", Some(("cookie", "session=anything".into()))).await;
+    let (s, _, _) = call(app(&pool, true), "/api/v1/me", Some(("cookie", "session=anything".into()))).await;
     assert_eq!(s, StatusCode::UNAUTHORIZED);
 }
 
@@ -146,7 +146,7 @@ async fn too_many_requests_get_429_with_retry_after() {
     for i in 0..RATE_PER_MINUTE {
         assert_eq!(me_on(&app, &tok).await.0, StatusCode::OK, "request {i}");
     }
-    let (s, v, h) = call(app.clone(), "/api/v1beta1/me", Some(("authorization", format!("Bearer {tok}")))).await;
+    let (s, v, h) = call(app.clone(), "/api/v1/me", Some(("authorization", format!("Bearer {tok}")))).await;
     assert_eq!(s, StatusCode::TOO_MANY_REQUESTS);
     assert_eq!(v["error"]["code"], "rate_limited");
     assert!(h.get("retry-after").is_some());
@@ -155,9 +155,9 @@ async fn too_many_requests_get_429_with_retry_after() {
 #[tokio::test]
 async fn unknown_paths_and_an_uninstalled_server_answer_in_json() {
     let pool = db().await;
-    let (s, v, _) = call(app(&pool, true), "/api/v1beta1/nope", None).await;
+    let (s, v, _) = call(app(&pool, true), "/api/v1/nope", None).await;
     assert_eq!((s, v["error"]["code"].as_str()), (StatusCode::NOT_FOUND, Some("not_found")));
-    let (s, v, _) = call(app(&pool, false), "/api/v1beta1/me", None).await;
+    let (s, v, _) = call(app(&pool, false), "/api/v1/me", None).await;
     assert_eq!((s, v["error"]["code"].as_str()), (StatusCode::SERVICE_UNAVAILABLE, Some("not_installed")));
 }
 
