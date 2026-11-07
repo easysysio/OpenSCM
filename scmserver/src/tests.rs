@@ -201,6 +201,87 @@ fn build_tests_with_conditions(
 
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Helper: policies_of_tests
+// The policies each of the tenant's tests is in, as (id, name) by test id,
+// names in order. `only` limits it to one test.
+// ─────────────────────────────────────────────────────────────────────────────
+pub async fn policies_of_tests(
+    pool: &SqlitePool,
+    tenant_id: &str,
+    only: Option<i64>,
+) -> HashMap<i64, Vec<(i64, String)>> {
+    let rows = sqlx::query(
+        "SELECT tip.test_id, p.id, p.name FROM tests_in_policy tip
+         JOIN policies p ON p.id = tip.policy_id AND p.tenant_id = tip.tenant_id
+         WHERE tip.tenant_id = ? AND (? IS NULL OR tip.test_id = ?)
+         ORDER BY p.name, p.id",
+    )
+    .bind(tenant_id).bind(only).bind(only)
+    .fetch_all(pool).await
+    .unwrap_or_else(|e| { error!("Failed to load the policies of tests: {}", e); Vec::new() });
+    let mut out: HashMap<i64, Vec<(i64, String)>> = HashMap::new();
+    for r in rows {
+        out.entry(r.get("test_id")).or_default().push((r.get("id"), r.get("name")));
+    }
+    out
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Helper: delete_warning
+// The delete dialog's text: names the policies the test will be removed from.
+// ─────────────────────────────────────────────────────────────────────────────
+pub fn delete_warning(policies: &[(i64, String)]) -> String {
+    let tail = "Its results on every system are lost. This cannot be undone.";
+    match policies.len() {
+        0 => format!("Delete this test? It is not in any policy. {tail}"),
+        n => {
+            let names: Vec<&str> = policies.iter().map(|(_, name)| name.as_str()).collect();
+            let what = if n == 1 { "1 policy".to_string() } else { format!("{n} policies") };
+            format!("This test is in {what}: {}. Deleting it removes it from {}. {tail}",
+                names.join(", "), if n == 1 { "that policy" } else { "them" })
+        }
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Helper: delete_test
+// Deletes one test of the tenant and records test.delete in the audit log
+// with the policies it was removed from. Ok(false): no such test.
+// ─────────────────────────────────────────────────────────────────────────────
+async fn delete_test(
+    pool: &SqlitePool,
+    auth: &AuthSession,
+    ip: &str,
+    id: i64,
+) -> Result<bool, sqlx::Error> {
+    // What the audit entry records, read before the rows are gone.
+    let name: Option<String> = sqlx::query_scalar("SELECT name FROM tests WHERE id = ? AND tenant_id = ?")
+        .bind(id).bind(&auth.tenant_id).fetch_optional(pool).await?;
+    let Some(name) = name else { return Ok(false) };
+    let policies = policies_of_tests(pool, &auth.tenant_id, Some(id)).await
+        .remove(&id).unwrap_or_default();
+
+    // ON DELETE CASCADE removes its conditions, policy links, results,
+    // commands and fix runs — no transaction needed.
+    sqlx::query("DELETE FROM tests WHERE id = ? AND tenant_id = ?")
+        .bind(id).bind(&auth.tenant_id).execute(pool).await?;
+
+    crate::audit::record(
+        pool, &auth.tenant_id,
+        Some(auth), Some(ip),
+        "test.delete",
+        Some("test"), Some(&id.to_string()),
+        Some(serde_json::json!({
+            "name": name,
+            "removed_from_policies": policies.iter()
+                .map(|(pid, pname)| serde_json::json!({"id": pid, "name": pname}))
+                .collect::<Vec<_>>(),
+        })),
+    ).await;
+    Ok(true)
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // GET /tests
 // List all compliance tests with their conditions for the current tenant.
 // Role: Viewer
@@ -262,11 +343,21 @@ pub async fn tests(
     .map(|r| (r.get("id"), r.get("name")))
     .collect();
 
+    // Each test row carries its delete dialog text (the policies it is in).
+    let in_policies = policies_of_tests(&pool, &auth.tenant_id, None).await;
+    let tests_view: Vec<serde_json::Value> = tests_with_conditions.iter().map(|t| {
+        let mut v = serde_json::to_value(t).unwrap_or_default();
+        let pols = in_policies.get(&(t.test.id.unwrap_or(0) as i64)).map(Vec::as_slice).unwrap_or(&[]);
+        v["delete_warning"] = serde_json::Value::String(delete_warning(pols));
+        v["policy_names"] = serde_json::json!(pols.iter().map(|(_, n)| n).collect::<Vec<_>>());
+        v
+    }).collect();
+
     let mut context = Context::new();
     if let Some(msg) = query.error_message { context.insert("error_message", &msg); }
     if let Some(msg) = query.success_message { context.insert("success_message", &msg); }
     context.insert("policies", &policies);
-    context.insert("tests", &tests_with_conditions);
+    context.insert("tests", &tests_view);
     render_template(&tera, Some(&pool), "tests.html", context, Some(auth))
         .await.into_response()
 }
@@ -464,16 +555,14 @@ pub async fn tests_delete(
     Path(id): Path<i32>,
     Extension(pool): Extension<SqlitePool>,
     Extension(sync_tx): Extension<mpsc::Sender<()>>,
+    ip: crate::handlers::ClientIp,
 ) -> impl IntoResponse {
 
     if let Some(redir) = auth::authorize(&auth.role, UserRole::Editor) {
         return redir;
     }
 
-    // ON DELETE CASCADE handles test_conditions — no transaction needed
-    if let Err(e) = sqlx::query("DELETE FROM tests WHERE id = ? AND tenant_id = ?")
-        .bind(id).bind(&auth.tenant_id).execute(&pool).await
-    {
+    if let Err(e) = delete_test(&pool, &auth, ip.as_str(), id as i64).await {
         error!("Failed to delete test {}: {}", id, e);
         let encoded = urlencoding::encode(&format!("Error deleting test: {}", e)).to_string();
         return Redirect::to(&format!("/tests?error_message={}", encoded)).into_response();
@@ -575,6 +664,9 @@ pub async fn tests_edit(
     context.insert("fix_sh", &fix_sh.unwrap_or_default());
     context.insert("fix_ps", &fix_ps.unwrap_or_default());
     context.insert("test", &test);
+    let in_policies = policies_of_tests(&pool, &auth.tenant_id, Some(id as i64)).await;
+    context.insert("delete_warning",
+        &delete_warning(in_policies.get(&(id as i64)).map(Vec::as_slice).unwrap_or(&[])));
     context.insert("test_conds", &test_conds);
     context.insert("app_conditions", &app_conditions);
     render_template(&tera, Some(&pool), "tests_edit.html", context, Some(auth))
@@ -732,6 +824,7 @@ pub async fn tests_bulk_delete(
     auth: AuthSession,
     Extension(pool): Extension<SqlitePool>,
     Extension(sync_tx): Extension<mpsc::Sender<()>>,
+    ip: crate::handlers::ClientIp,
     raw_form: RawForm,
 ) -> impl IntoResponse {
 
@@ -756,12 +849,10 @@ pub async fn tests_bulk_delete(
 
     let mut deleted = 0usize;
     for id in &ids {
-        if let Err(e) = sqlx::query("DELETE FROM tests WHERE id = ? AND tenant_id = ?")
-            .bind(id).bind(&auth.tenant_id).execute(&pool).await
-        {
-            error!("Bulk delete: failed for test {}: {}", id, e);
-        } else {
-            deleted += 1;
+        match delete_test(&pool, &auth, ip.as_str(), *id as i64).await {
+            Ok(true) => deleted += 1,
+            Ok(false) => {}
+            Err(e) => error!("Bulk delete: failed for test {}: {}", id, e),
         }
     }
 

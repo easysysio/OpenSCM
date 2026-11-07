@@ -439,6 +439,13 @@ the bulk toolbar that appears at the top of the table:
 | **Add to Policy** | Add all selected tests to a chosen policy |
 | **Delete** | Permanently remove all selected tests |
 
+!!! warning "Deleting a test removes it from its policies"
+    A deleted test is taken out of every policy it is in, and its results on
+    every system are lost. Saved reports keep it. Before you confirm, the
+    delete dialog (on the tests list, the edit page and the bulk toolbar)
+    names those policies. Each deletion is recorded in the audit log as
+    `test.delete`, with the test's name and the policies it was removed from.
+
 The **Select All** checkbox in the header selects all rows matching the current
 search filter, not just the visible page.
 

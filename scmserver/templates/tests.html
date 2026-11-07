@@ -114,7 +114,7 @@
               <tr>
                 <td>{{ test.id }}</td>
                 <td class="text-center">
-                  <label for="select_test_{{ test.id }}" class="sr-only">Select test</label><input id="select_test_{{ test.id }}" type="checkbox" class="row-checkbox" value="{{ test.id }}" title="Select">
+                  <label for="select_test_{{ test.id }}" class="sr-only">Select test</label><input id="select_test_{{ test.id }}" type="checkbox" class="row-checkbox" value="{{ test.id }}" title="Select" data-policies="{{ test.policy_names | json_encode }}">
                 </td>
                 <td><strong>{{ test.name }}</strong></td>
                 <td>{{ test.description | default(value="") | truncate(length=65) }}</td>
@@ -165,7 +165,8 @@
                      <i class="fas {% if is_editor %}fa-pencil-alt{% else %}fa-lock{% endif %}"></i>
                   </a>
                   <a class="btn btn-danger btn-sm {% if not is_editor %}disabled{% endif %}"
-                     onclick="postTo('{% if is_editor %}/tests/delete/{{ test.id }}{% else %}#{% endif %}', 'Delete test? All historical data will be lost.'); return false;"
+                     data-confirm="{{ test.delete_warning }}"
+                     onclick="postTo('{% if is_editor %}/tests/delete/{{ test.id }}{% else %}#{% endif %}', this.dataset.confirm); return false;"
                      href="#"
                      title="{% if is_editor %}Delete{% else %}Permission Required{% endif %}"
                      {% if not is_editor %}style="opacity: 0.5; cursor: not-allowed;"{% endif %}>
@@ -478,7 +479,24 @@ $(function () {
     $('#bulk-delete-btn').on('click', function() {
         const ids = getSelectedIds();
         if (!ids.length) return;
-        confirmAction('Delete ' + ids.length + ' test(s)? All historical data will be lost.', function () {
+        // Name the policies the selected tests will be removed from.
+        const names = new Set();
+        let inPolicies = 0;
+        $('.row-checkbox:checked').each(function () {
+            let pols = [];
+            try { pols = JSON.parse(this.dataset.policies || '[]'); } catch (e) { pols = []; }
+            if (pols.length) { inPolicies++; }
+            pols.forEach(function (n) { names.add(n); });
+        });
+        let msg = 'Delete ' + ids.length + ' test(s)? ';
+        if (inPolicies) {
+            msg += inPolicies + ' of them ' + (inPolicies === 1 ? 'is' : 'are') + ' in policies (' +
+                   Array.from(names).join(', ') + ') and will be removed from them. ';
+        } else {
+            msg += 'None of them is in a policy. ';
+        }
+        msg += 'Their results on every system are lost. This cannot be undone.';
+        confirmAction(msg, function () {
             const container = $('#bulk-delete-ids').empty();
             ids.forEach(function(id) {
                 container.append('<input type="hidden" name="ids" value="' + id + '">');
