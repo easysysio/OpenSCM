@@ -2,7 +2,8 @@
 //
 // Deleting a test removes it from every policy it is in. The delete dialog
 // (tests list and edit page) names those policies first, and the deletion is
-// recorded in the audit log as test.delete with the policies it left.
+// recorded in the audit log as test.delete with the policies it left. The
+// tests list can show only the tests in no policy, to clean them up.
 
 use axum::body::Body;
 use axum::http::{Request, StatusCode};
@@ -124,4 +125,23 @@ async fn bulk_delete_warns_and_audits_each_test() {
         "SELECT target_id FROM audit_log WHERE action = 'test.delete' ORDER BY target_id")
         .fetch_all(&pool).await.unwrap();
     assert_eq!(rows, vec![(Some("5".into()),), (Some("6".into()),)]);
+}
+
+// The "Show" filter on the tests list: each row says whether its test is in
+// a policy, and the bulk actions take the ticked rows of every page of the
+// filtered table, not only the page on screen.
+#[tokio::test]
+async fn the_list_can_show_tests_in_no_policy() {
+    let (app, _pool, cookie) = fixture().await;
+    let (_, list) = send(&app, &cookie, "GET", "/tests").await;
+    assert!(list.contains(r#"<option value="none">Not in a policy</option>"#));
+    let row = |id: &str| {
+        let at = list.find(&format!(r#"id="select_test_{id}""#)).unwrap();
+        let tr = list[..at].rfind("<tr ").unwrap();
+        list[tr..at].to_string()
+    };
+    assert!(row("5").contains(r#"data-in-policy="1""#));
+    assert!(row("6").contains(r#"data-in-policy="0""#));
+    assert!(list.contains("table.rows({ search: 'applied' }).nodes()).find('.row-checkbox:checked')"));
+    assert!(!list.contains("$('.row-checkbox:checked')"), "selection must not be limited to the page on screen");
 }

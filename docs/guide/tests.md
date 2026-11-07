@@ -449,5 +449,12 @@ the bulk toolbar that appears at the top of the table:
 The **Select All** checkbox in the header selects all rows matching the current
 search filter, not just the visible page.
 
+**Cleaning up unused tests.** The **Show** list next to **New Test** filters
+the table to **In a policy** or **Not in a policy**. To delete every test that
+no policy uses, choose **Not in a policy**, tick **Select All**, review the
+selection, and click **Delete**. Changing the filter clears the selection, so
+a test hidden by the filter is never deleted by mistake. A link to
+`/tests?policy=none` opens the page already filtered.
+
 !!! note "Editor role required"
     Bulk actions require at least the **Editor** role.

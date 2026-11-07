@@ -76,6 +76,12 @@
         <div class="card-header border-0">
           <h3 class="card-title">Compliance Definitions</h3>
           <div class="card-tools">
+            <label for="policy-filter" class="sr-only">Show tests</label>
+            <select id="policy-filter" class="form-control form-control-sm d-inline-block w-auto mr-2" title="Show tests">
+              <option value="">All tests</option>
+              <option value="in">In a policy</option>
+              <option value="none">Not in a policy</option>
+            </select>
             <a href="{% if is_editor %}/tests/add{% else %}#{% endif %}" class="btn btn-primary btn-sm {% if not is_editor %}disabled{% endif %}">
               <i class="fas {% if is_editor %}fa-vial{% else %}fa-lock{% endif %} mr-1"></i> New Test
             </a>
@@ -111,7 +117,7 @@
             <tbody>
               {% for test in tests %}
               {% set sev = test.severity | default(value="") | lower | trim %}
-              <tr>
+              <tr data-in-policy="{% if test.policy_names | length > 0 %}1{% else %}0{% endif %}">
                 <td>{{ test.id }}</td>
                 <td class="text-center">
                   <label for="select_test_{{ test.id }}" class="sr-only">Select test</label><input id="select_test_{{ test.id }}" type="checkbox" class="row-checkbox" value="{{ test.id }}" title="Select" data-policies="{{ test.policy_names | json_encode }}">
@@ -448,9 +454,36 @@ $(function () {
 
     table.buttons().container().appendTo('#tests_table_wrapper .col-md-6:eq(0)');
 
+    // Policy filter: all tests, those in a policy, or those in none.
+    // ?policy=none (or =in) opens the page filtered.
+    $.fn.dataTable.ext.search.push(function (settings, data, dataIndex) {
+        if (settings.nTable.id !== 'tests_table') { return true; }
+        const want = $('#policy-filter').val();
+        if (!want) { return true; }
+        const inPolicy = settings.aoData[dataIndex].nTr.getAttribute('data-in-policy') === '1';
+        return want === 'in' ? inPolicy : !inPolicy;
+    });
+    $('#policy-filter').on('change', function () {
+        // Clear the selection so no hidden test stays selected.
+        $(table.rows().nodes()).find('.row-checkbox').prop('checked', false);
+        $('#select-all').prop('checked', false);
+        table.draw();
+        updateBulkToolbar();
+    });
+    const startFilter = new URLSearchParams(window.location.search).get('policy');
+    if (startFilter === 'in' || startFilter === 'none') {
+        $('#policy-filter').val(startFilter);
+        table.draw();
+    }
+
     // 3. Checkbox / bulk toolbar logic
+    // The ticked rows on every page of the table as filtered — not only the
+    // page on screen, which is all the DOM holds.
+    function selectedBoxes() {
+        return $(table.rows({ search: 'applied' }).nodes()).find('.row-checkbox:checked');
+    }
     function getSelectedIds() {
-        return $('.row-checkbox:checked').map(function() { return $(this).val(); }).get();
+        return selectedBoxes().map(function() { return $(this).val(); }).get();
     }
 
     function updateBulkToolbar() {
@@ -482,7 +515,7 @@ $(function () {
         // Name the policies the selected tests will be removed from.
         const names = new Set();
         let inPolicies = 0;
-        $('.row-checkbox:checked').each(function () {
+        selectedBoxes().each(function () {
             let pols = [];
             try { pols = JSON.parse(this.dataset.policies || '[]'); } catch (e) { pols = []; }
             if (pols.length) { inPolicies++; }
