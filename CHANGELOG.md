@@ -6,6 +6,10 @@ All notable changes to OpenSCM are documented here.
 
 ## [Unreleased]
 
+---
+
+## [1.1.1] - 2026-11-08
+
 ### Added
 - **"Not in a policy" filter on the Tests page.** A **Show** list next to **New Test** filters the table to tests in a policy or in none, so unused tests can be selected and bulk-deleted in one go (`/tests?policy=none` opens it filtered).
 
