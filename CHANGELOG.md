@@ -6,6 +6,10 @@ All notable changes to OpenSCM are documented here.
 
 ## [Unreleased]
 
+---
+
+## [1.1.2] - 2026-11-08
+
 ### Fixed
 - **A fix whose result never arrived stayed at "Fixing…" forever** and blocked any new fix for that finding. This happened when a web application firewall or proxy blocked the agent's result, or the agent stopped mid-run. After 10 minutes with no result (the script's 5-minute limit plus 5 minutes), the row now shows "Last fix: no result from the agent within 10 minutes" and the Fix button is back. A result that still arrives later is recorded.
 
