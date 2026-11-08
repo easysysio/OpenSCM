@@ -424,8 +424,10 @@ fix queued, cancelled or reported is recorded in the audit log
     own `cmd_enabled` / `ps_enabled` before running any fix, so the server
     cannot run scripts on a system whose owner has not turned them on.
 
-Policy export and import carry fix scripts. Policies installed from the
-**Policy Store** (SaaS) never bring fix scripts.
+Policy export and import carry fix scripts, and so do policies installed from
+the **Policy Store** (SaaS). Read a store script in the Fix dialog before you
+run it. Updating a policy replaces a test's fix script when the new file has
+one; a test with no script in the file keeps your own.
 
 ---
 
