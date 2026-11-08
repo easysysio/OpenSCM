@@ -124,6 +124,17 @@ fn a_running_fix_and_the_last_outcome_are_shown() {
 }
 
 #[test]
+fn a_lost_fix_says_no_result_arrived() {
+    for tpl in PAGES {
+        let lost = FixView { last: Some(LastFix {
+            status: "lost".into(), exit_code: None, output: None,
+            finished_at: Some("2026-11-08 18:20:00".into()),
+        }), ..Default::default() };
+        assert!(render(tpl, true, Some(lost)).contains("no result from the agent within 10 minutes"), "{tpl}");
+    }
+}
+
+#[test]
 fn no_fix_no_controls() {
     for tpl in PAGES {
         let h = render(tpl, true, None);
@@ -277,4 +288,34 @@ async fn a_fix_already_sent_cannot_be_cancelled_and_its_outcome_is_shown() {
     let v = v[0].as_ref().expect("last fix shown on the now-passing result");
     assert_eq!(v.state, None);
     assert_eq!(v.last.as_ref().map(|l| (l.status.as_str(), l.exit_code)), Some(("done", Some(0))));
+}
+
+#[tokio::test]
+async fn a_fix_whose_result_never_arrives_stops_blocking_the_button() {
+    let pool = db().await;
+    let e = editor();
+    queue_fix(&pool, &e, "127.0.0.1", 1, 10).await.unwrap();
+    sqlx::query("UPDATE fix_runs SET status = 'sent', sent_at = datetime('now', '-11 minutes')")
+        .execute(&pool).await.unwrap();
+
+    // Opening the report clears it: the button is back, with the lost run under it.
+    let v = annotate(&pool, true, vec![row(1, 10, "FAIL")]).await;
+    assert_eq!(state(&v[0]), Some("ready"));
+    assert_eq!(v[0].as_ref().unwrap().last.as_ref().map(|l| l.status.as_str()), Some("lost"));
+
+    // And it can be run again.
+    queue_fix(&pool, &e, "127.0.0.1", 1, 10).await.unwrap();
+    let open: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM fix_runs WHERE status = 'queued'")
+        .fetch_one(&pool).await.unwrap();
+    assert_eq!(open, 1);
+}
+
+#[tokio::test]
+async fn clicking_fix_clears_a_stuck_run_without_the_page() {
+    let pool = db().await;
+    let e = editor();
+    queue_fix(&pool, &e, "127.0.0.1", 1, 10).await.unwrap();
+    sqlx::query("UPDATE fix_runs SET status = 'sent', sent_at = datetime('now', '-11 minutes')")
+        .execute(&pool).await.unwrap();
+    queue_fix(&pool, &e, "127.0.0.1", 1, 10).await.expect("a stuck run must not block a new fix");
 }

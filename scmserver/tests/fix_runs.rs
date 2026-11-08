@@ -6,6 +6,7 @@
 //   • a queued fix goes out once, with its hash, timeout and test
 //   • agents before 1.1.0 (no settings reported) are never sent fixes
 //   • a fix nobody picks up expires after 24 hours
+//   • a sent fix with no result after 10 minutes is lost; a late result counts
 //   • only the system a fix was sent to can report it, once, signed
 
 use axum::body::Body;
@@ -217,4 +218,28 @@ async fn only_the_system_a_fix_was_sent_to_can_report_it() {
     assert_eq!(status, StatusCode::BAD_REQUEST);
 
     assert_eq!(status_of(&pool, id).await, "sent");
+}
+
+#[tokio::test]
+async fn a_sent_fix_with_no_result_is_lost_and_a_late_result_still_counts() {
+    let (pool, k1, _) = setup().await;
+    let id = queue(&pool, 1).await;
+    heartbeat(&pool, 1, &k1, Some((true, false))).await;
+    assert_eq!(status_of(&pool, id).await, "sent");
+
+    // Still within the script's 5 minutes plus 5 for the result: left alone.
+    sqlx::query("UPDATE fix_runs SET sent_at = datetime('now', '-9 minutes') WHERE id = ?")
+        .bind(id).execute(&pool).await.unwrap();
+    heartbeat(&pool, 1, &k1, Some((true, false))).await;
+    assert_eq!(status_of(&pool, id).await, "sent");
+
+    sqlx::query("UPDATE fix_runs SET sent_at = datetime('now', '-11 minutes') WHERE id = ?")
+        .bind(id).execute(&pool).await.unwrap();
+    heartbeat(&pool, 1, &k1, Some((true, false))).await;
+    assert_eq!(status_of(&pool, id).await, "lost");
+
+    // The result shows up after all (a proxy let it through on a retry).
+    let (status, body) = post_signed(&pool, "/fix_result", &k1, report(1, id, "done")).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(status_of(&pool, id).await, "done");
 }

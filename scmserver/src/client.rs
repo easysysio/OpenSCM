@@ -1483,7 +1483,8 @@ async fn ingest_containers(
 // Records what the agent did with a fix it was sent (docs/design/
 // 1.1.0-remediation.md §4): done, failed, timeout or refused, with the exit
 // code and output. Only the system the fix was sent to can report it, and
-// only once (the run must still be `sent`).
+// only once (the run must still be `sent`, or `lost` when the result is late:
+// see fixes::mark_lost).
 // ─────────────────────────────────────────────────────────────────────────────
 pub async fn receive_fix_result(
     Extension(pool): Extension<SqlitePool>,
@@ -1536,7 +1537,7 @@ pub async fn receive_fix_result(
     let output = payload.output.as_deref().map(crate::fixes::cap_output);
     let updated = sqlx::query(
         "UPDATE fix_runs SET status = ?, exit_code = ?, output = ?, finished_at = CURRENT_TIMESTAMP
-          WHERE id = ? AND tenant_id = ? AND system_id = ? AND status = 'sent'",
+          WHERE id = ? AND tenant_id = ? AND system_id = ? AND status IN ('sent', 'lost')",
     )
     .bind(&payload.status).bind(payload.exit_code).bind(&output)
     .bind(payload.fix_id).bind(tenant_id).bind(payload.client_id)

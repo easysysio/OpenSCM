@@ -8,6 +8,8 @@
 //
 // Status flow: queued → sent → done | failed | timeout | refused.
 // A queued run nobody picks up within FIX_EXPIRY_HOURS becomes expired.
+// A sent run with no result within FIX_LOST_SECS becomes lost (the result was
+// blocked or the agent died); a result that still arrives later is kept.
 // =============================================================================
 
 use serde::{Deserialize, Serialize};
@@ -21,6 +23,12 @@ pub const FIX_TIMEOUT_SECS: i64 = 300;
 
 // A queued fix not picked up within this many hours is expired.
 pub const FIX_EXPIRY_HOURS: i64 = 24;
+
+// A sent fix with no result after this many seconds is lost: the script's own
+// limit plus five minutes for the result to arrive. Without it, a result that
+// never arrives (a proxy blocked it, the agent restarted) leaves the row at
+// "Fixing…" and blocks any new fix for that finding forever.
+pub const FIX_LOST_SECS: i64 = FIX_TIMEOUT_SECS + 300;
 
 // The most script output kept per fix run.
 pub const FIX_OUTPUT_MAX: usize = 64 * 1024;
@@ -108,6 +116,7 @@ pub async fn take_queued_fixes(
     )
     .bind(tenant_id).bind(system_id).bind(format!("-{FIX_EXPIRY_HOURS} hours"))
     .execute(&mut *conn).await?;
+    mark_lost(&mut *conn, tenant_id).await?;
 
     if !agent_can_fix {
         return Ok(Vec::new());
@@ -139,6 +148,25 @@ pub async fn take_queued_fixes(
         });
     }
     Ok(fixes)
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// mark_lost
+// Marks the organization's sent runs with no result after FIX_LOST_SECS as
+// lost. Run wherever an open run matters: the heartbeat, the report page and
+// queueing, so a stuck run clears without waiting for the agent.
+// ─────────────────────────────────────────────────────────────────────────────
+pub async fn mark_lost<'e, E>(exec: E, tenant_id: &str) -> Result<u64, sqlx::Error>
+where
+    E: sqlx::Executor<'e, Database = sqlx::Sqlite>,
+{
+    let r = sqlx::query(
+        "UPDATE fix_runs SET status = 'lost', finished_at = CURRENT_TIMESTAMP
+          WHERE tenant_id = ? AND status = 'sent' AND sent_at < datetime('now', ?)",
+    )
+    .bind(tenant_id).bind(format!("-{FIX_LOST_SECS} seconds"))
+    .execute(exec).await?;
+    Ok(r.rows_affected())
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -256,6 +284,9 @@ pub async fn annotate_results<'a>(
     is_editor: bool,
     results:   impl IntoIterator<Item = &'a mut IndividualResult>,
 ) {
+    if let Err(e) = mark_lost(pool, tenant_id).await {
+        error!("fix view: mark lost: {}", e);
+    }
     let systems: HashMap<i64, SystemFacts> = sqlx::query(
         "SELECT id, os, cmd_enabled, ps_enabled FROM systems WHERE tenant_id = ?",
     )
@@ -400,6 +431,9 @@ pub async fn queue_fix(
     }
 
     let sha = script_sha256(&script);
+    mark_lost(pool, tenant)
+        .await
+        .map_err(|e| { error!("queue_fix: {}", e); "Database error.".to_string() })?;
     // One open fix per system and test, checked in the same statement.
     let inserted = sqlx::query(
         "INSERT INTO fix_runs (tenant_id, system_id, test_id, kind, script, script_sha256, requested_by)

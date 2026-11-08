@@ -6,6 +6,7 @@
     {% if res.fix.last.status == "done" %}<span class="text-success">done</span>
     {% elif res.fix.last.status == "expired" %}<span class="text-muted">expired before the agent checked in</span>
     {% elif res.fix.last.status == "refused" %}<span class="text-warning">refused by the agent</span>
+    {% elif res.fix.last.status == "lost" %}<span class="text-warning">no result from the agent within 10 minutes</span>
     {% elif res.fix.last.status == "timeout" %}<span class="text-danger">stopped after 5 minutes</span>
     {% else %}<span class="text-danger">{{ res.fix.last.status }}</span>{% endif %}
     {% if res.fix.last.exit_code is number %}(exit code {{ res.fix.last.exit_code }}){% endif %}

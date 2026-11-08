@@ -407,6 +407,15 @@ queues it.
 
 A queued fix can be cancelled until the agent picks it up.
 
+If no result arrives within 10 minutes of the agent picking the fix up, the
+row shows **Last fix: no result from the agent within 10 minutes** and the
+Fix button is back. That happens when something between the agent and the
+server blocks the result (a web application firewall or proxy — let `POST`
+to `/send`, `/result` and `/fix_result` through without content rules), or
+when the agent stopped while the script ran. Check the system before running
+the fix again: the script may have run. A result that arrives later is still
+recorded.
+
 **When the button is gray.** Hover over it to see why:
 
 | Reason | What to do |
