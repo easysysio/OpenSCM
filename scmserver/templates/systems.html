@@ -58,6 +58,14 @@
             <div class="card-header">
               <h3 class="card-title">Systems Inventory</h3>
               <div class="card-tools">
+                {# Online / offline: approved systems only, by the same
+                   offline threshold as the Offline badge (data-state below). #}
+                <label for="state-filter" class="sr-only">Show systems</label>
+                <select id="state-filter" class="form-control form-control-sm d-inline-block w-auto mr-1" title="Show systems">
+                  <option value="">All systems</option>
+                  <option value="online">Online</option>
+                  <option value="offline">Offline</option>
+                </select>
                 {% if has_upgradable and is_admin %}
                 {# Confirmed in the page's own window, not the browser's
                    confirm(): browsers may silently suppress those, which made
@@ -127,7 +135,7 @@
                   {% for system in systems %}
                   {% set os_lower = system.os | default(value="") | lower %}
 
-                  <tr class="{% if system.status == 'pending' %}table-warning{% endif %}" data-offline="{{ system.is_offline }}" data-system-id="{{ system.id }}">
+                  <tr class="{% if system.status == 'pending' %}table-warning{% endif %}" data-offline="{{ system.is_offline }}" data-state="{% if system.status == 'active' %}{% if system.is_offline %}offline{% else %}online{% endif %}{% else %}{{ system.status }}{% endif %}" data-system-id="{{ system.id }}">
                     <td style="display:none;">{{ system.status }}</td>
                     <td class="text-center expand-toggle" style="cursor:pointer; user-select:none;" title="Show containers"></td>
                     <td class="text-center">
@@ -564,9 +572,21 @@
 
     table.buttons().container().appendTo('#systems_table_wrapper .col-md-6:eq(0)');
 
+    // Show: All / Online / Offline, from each row's data-state (set on the
+    // server). Pending and denied systems are neither, so only "All" shows them.
+    $.fn.dataTable.ext.search.push(function (settings, data, dataIndex) {
+      if (settings.nTable.id !== 'systems_table') { return true; }
+      const want = $('#state-filter').val();
+      if (!want) { return true; }
+      return settings.aoData[dataIndex].nTr.getAttribute('data-state') === want;
+    });
+
     // 4. Checkbox / bulk toolbar logic
+    // The ticked rows on every page of the table as filtered — not only the
+    // page on screen, which is all a plain $('.row-checkbox:checked') sees.
     function getSelectedIds() {
-      return $('.row-checkbox:checked').map(function() { return $(this).val(); }).get();
+      return $(table.rows({ search: 'applied' }).nodes()).find('.row-checkbox:checked')
+        .map(function() { return $(this).val(); }).get();
     }
 
     function updateBulkToolbar() {
@@ -587,6 +607,19 @@
       });
       updateBulkToolbar();
     });
+
+    $('#state-filter').on('change', function () {
+      // Clear the selection so no hidden system stays selected.
+      $(table.rows().nodes()).find('.row-checkbox').prop('checked', false);
+      $('#select-all').prop('checked', false);
+      table.draw();
+      updateBulkToolbar();
+    });
+    const startState = new URLSearchParams(window.location.search).get('show');
+    if (startState === 'online' || startState === 'offline') {
+      $('#state-filter').val(startState);
+      table.draw();
+    }
 
     $(document).on('change', '.row-checkbox', function() {
       if (!$(this).prop('checked')) $('#select-all').prop('checked', false);

@@ -6,6 +6,12 @@ All notable changes to OpenSCM are documented here.
 
 ## [Unreleased]
 
+### Added
+- **Filter the Systems inventory by online or offline.** A list next to **+ New System** shows all systems, only online ones, or only offline ones, by the same offline threshold as the Offline badge. `/systems?show=offline` (or `online`) opens the page already filtered.
+
+### Fixed
+- **Bulk actions on the Systems page only took the selected rows on the page you were looking at.** With **Select All** on a table longer than one page, Approve, Add to Group, Upgrade and Delete now apply to every selected row matching the search and filter, as the page said they would.
+
 ---
 
 ## [1.1.4] - 2026-11-14

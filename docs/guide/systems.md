@@ -130,6 +130,26 @@ After approval, assign the system to one or more groups:
 
 Group assignment determines which policies the system participates in.
 
+### Online and Offline Systems
+
+The list next to **+ New System** in the Systems Inventory header picks which
+systems the table shows:
+
+| Choice | Shows |
+| :--- | :--- |
+| **All systems** | Every system, including pending ones |
+| **Online** | Approved systems the agent has reported from within the offline threshold |
+| **Offline** | Approved systems whose agent hasn't reported within the offline threshold |
+
+The offline threshold is set under **Admin Settings** and is the same one the
+**Offline** badge uses. Online and Offline include only approved systems; pending
+and rejected systems appear under **All systems**. To open the page already
+filtered, add `?show=online` or `?show=offline` to the address, for example
+`/systems?show=offline`.
+
+The filter works together with the search box, and bulk actions apply to the
+filtered rows (see below). Changing the filter clears the current selection.
+
 ### Bulk Actions
 
 Select multiple systems using the checkboxes on the left of each row, then use
@@ -143,7 +163,8 @@ the bulk toolbar that appears at the top of the table:
 | **Delete** | Permanently remove all selected systems |
 
 The **Select All** checkbox in the header selects all rows matching the current
-search filter, not just the visible page.
+search and online/offline filter, on every page of the table, not just the
+visible one.
 
 !!! note "Role requirements"
     Approve / Add to Group / Delete require at least the **Editor** role.
