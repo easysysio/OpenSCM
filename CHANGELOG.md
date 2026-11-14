@@ -6,6 +6,10 @@ All notable changes to OpenSCM are documented here.
 
 ## [Unreleased]
 
+---
+
+## [1.1.4] - 2026-11-14
+
 ### Security
 - rustix 1.1.4 → 1.1.6 (RUSTSEC-2026-0486, unsound: the xattr functions could mark unwritten memory as initialized when given an empty buffer). OpenSCM does not call them that way; `cargo audit` is now clean with no warnings.
 
