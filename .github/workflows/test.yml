@@ -57,6 +57,12 @@ jobs:
       - name: Cache cargo registry and build artifacts
         uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
 
+      # rustup installs the toolchain pinned in rust-toolchain.toml on first
+      # use, without clippy. Added here only, not in rust-toolchain.toml, so
+      # the build jobs do not download it too.
+      - name: Install clippy
+        run: rustup component add clippy
+
       # Same gate as release.sh: every target (tests too), warnings are errors.
       - name: Clippy (workspace)
         run: cargo clippy --workspace --all-targets --locked -- -D warnings
