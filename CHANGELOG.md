@@ -6,6 +6,10 @@ All notable changes to OpenSCM are documented here.
 
 ## [Unreleased]
 
+---
+
+## [1.1.3] - 2026-11-14
+
 ### Upgrade notes
 - Schema v53. Policies imported before this version are treated as if every test in them had been added by hand: a later update of such a policy removes no tests, even ones the new file dropped. Remove those yourself if you want them gone.
 
