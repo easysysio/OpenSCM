@@ -6,6 +6,9 @@ All notable changes to OpenSCM are documented here.
 
 ## [Unreleased]
 
+### Changed
+- **CI runs the same checks as `release.sh`.** Every push and pull request now runs `cargo clippy` (warnings are errors) next to the tests, and `cargo audit` now fails the run instead of only reporting. A tagged release waits for all three. Agent code that only builds on Linux was tidied to pass clippy (merged nested `if`s, `next_back()` instead of `last()`); no change in behavior.
+
 ---
 
 ## [1.1.3] - 2026-11-14

@@ -1,7 +1,8 @@
 name: Tests
 
 # Runs on every push and pull request — and is called by the release
-# workflow so a tag cannot produce artifacts from a failing tree.
+# workflow so a tag cannot produce artifacts from a failing tree. Tests,
+# clippy and cargo audit, the same three checks release.sh runs.
 #
 # This exists because it didn't: releases were built straight from a tag
 # with no test run, and 0.7.4 shipped a template that failed to parse,
@@ -45,15 +46,29 @@ jobs:
       - name: Test (workspace)
         run: cargo test --workspace --locked
 
+  clippy:
+    name: cargo clippy · workspace
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Cache cargo registry and build artifacts
+        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
+
+      # Same gate as release.sh: every target (tests too), warnings are errors.
+      - name: Clippy (workspace)
+        run: cargo clippy --workspace --all-targets --locked -- -D warnings
+
   audit:
     name: cargo audit · advisories
     runs-on: ubuntu-latest
     timeout-minutes: 15
-    # Advisory-only. A newly published CVE in any of ~500 transitive crates
-    # would otherwise appear with no warning and block a release the moment
-    # someone needed to ship — so this reports without failing the build.
-    # Promote to blocking once the backlog (if any) is cleared.
-    continue-on-error: true
+    # Blocking, the same as release.sh (it was report-only until 1.1.3). An
+    # advisory that cannot affect this product is not silenced here: it gets a
+    # reasoned entry in .cargo/audit.toml, which is also the way out when a
+    # new one lands while something must ship.
 
     steps:
       - uses: actions/checkout@v4
@@ -67,9 +82,9 @@ jobs:
 
       # No --deny warnings: `unmaintained` advisories are informational, not
       # exploitable, and reporting them as errors buries the vulnerabilities
-      # that matter. Vulnerabilities are still reported and still non-zero-exit.
+      # that matter. A vulnerability fails the job.
       - name: Audit dependencies
-        run: cargo audit || true
+        run: cargo audit
 
       # Surface the result where it is actually read, rather than only in the
       # job log — an advisory nobody opens is the same as no advisory.

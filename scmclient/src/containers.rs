@@ -250,11 +250,11 @@ fn enrich(runtime: &str, id: &str, c: &mut DiscoveredContainer) {
         c.restart_policy  = hc.get("RestartPolicy").and_then(|rp| rp.get("Name"))
                               .and_then(|v| v.as_str()).map(String::from);
 
-        if let Some(caps) = hc.get("CapAdd").and_then(Value::as_array) {
-            if !caps.is_empty() {
-                let list: Vec<String> = caps.iter().filter_map(|v| v.as_str().map(String::from)).collect();
-                c.capabilities_add = serde_json::to_string(&list).ok();
-            }
+        if let Some(caps) = hc.get("CapAdd").and_then(Value::as_array)
+            && !caps.is_empty()
+        {
+            let list: Vec<String> = caps.iter().filter_map(|v| v.as_str().map(String::from)).collect();
+            c.capabilities_add = serde_json::to_string(&list).ok();
         }
 
         // Mounts — prefer the structured Mounts array, fall back to legacy Binds.

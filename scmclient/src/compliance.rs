@@ -218,12 +218,11 @@ fn systemd_unit_state(name: &str) -> Option<SystemdUnit> {
     let now = Instant::now();
 
     // Reuse cached result if still fresh and the unit is present.
-    if let Some((cached_at, map)) = guard.as_ref() {
-        if now.duration_since(*cached_at) < TTL {
-            if let Some(s) = map.get(name) {
-                return Some(*s);
-            }
-        }
+    if let Some((cached_at, map)) = guard.as_ref()
+        && now.duration_since(*cached_at) < TTL
+        && let Some(s) = map.get(name)
+    {
+        return Some(*s);
     }
 
     let out = Command::new("systemctl")
@@ -725,8 +724,10 @@ fn check_package_exists(package: &str) -> bool {
 
     // Debian/Ubuntu — native /var/lib/dpkg/status parse (with mtime cache).
     // Avoids forking dpkg-query for every PACKAGE test.
-    if let Some(info) = dpkg_lookup(package) {
-        if info.installed { return true; }
+    if let Some(info) = dpkg_lookup(package)
+        && info.installed
+    {
+        return true;
     }
 
     // RHEL/Fedora/openSUSE — rpm. Native RPM DB parsing is a follow-up
@@ -814,12 +815,12 @@ fn get_package_version(package: &str) -> Option<String> {
 #[cfg(all(unix, not(target_os = "macos")))]
 fn get_package_version(package: &str) -> Option<String> {
     // Debian/Ubuntu — native dpkg status parse (with mtime cache).
-    if let Some(info) = dpkg_lookup(package) {
-        if info.installed {
-            // Strip the epoch prefix "1:" if present (matches dpkg-query semantics).
-            let v = info.version.split(':').last().unwrap_or(&info.version).to_string();
-            return Some(v);
-        }
+    if let Some(info) = dpkg_lookup(package)
+        && info.installed
+    {
+        // Strip the epoch prefix "1:" if present (matches dpkg-query semantics).
+        let v = info.version.split(':').next_back().unwrap_or(&info.version).to_string();
+        return Some(v);
     }
 
     // Try rpm (RHEL/Fedora/openSUSE — zypper uses rpm under the hood)
@@ -828,10 +829,10 @@ fn get_package_version(package: &str) -> Option<String> {
         .output()
         .ok();
 
-    if let Some(o) = output_rpm {
-        if o.status.success() {
-            return Some(String::from_utf8_lossy(&o.stdout).trim().to_string());
-        }
+    if let Some(o) = output_rpm
+        && o.status.success()
+    {
+        return Some(String::from_utf8_lossy(&o.stdout).trim().to_string());
     }
 
     // Try pacman (Arch Linux)
@@ -840,13 +841,13 @@ fn get_package_version(package: &str) -> Option<String> {
         .output()
         .ok();
 
-    if let Some(o) = output_pacman {
-        if o.status.success() {
-            // pacman -Q returns "package version" e.g. "nginx 1.24.0-1"
-            let out = String::from_utf8_lossy(&o.stdout);
-            if let Some(ver) = out.split_whitespace().nth(1) {
-                return Some(ver.to_string());
-            }
+    if let Some(o) = output_pacman
+        && o.status.success()
+    {
+        // pacman -Q returns "package version" e.g. "nginx 1.24.0-1"
+        let out = String::from_utf8_lossy(&o.stdout);
+        if let Some(ver) = out.split_whitespace().nth(1) {
+            return Some(ver.to_string());
         }
     }
 
