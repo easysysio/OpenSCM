@@ -6,6 +6,12 @@ All notable changes to OpenSCM are documented here.
 
 ## [Unreleased]
 
+### Upgrade notes
+- Schema v53. Policies imported before this version are treated as if every test in them had been added by hand: a later update of such a policy removes no tests, even ones the new file dropped. Remove those yourself if you want them gone.
+
+### Fixed
+- **Updating a policy from the Policy Store, or importing a newer file of it, removed the tests you had added to it yourself.** An update now removes only tests an earlier import brought in and the new file no longer has; tests you added stay in the policy. Saving the policy edit form keeps track of which is which. A test removed from a policy was never deleted: find it under **Tests → Show → Not in a policy** and add it back.
+
 ---
 
 ## [1.1.2] - 2026-11-08

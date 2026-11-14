@@ -194,6 +194,21 @@ for security audits.
 
 ---
 
+## Updating an Imported Policy
+
+A policy that came from a file (**Policy import**) or from the **Policy Store**
+(SaaS) is updated by importing a newer version of the same file. The update
+replaces the tests the file has and removes the tests a previous version had
+but this one dropped. **Tests you added to the policy yourself stay** *(1.1.3)*
+— add your own checks to a Store policy without losing them on the next update.
+A test removed from a policy is kept on the Tests page (**Show → Not in a
+policy**); only its results go.
+
+!!! note "Policies imported before 1.1.3"
+    OpenSCM did not record which tests came from the file before 1.1.3, so for
+    those policies an update removes nothing. Tests the file drops stay in the
+    policy until you remove them.
+
 ## Best Practices
 
 **Use focused policies over large ones**

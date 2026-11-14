@@ -450,7 +450,8 @@ policies/web-hardening.json: imported (policy 8)
 
 The first import creates the policy (`201`); later ones update the policy
 with the same `external_id` (`200`, `"action": "updated"`), so ids stay put
-and history is kept. A minimal file:
+and history is kept. An update removes from the policy only tests an earlier
+import added; tests added to it by hand stay (1.1.3). A minimal file:
 
 ```json
 {

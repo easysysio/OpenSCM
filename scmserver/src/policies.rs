@@ -712,18 +712,26 @@ pub async fn policies_edit_save(
         return Redirect::to(&format!("/policies?error_message={}", encoded)).into_response();
     }
 
-    // Clear and re-insert tests
-    if let Err(e) = sqlx::query("DELETE FROM tests_in_policy WHERE policy_id = ? AND tenant_id = ?")
-        .bind(id).bind(&auth.tenant_id).execute(&mut *tx).await
-    {
+    // Remove the tests that were unticked and add the new ones. Links that
+    // stay are left alone, so they keep `imported` (see apply_policy_import).
+    let test_ids: Vec<i64> = form_data.get("tests").cloned().unwrap_or_default()
+        .iter().filter_map(|t| t.parse::<i64>().ok()).collect();
+    let keep = if test_ids.is_empty() {
+        String::new()
+    } else {
+        format!(" AND test_id NOT IN ({})", test_ids.iter().map(|_| "?").collect::<Vec<_>>().join(","))
+    };
+    let sql = format!("DELETE FROM tests_in_policy WHERE policy_id = ? AND tenant_id = ?{keep}");
+    let mut q = sqlx::query(&sql).bind(id).bind(&auth.tenant_id);
+    for t in &test_ids { q = q.bind(*t); }
+    if let Err(e) = q.execute(&mut *tx).await {
         let encoded = urlencoding::encode(&format!("Error clearing tests: {}", e)).to_string();
         tx.rollback().await.ok();
         return Redirect::to(&format!("/policies?error_message={}", encoded)).into_response();
     }
 
-    for test_id_str in form_data.get("tests").cloned().unwrap_or_default() {
-        if let Ok(test_id) = test_id_str.parse::<i32>()
-            && let Err(e) = sqlx::query(
+    for test_id in test_ids {
+        if let Err(e) = sqlx::query(
                 "INSERT OR IGNORE INTO tests_in_policy (tenant_id, policy_id, test_id) VALUES (?, ?, ?)",
             )
             .bind(&auth.tenant_id).bind(id).bind(test_id).execute(&mut *tx).await
@@ -2191,8 +2199,11 @@ pub async fn apply_policy_import(
             .map_err(|e| format!("Condition insert failed: {}", e))?;
         }
 
+        // The import owns this link from now on, even one someone added by
+        // hand: the file lists the test, so a later file without it removes it.
         sqlx::query(
-            "INSERT OR IGNORE INTO tests_in_policy (tenant_id, policy_id, test_id) VALUES (?, ?, ?)",
+            "INSERT INTO tests_in_policy (tenant_id, policy_id, test_id, imported) VALUES (?, ?, ?, 1)
+             ON CONFLICT DO UPDATE SET imported = 1",
         )
         .bind(tenant_id).bind(policy_id).bind(test_id)
         .execute(&mut *tx).await
@@ -2201,12 +2212,13 @@ pub async fn apply_policy_import(
         imported_test_ids.push(test_id);
     }
 
-    // Unlink tests previously linked to this policy that are not in the import.
+    // Unlink tests an earlier import linked to this policy that the new file
+    // no longer has. Tests the organization added itself (imported = 0) stay.
     let unlinked_count = if existing_id.is_some() && !imported_test_ids.is_empty() {
         let placeholders = imported_test_ids.iter().map(|_| "?").collect::<Vec<_>>().join(",");
         let sql = format!(
             "DELETE FROM tests_in_policy
-             WHERE tenant_id = ? AND policy_id = ?
+             WHERE tenant_id = ? AND policy_id = ? AND imported = 1
                AND test_id NOT IN ({})",
             placeholders,
         );

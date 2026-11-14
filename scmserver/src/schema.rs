@@ -972,7 +972,7 @@ pub async fn seed_plan_limits(pool: &SqlitePool) -> Result<(), sqlx::Error> {
 // a higher version was migrated by a newer OpenSCM, and this build refuses
 // to run on it rather than write to tables it does not understand.
 // ─────────────────────────────────────────────────────────────────────────────
-pub const SCHEMA_VERSION: i64 = 52;
+pub const SCHEMA_VERSION: i64 = 53;
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Helper: run_migrations
@@ -3211,6 +3211,24 @@ async fn run_migrations_on(pool: &SqlitePool) -> Result<(), sqlx::Error> {
         .execute(pool).await?;
         sqlx::query("UPDATE schema_info SET version = 52").execute(pool).await?;
         info!("Schema migration v51 → v52 complete.");
+    }
+
+    // v52 → v53: tests_in_policy.imported — 1 when a policy import (file or
+    // Policy Store) made the link, 0 when someone added the test to the
+    // policy. An update unlinks only imported links the new file no longer
+    // has, so tests an organization added itself stay in the policy.
+    // Existing links start at 0: an upgrade never removes anything, at the
+    // cost of a test the store later drops staying in older installs.
+    if version < 53 {
+        info!("Running schema migration v52 → v53 (imported policy links)...");
+        if table_exists(pool, "tests_in_policy").await
+            && !column_exists(pool, "tests_in_policy", "imported").await
+        {
+            sqlx::query("ALTER TABLE tests_in_policy ADD COLUMN imported INTEGER NOT NULL DEFAULT 0")
+                .execute(pool).await?;
+        }
+        sqlx::query("UPDATE schema_info SET version = 53").execute(pool).await?;
+        info!("Schema migration v52 → v53 complete.");
     }
 
     Ok(())
