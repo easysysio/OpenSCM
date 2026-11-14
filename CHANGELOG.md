@@ -9,6 +9,9 @@ All notable changes to OpenSCM are documented here.
 ### Upgrade notes
 - Schema v53. Policies imported before this version are treated as if every test in them had been added by hand: a later update of such a policy removes no tests, even ones the new file dropped. Remove those yourself if you want them gone.
 
+### Security
+- **SQLite advisory RUSTSEC-2026-0459 (CVE-2026-119375) assessed, not yet fixable.** The bundled SQLite can return stale memory when it opens a database together with a crafted `-wal` file. OpenSCM only opens files in folders writable by its own user, so exploiting it needs access that already gives the whole database. No sqlx release ships the fixed SQLite yet; the server moves to it when one does. The reasoning is recorded in `.cargo/audit.toml`.
+
 ### Fixed
 - **Updating a policy from the Policy Store, or importing a newer file of it, removed the tests you had added to it yourself.** An update now removes only tests an earlier import brought in and the new file no longer has; tests you added stay in the policy. Saving the policy edit form keeps track of which is which. A test removed from a policy was never deleted: find it under **Tests → Show → Not in a policy** and add it back.
 

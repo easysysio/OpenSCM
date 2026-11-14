@@ -26,4 +26,17 @@ ignore = [
     # stayed on 0.11.5 (checked 2026-11-05).
     "RUSTSEC-2026-0374",  # basic-toml
     "RUSTSEC-2026-0173",  # proc-macro-error2
+
+    # libsqlite3-sys 0.30.1 bundles SQLite before 3.54.0 (CVE-2026-119375):
+    # opening a database together with a crafted sibling -wal file can return
+    # stale page-cache bytes. It needs a less trusted party to write both
+    # files next to each other. The live database sits in the data folder,
+    # writable only by the server's user (root or 65532), and restore/verify
+    # decrypt the age backup into the backups folder, same owner — anyone who
+    # can plant the -wal there can already read or replace the database.
+    # No fix to take yet: sqlx 0.8.6 pins libsqlite3-sys ^0.30.1 and sqlx
+    # 0.9.0 allows <0.38; the fix is 0.39. Linking the system SQLite instead
+    # would break the static musl builds.
+    # Remove this when sqlx accepts libsqlite3-sys >= 0.39 (checked 2026-11-14).
+    "RUSTSEC-2026-0459",
 ]
