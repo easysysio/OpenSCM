@@ -6,21 +6,21 @@ All notable changes to OpenSCM are documented here.
 
 ## [Unreleased]
 
-### Added
-- **Filter the Systems inventory by online or offline.** A list next to **+ New System** shows all systems, only online ones, or only offline ones, by the same offline threshold as the Offline badge. `/systems?show=offline` (or `online`) opens the page already filtered.
-
-### Fixed
-- **Bulk actions on the Systems page only took the selected rows on the page you were looking at.** With **Select All** on a table longer than one page, Approve, Add to Group, Upgrade and Delete now apply to every selected row matching the search and filter, as the page said they would.
-
 ---
 
-## [1.1.4] - 2026-11-14
+## [1.1.4] - 2026-11-15
 
 ### Security
 - rustix 1.1.4 → 1.1.6 (RUSTSEC-2026-0486, unsound: the xattr functions could mark unwritten memory as initialized when given an empty buffer). OpenSCM does not call them that way; `cargo audit` is now clean with no warnings.
 
 ### Changed
 - **CI runs the same checks as `release.sh`.** Every push and pull request now runs `cargo clippy` (warnings are errors) next to the tests, and `cargo audit` now fails the run instead of only reporting. A tagged release waits for all three. Agent code that only builds on Linux was tidied to pass clippy (merged nested `if`s, `next_back()` instead of `last()`); no change in behavior.
+
+### Added
+- **Filter the Systems inventory by online or offline.** A list next to **+ New System** shows all systems, only online ones, or only offline ones, by the same offline threshold as the Offline badge. `/systems?show=offline` (or `online`) opens the page already filtered.
+
+### Fixed
+- **Bulk actions on the Systems page only took the selected rows on the page you were looking at.** With **Select All** on a table longer than one page, Approve, Add to Group, Upgrade and Delete now apply to every selected row matching the search and filter, as the page said they would.
 
 ---
 
