@@ -6,6 +6,10 @@ All notable changes to OpenSCM are documented here.
 
 ## [Unreleased]
 
+---
+
+## [1.1.5] - 2026-11-17
+
 ### Security
 - **chrono replaced with jiff** (RUSTSEC-2026-0543, -0555, -0559: chrono, chrono-tz and chrono-tz-build are unmaintained). The server and agent now use [jiff](https://crates.io/crates/jiff) for times; Tera's unused built-in helpers (`date`, `now()`, `urlencode`, `slugify`, `filesizeformat`) and sqlx's chrono support are switched off, so chrono is no longer in the build at all. Times are stored, shown and sent exactly as before. `cargo audit` reports no warnings.
 
