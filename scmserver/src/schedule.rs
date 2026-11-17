@@ -8,7 +8,8 @@
 // policy_schedules.next_run has always had.
 // =============================================================================
 
-use chrono::{Datelike, Duration, NaiveDate, NaiveDateTime, Timelike};
+use jiff::civil::{Date as NaiveDate, DateTime as NaiveDateTime};
+use jiff::SignedDuration;
 
 /// The storage format of policy_schedules.next_run / last_run (UTC).
 pub const FMT: &str = "%Y-%m-%dT%H:%M";
@@ -19,9 +20,9 @@ pub const FMT: &str = "%Y-%m-%dT%H:%M";
 // ─────────────────────────────────────────────────────────────────────────────
 pub fn parse_time(s: &str) -> Option<NaiveDateTime> {
     let s = s.trim();
-    NaiveDateTime::parse_from_str(s, FMT)
-        .or_else(|_| NaiveDateTime::parse_from_str(s, "%Y-%m-%dT%H:%M:%S"))
-        .or_else(|_| NaiveDateTime::parse_from_str(s, "%Y-%m-%dT%H:%M:%S%.f"))
+    NaiveDateTime::strptime(FMT, s)
+        .or_else(|_| NaiveDateTime::strptime("%Y-%m-%dT%H:%M:%S", s))
+        .or_else(|_| NaiveDateTime::strptime("%Y-%m-%dT%H:%M:%S%.f", s))
         .ok()
 }
 
@@ -41,7 +42,7 @@ pub fn local_to_utc(local: &str, offset_minutes: Option<i64>) -> Option<String> 
     let t = parse_time(local)?;
     // Real offsets span −14h … +12h; anything else is a broken client.
     let off = offset_minutes.filter(|m| (-14 * 60..=14 * 60).contains(m)).unwrap_or(0);
-    Some((t + Duration::minutes(off)).format(FMT).to_string())
+    Some(t.checked_add(SignedDuration::from_mins(off)).ok()?.strftime(FMT).to_string())
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -159,7 +160,7 @@ impl CronExpr {
             return false;
         }
         let dom = self.dom & (1 << d.day()) != 0;
-        let dow = self.dow & (1 << d.weekday().num_days_from_sunday()) != 0;
+        let dow = self.dow & (1 << d.weekday().to_sunday_zero_offset()) != 0;
         match (self.dom_any, self.dow_any) {
             (true, true)   => true,
             (true, false)  => dow,
@@ -174,7 +175,8 @@ impl CronExpr {
     // expression can never match (the 31st of February).
     // ─────────────────────────────────────────────────────────────────────────
     pub fn next_after(&self, after: NaiveDateTime) -> Option<NaiveDateTime> {
-        let start = after.with_second(0)?.with_nanosecond(0)? + Duration::minutes(1);
+        let start = after.with().second(0).subsec_nanosecond(0).build().ok()?
+            .checked_add(SignedDuration::from_mins(1)).ok()?;
         let mut day = start.date();
         // 29 February can be eight years away (2096 → 2104).
         for i in 0..(366 * 9) {
@@ -187,12 +189,12 @@ impl CronExpr {
                     let first_m = if i == 0 && h == from_h { from_m } else { 0 };
                     for m in first_m..60 {
                         if self.minutes & (1 << m) != 0 {
-                            return day.and_hms_opt(h, m, 0);
+                            return Some(day.at(h, m, 0, 0));
                         }
                     }
                 }
             }
-            day = day.succ_opt()?;
+            day = day.tomorrow().ok()?;
         }
         None
     }
@@ -216,7 +218,7 @@ pub fn validate_cron(expr: &str, now: NaiveDateTime) -> Result<(), String> {
 pub fn next_cron_run(expr: &str, now: NaiveDateTime) -> Result<String, String> {
     CronExpr::parse(expr)?
         .next_after(now)
-        .map(|t| t.format(FMT).to_string())
+        .map(|t| t.strftime(FMT).to_string())
         .ok_or_else(|| "this expression never occurs".to_string())
 }
 
@@ -254,16 +256,16 @@ pub fn next_run(
     }
 
     let step = match frequency {
-        "weekly"   => Duration::weeks(1),
-        "biweekly" => Duration::days(14),
-        "monthly"  => Duration::days(30),
-        _          => Duration::days(1),
+        "weekly"   => SignedDuration::from_hours(24 * 7),
+        "biweekly" => SignedDuration::from_hours(24 * 14),
+        "monthly"  => SignedDuration::from_hours(24 * 30),
+        _          => SignedDuration::from_hours(24),
     };
     let mut next = parse_time(planned).unwrap_or(now) + step;
     while next <= now {
         next += step;
     }
-    (next.format(FMT).to_string(), problem)
+    (next.strftime(FMT).to_string(), problem)
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -341,7 +343,7 @@ mod tests {
         parse_time(s).unwrap_or_else(|| panic!("bad test time {s}"))
     }
     fn after(expr: &str, from: &str) -> String {
-        CronExpr::parse(expr).unwrap().next_after(t(from)).unwrap().format(FMT).to_string()
+        CronExpr::parse(expr).unwrap().next_after(t(from)).unwrap().strftime(FMT).to_string()
     }
 
     // The five examples in docs/guide/scheduler.md. 2026-10-05 is a Monday.

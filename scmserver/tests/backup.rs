@@ -293,7 +293,7 @@ async fn a_backup_with_a_newer_schema_is_flagged() {
 
 #[test]
 fn default_names_are_dated_and_safe() {
-    let t = chrono::DateTime::parse_from_rfc3339("2026-10-29T08:05:09Z").unwrap().with_timezone(&chrono::Utc);
+    let t = "2026-10-29T08:05:09Z".parse::<jiff::Timestamp>().unwrap();
     assert_eq!(backup::default_file_name("web 1/prod", t), "openscm-web_1_prod-20261029T080509Z.oscm-backup");
     assert_eq!(backup::default_dir(Path::new("/var/lib/openscm/scm.db")), PathBuf::from("/var/lib/openscm/backups"));
 }

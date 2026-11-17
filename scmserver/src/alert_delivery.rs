@@ -359,7 +359,7 @@ async fn send_syslog(
     let pri = 13 * 8 + severity;
 
     let host = gethostname_string();
-    let ts = chrono::Utc::now().format("%Y-%m-%dT%H:%M:%SZ");
+    let ts = jiff::Timestamp::now().strftime("%Y-%m-%dT%H:%M:%SZ");
     let msg = format!(
         "<{pri}>1 {ts} {host} openscm - COMPLIANCE [openscm@99999 policy=\"{}\" prev=\"{:.2}\" curr=\"{:.2}\"] {} — {}",
         escape_sd(policy_name), obs.previous, obs.current,
@@ -383,7 +383,7 @@ async fn send_syslog_event(target: &str, event: &str, alert_name: &str, summary:
     let addr = if target.contains(':') { target.to_string() } else { format!("{target}:514") };
     let pri = 13 * 8 + 3;
     let host = gethostname_string();
-    let ts = chrono::Utc::now().format("%Y-%m-%dT%H:%M:%SZ");
+    let ts = jiff::Timestamp::now().strftime("%Y-%m-%dT%H:%M:%SZ");
     let msg = format!(
         "<{pri}>1 {ts} {host} openscm - BACKUP [openscm@99999 event=\"{}\"] {} — {}",
         escape_sd(event), escape_sd(alert_name), summary

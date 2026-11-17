@@ -20,7 +20,6 @@ use urlencoding;
 use std::collections::HashMap;
 use tracing::{info, warn, error};
 use bytes::Bytes;
-use chrono::{DateTime, Utc};
 
 use std::collections::BTreeMap;
 use crate::agents::derive_platform;
@@ -231,8 +230,8 @@ pub async fn systems(
                 auth_public_key:  None,
                 trust_challenge:  None,
                 trust_proof:      None,
-                created_date:     row.try_get::<String, _>("created_date").ok().and_then(|s| s.parse::<DateTime<Utc>>().ok()),
-                last_seen:        row.try_get::<String, _>("last_seen").ok().and_then(|s| s.parse::<DateTime<Utc>>().ok()),
+                created_date:     row.try_get::<String, _>("created_date").ok().and_then(|s| s.parse::<jiff::Timestamp>().ok()),
+                last_seen:        row.try_get::<String, _>("last_seen").ok().and_then(|s| s.parse::<jiff::Timestamp>().ok()),
                 is_offline:       row.try_get::<bool, _>("is_offline").unwrap_or(false),
                 upgrade_available,
                 upgrade_version,
@@ -728,8 +727,8 @@ pub async fn systems_pending(
             auth_public_key: None,
             trust_challenge: None,
             trust_proof: None,
-            created_date: row.try_get::<String, _>("created_date").ok().and_then(|s| s.parse::<DateTime<Utc>>().ok()),
-            last_seen: row.try_get::<String, _>("last_seen").ok().and_then(|s| s.parse::<DateTime<Utc>>().ok()),
+            created_date: row.try_get::<String, _>("created_date").ok().and_then(|s| s.parse::<jiff::Timestamp>().ok()),
+            last_seen: row.try_get::<String, _>("last_seen").ok().and_then(|s| s.parse::<jiff::Timestamp>().ok()),
             is_offline: false,
             platform: None,
             upgrade_available: false,
@@ -1148,8 +1147,8 @@ pub async fn fetch_system_report_data(
         .try_get::<String, _>("last_seen")
         .ok()
         .map(|s| {
-            s.parse::<DateTime<Utc>>()
-                .map(|dt| dt.format("%Y-%m-%d %H:%M UTC").to_string())
+            s.parse::<jiff::Timestamp>()
+                .map(|dt| dt.strftime("%Y-%m-%d %H:%M UTC").to_string())
                 .unwrap_or(s)
         });
 

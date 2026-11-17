@@ -21,7 +21,7 @@ fn temp_dir(tag: &str) -> PathBuf {
     let dir = std::env::temp_dir().join(format!(
         "openscm-{tag}-{}-{}",
         std::process::id(),
-        chrono::Utc::now().timestamp_nanos_opt().unwrap_or(0)
+        jiff::Timestamp::now().as_nanosecond()
     ));
     std::fs::create_dir_all(&dir).unwrap();
     dir

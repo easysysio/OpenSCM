@@ -27,7 +27,7 @@ async fn file_pool(tag: &str) -> (SqlitePool, PathBuf) {
     let path = std::env::temp_dir().join(format!(
         "openscm-{tag}-{}-{}.db",
         std::process::id(),
-        chrono::Utc::now().timestamp_nanos_opt().unwrap_or(0)
+        jiff::Timestamp::now().as_nanosecond()
     ));
     std::fs::File::create(&path).unwrap();
     let pool = SqlitePoolOptions::new()

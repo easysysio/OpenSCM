@@ -111,7 +111,7 @@ async fn a_pre_094_cookie_is_refused() {
 async fn an_expired_session_is_refused_even_though_the_signature_is_valid() {
     let pool = db().await;
     let mut v = login(10, "default");
-    let now = chrono::Utc::now().timestamp();
+    let now = jiff::Timestamp::now().as_second();
     v["iat"] = json!(now - 9 * 3600);
     v["exp"] = json!(now - 3600);
     v["epoch"] = json!(0);

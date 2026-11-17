@@ -1797,8 +1797,7 @@ pub async fn system_report_live_download(
         }
     };
 
-    use chrono::Local;
-    let subtitle = format!("Live Report  ·  {}", Local::now().format("%Y-%m-%d %H:%M"));
+    let subtitle = format!("Live Report  ·  {}", jiff::ZonedDateTime::now().strftime("%Y-%m-%d %H:%M"));
 
     let buffer = match build_system_report_pdf(&data, &subtitle) {
         Ok(b) => b,
@@ -1933,8 +1932,7 @@ pub async fn system_report_live_email(
         }
     };
 
-    use chrono::Local;
-    let now = Local::now().format("%Y-%m-%d %H:%M").to_string();
+    let now = jiff::ZonedDateTime::now().strftime("%Y-%m-%d %H:%M").to_string();
     let subtitle = format!("Live Report  ·  {}", now);
 
     let bytes = match build_system_report_pdf(&data, &subtitle) {

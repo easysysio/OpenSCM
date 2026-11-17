@@ -6,6 +6,9 @@ All notable changes to OpenSCM are documented here.
 
 ## [Unreleased]
 
+### Security
+- **chrono replaced with jiff** (RUSTSEC-2026-0543, -0555, -0559: chrono, chrono-tz and chrono-tz-build are unmaintained). The server and agent now use [jiff](https://crates.io/crates/jiff) for times; Tera's unused built-in helpers (`date`, `now()`, `urlencode`, `slugify`, `filesizeformat`) and sqlx's chrono support are switched off, so chrono is no longer in the build at all. Times are stored, shown and sent exactly as before. `cargo audit` reports no warnings.
+
 ### Added
 - **Filter a whole policy report by Failed, Passed, NA or Excluded.** A **Show** bar on the policy report and on saved policy reports applies to every system at once, including container results. Systems with nothing to show are hidden. Clicking the Pass / Fail / NA / Excl totals at the top does the same, and `?show=fail` (or `pass`, `na`, `excluded`) opens a report already filtered.
 - **Results by Test on policy reports.** A new card lists each test once with how many systems pass, fail, are NA or excluded, worst first, and which systems those are. Its result is FAIL if the test fails on any system. It follows the same filter, and saved reports have it too.

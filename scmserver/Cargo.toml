@@ -34,17 +34,19 @@ fs2 = "0.4"
 # "runtime-tokio", not "runtime-tokio-rustls": the TLS half is for connecting
 # to a database server over the network, which SQLite never does, and it kept
 # webpki-roots 0.26 in the build (RUSTSEC-2026-0381, no fixed 0.26 release).
-sqlx = { version = "0.8", features = ["sqlite", "runtime-tokio", "chrono"] }
+sqlx = { version = "0.8", features = ["sqlite", "runtime-tokio"] }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
-tera = "1.20"
+# No default "builtins": its date/now/urlencode/slugify helpers pull in chrono
+# and chrono-tz (unmaintained) and no template uses them.
+tera = { version = "1.20", default-features = false }
 include_dir = "0.7"
 toml = "0.8.0"
 urlencoding = "2.1"
 mime_guess = "2.0"
-chrono = { version = "0.4", features = ["serde"] }
+jiff = { version = "1.0", features = ["serde"] }
 bytes = "1.6"
 base64 = "0.21"
 rand = "0.8"

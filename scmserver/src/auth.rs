@@ -104,7 +104,7 @@ pub async fn issue_session_cookie(
     .bind(userid).bind(&real_tenant)
     .fetch_optional(pool).await.ok().flatten().unwrap_or(0);
 
-    let now = chrono::Utc::now().timestamp();
+    let now = jiff::Timestamp::now().as_second();
     if let Some(obj) = session.as_object_mut() {
         obj.insert("iat".into(), json!(now));
         obj.insert("exp".into(), json!(now + ttl.whole_seconds()));
@@ -208,7 +208,7 @@ pub async fn validate_session(pool: &SqlitePool, session: &Value) -> Option<Auth
     let exp = session.get("exp")?.as_i64()?;
     let epoch = session.get("epoch")?.as_i64()?;
 
-    if chrono::Utc::now().timestamp() >= exp {
+    if jiff::Timestamp::now().as_second() >= exp {
         return None;
     }
 

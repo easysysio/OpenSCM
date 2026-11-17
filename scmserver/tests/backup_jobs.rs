@@ -12,7 +12,7 @@ use axum::extract::{Form, Query};
 use axum::response::IntoResponse;
 use axum::Extension;
 use base64::{engine::general_purpose, Engine as _};
-use chrono::NaiveDateTime;
+use jiff::civil::DateTime as NaiveDateTime;
 use scmserver::backup::Paths;
 use scmserver::backup_jobs::{self, BackupSettings, Backups, Trigger};
 use scmserver::handlers::ClientIp;
@@ -93,7 +93,7 @@ fn admin() -> AuthSession {
 }
 
 fn t(s: &str) -> NaiveDateTime {
-    NaiveDateTime::parse_from_str(s, "%Y-%m-%d %H:%M:%S").unwrap()
+    NaiveDateTime::strptime("%Y-%m-%d %H:%M:%S", s).unwrap()
 }
 
 // v50 seeds the settings: off, 02:00 UTC daily, keep 7.

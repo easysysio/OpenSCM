@@ -9,7 +9,6 @@
 
 use std::fs;
 use serde::{Deserialize, Serialize};
-use chrono::Utc;
 use tracing::warn;
 
 use crate::compliance::{evaluate, EvalResult};
@@ -286,7 +285,7 @@ fn print_json(meta: &LocalPolicyMeta, outcomes: &[TestOutcome], summary: &RunSum
             os: format!("{} {}", osinfo.os_type(), osinfo.version()),
             arch: std::env::consts::ARCH.into(),
         },
-        run_at: Utc::now().format("%Y-%m-%dT%H:%M:%SZ").to_string(),
+        run_at: jiff::Timestamp::now().strftime("%Y-%m-%dT%H:%M:%SZ").to_string(),
         summary: summary.clone(),
         results: outcomes.iter().map(|o| TestOutcome {
             external_id: o.external_id.clone(),

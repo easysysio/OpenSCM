@@ -90,7 +90,7 @@ async fn find_valid_token(
     raw_token: &str,
 ) -> Result<Option<i64>, sqlx::Error> {
     let hash = hash_token(raw_token);
-    let now = chrono::Utc::now().format("%Y-%m-%d %H:%M:%S").to_string();
+    let now = crate::clock::utc_now_fmt("%Y-%m-%d %H:%M:%S");
 
     let row = sqlx::query(
         "SELECT id FROM enrollment_tokens
@@ -119,7 +119,7 @@ async fn consume_token(
     tenant_id: &str,
     token_id: i64,
 ) -> Result<(), sqlx::Error> {
-    let now = chrono::Utc::now().format("%Y-%m-%d %H:%M:%S").to_string();
+    let now = crate::clock::utc_now_fmt("%Y-%m-%d %H:%M:%S");
     sqlx::query(
         "UPDATE enrollment_tokens
          SET use_count = use_count + 1, last_used_at = ?
@@ -177,7 +177,7 @@ pub async fn approve_with_token(
 // Loads the tenant's tokens with a derived status string for display.
 // ─────────────────────────────────────────────────────────────────────────────
 async fn load_tokens(pool: &SqlitePool, tenant_id: &str) -> Vec<serde_json::Value> {
-    let now = chrono::Utc::now().format("%Y-%m-%d %H:%M:%S").to_string();
+    let now = crate::clock::utc_now_fmt("%Y-%m-%d %H:%M:%S");
     let rows = sqlx::query(
         "SELECT id, name, token_prefix, enabled, expires_at, max_uses, use_count,
                 created_by, created_at, last_used_at

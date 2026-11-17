@@ -292,7 +292,7 @@ pub async fn add_notification(
     owner_id: i32,
     message: &str,
 ) {
-    let now = chrono::Utc::now().format("%Y-%m-%dT%H:%M:%S").to_string();
+    let now = crate::clock::utc_now_fmt("%Y-%m-%dT%H:%M:%S");
 
     if let Err(e) = sqlx::query(
         "INSERT INTO notify (tenant_id, ntype, nts, owner_id, message) VALUES (?, ?, ?, ?, ?)",

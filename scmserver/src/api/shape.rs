@@ -17,7 +17,7 @@
 
 use std::collections::HashMap;
 
-use chrono::{DateTime, NaiveDateTime, Utc};
+use jiff::{civil::DateTime as NaiveDateTime, Timestamp};
 use serde::Serialize;
 use serde_json::{json, Value};
 use sqlx::{Row, SqlitePool};
@@ -54,13 +54,13 @@ pub fn text(v: Option<String>) -> Option<String> {
 pub fn timestamp(raw: &str) -> Option<String> {
     let t = raw.trim();
     if t.is_empty() { return None; }
-    if let Ok(dt) = DateTime::parse_from_rfc3339(t) {
-        return Some(dt.with_timezone(&Utc).format("%Y-%m-%dT%H:%M:%SZ").to_string());
+    if let Ok(dt) = t.parse::<Timestamp>() {
+        return Some(dt.strftime("%Y-%m-%dT%H:%M:%SZ").to_string());
     }
     for f in ["%Y-%m-%d %H:%M:%S", "%Y-%m-%dT%H:%M:%S", "%Y-%m-%d %H:%M:%S%.f",
               "%Y-%m-%dT%H:%M:%S%.f", "%Y-%m-%d %H:%M UTC", "%Y-%m-%d %H:%M"] {
-        if let Ok(dt) = NaiveDateTime::parse_from_str(t, f) {
-            return Some(dt.format("%Y-%m-%dT%H:%M:%SZ").to_string());
+        if let Ok(dt) = NaiveDateTime::strptime(f, t) {
+            return Some(dt.strftime("%Y-%m-%dT%H:%M:%SZ").to_string());
         }
     }
     None
@@ -72,7 +72,7 @@ pub fn opt_timestamp(v: Option<&str>) -> Option<String> {
 
 // The current time, as v1 writes it.
 pub fn now() -> String {
-    Utc::now().format("%Y-%m-%dT%H:%M:%SZ").to_string()
+    Timestamp::now().strftime("%Y-%m-%dT%H:%M:%SZ").to_string()
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

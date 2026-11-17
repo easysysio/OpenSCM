@@ -196,7 +196,7 @@ pub fn build_payload(
     Payload {
         version: 1,
         event: "compliance.alert",
-        fired_at: chrono::Utc::now().format("%Y-%m-%dT%H:%M:%SZ").to_string(),
+        fired_at: crate::clock::utc_now_fmt("%Y-%m-%dT%H:%M:%SZ"),
         server: base.to_string(),
         tenant: rule.tenant_id.clone(),
         alert: PayloadAlert {

@@ -127,13 +127,13 @@ pub fn default_dir(db: &Path) -> PathBuf {
 // Helper: default_file_name
 // openscm-<host>-<YYYYMMDDTHHMMSSZ>.oscm-backup, host reduced to safe chars.
 // ─────────────────────────────────────────────────────────────────────────────
-pub fn default_file_name(host: &str, now: chrono::DateTime<chrono::Utc>) -> String {
+pub fn default_file_name(host: &str, now: jiff::Timestamp) -> String {
     let host: String = host
         .chars()
         .map(|c| if c.is_ascii_alphanumeric() || c == '-' || c == '.' { c } else { '_' })
         .collect();
     let host = if host.is_empty() { "openscm".to_string() } else { host };
-    format!("openscm-{}-{}.{}", host, now.format("%Y%m%dT%H%M%SZ"), EXTENSION)
+    format!("openscm-{}-{}.{}", host, now.strftime("%Y%m%dT%H%M%SZ"), EXTENSION)
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -153,7 +153,7 @@ pub(crate) fn this_host() -> String {
 // an existing directory → a default name inside it; anything else → that file.
 // ─────────────────────────────────────────────────────────────────────────────
 pub fn resolve_out(out: Option<&Path>, db: &Path) -> Result<PathBuf, String> {
-    let name = default_file_name(&this_host(), chrono::Utc::now());
+    let name = default_file_name(&this_host(), jiff::Timestamp::now());
     match out {
         None => {
             let dir = default_dir(db);
@@ -406,13 +406,13 @@ fn package(
     if let Some(c) = &config {
         files.insert(CONFIG_ENTRY.to_string(), sha256_hex(c));
     }
-    let now = chrono::Utc::now();
+    let now = jiff::Timestamp::now();
     let manifest = Manifest {
         format: FORMAT,
         openscm_version: crate::app_version().to_string(),
         edition: crate::app_edition().to_string(),
         schema_version,
-        created_at: now.to_rfc3339_opts(chrono::SecondsFormat::Secs, true),
+        created_at: now.strftime("%Y-%m-%dT%H:%M:%SZ").to_string(),
         host: this_host(),
         files,
     };
@@ -431,7 +431,7 @@ fn package(
     let mut partial = out.as_os_str().to_owned();
     partial.push(".partial");
     let partial = PathBuf::from(partial);
-    let written = write_archive(&partial, &manifest_json, &entries, passphrase, work_factor, now.timestamp());
+    let written = write_archive(&partial, &manifest_json, &entries, passphrase, work_factor, now.as_second());
     if let Err(e) = written {
         let _ = fs::remove_file(&partial);
         return Err(format!("Writing the backup failed: {e}"));
@@ -910,8 +910,8 @@ fn swap_in(
     m: &Manifest,
     include_config: bool,
 ) -> Result<PathBuf, String> {
-    let ts = chrono::Utc::now();
-    let pre = db_dir.join(format!("pre-restore-{}", ts.format("%Y%m%dT%H%M%SZ")));
+    let ts = jiff::Timestamp::now();
+    let pre = db_dir.join(format!("pre-restore-{}", ts.strftime("%Y%m%dT%H%M%SZ")));
     create_private_dir(&pre.join("keys"))?;
 
     let with_suffix = |p: &Path, s: &str| { let mut o = p.as_os_str().to_owned(); o.push(s); PathBuf::from(o) };
@@ -962,7 +962,7 @@ fn swap_in(
         backup_host: m.host.clone(),
         backup_version: m.openscm_version.clone(),
         backup_schema: m.schema_version,
-        restored_at: ts.to_rfc3339_opts(chrono::SecondsFormat::Secs, true),
+        restored_at: ts.strftime("%Y-%m-%dT%H:%M:%SZ").to_string(),
         pre_restore: pre.display().to_string(),
         config_restored: include_config,
     };

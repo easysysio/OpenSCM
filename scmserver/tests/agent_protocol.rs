@@ -18,7 +18,7 @@ use tower::ServiceExt;
 
 fn b64(bytes: &[u8]) -> String { general_purpose::STANDARD.encode(bytes) }
 fn agent_key() -> SigningKey { SigningKey::from_bytes(&[7u8; 32]) }
-fn now_ms() -> i64 { chrono::Utc::now().timestamp_millis() }
+fn now_ms() -> i64 { jiff::Timestamp::now().as_millisecond() }
 
 async fn db() -> SqlitePool {
     let pool = SqlitePool::connect("sqlite::memory:").await.unwrap();

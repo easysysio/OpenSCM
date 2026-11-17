@@ -72,8 +72,8 @@ async fn schedule(pool: &SqlitePool, kind: &str) -> Option<(i64, String, Option<
     .unwrap()
 }
 
-fn now_utc() -> chrono::NaiveDateTime {
-    chrono::Utc::now().naive_utc()
+fn now_utc() -> jiff::civil::DateTime {
+    scmserver::clock::utc_now()
 }
 
 #[tokio::test]
@@ -101,7 +101,7 @@ async fn with_no_time_picked_a_new_schedule_starts_now() {
     add(&pool, &[("schedule_enabled", "on"), ("frequency", "daily"), ("next_run", "")]).await;
     let (_, _, _, next) = schedule(&pool, "scan").await.unwrap();
     let next = scmserver::schedule::parse_time(&next).unwrap();
-    assert!((now_utc() - next).num_minutes().abs() <= 1, "expected about now, got {next}");
+    assert!(now_utc().duration_since(next).as_mins().abs() <= 1, "expected about now, got {next}");
 }
 
 // The reviewed bug: clearing the time on the edit page reset it to now.
@@ -150,9 +150,9 @@ async fn a_cron_schedule_takes_its_next_run_from_the_expression() {
     let (_, freq, cron, next) = schedule(&pool, "scan").await.unwrap();
     assert_eq!((freq.as_str(), cron.as_deref()), ("custom", Some("*/5 * * * *")));
     let next = scmserver::schedule::parse_time(&next).unwrap();
-    let wait = (next - now_utc()).num_seconds();
+    let wait = next.duration_since(now_utc()).as_secs();
     assert!((0..=300).contains(&wait), "next run should be within 5 minutes, is {wait}s away");
-    assert_eq!(chrono::Timelike::minute(&next) % 5, 0, "on a 5-minute boundary");
+    assert_eq!(next.minute() % 5, 0, "on a 5-minute boundary");
 }
 
 #[tokio::test]

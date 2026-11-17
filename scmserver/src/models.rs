@@ -8,7 +8,6 @@
 use serde::{Deserialize, Serialize};
 use serde_json::value::RawValue;
 use sqlx::FromRow;
-use chrono::{DateTime, Utc};
 
 
 // Query parameters used on pages that show flash messages.
@@ -52,8 +51,8 @@ pub struct System {
     pub auth_public_key: Option<String>,
     pub trust_challenge: Option<String>,
     pub trust_proof: Option<String>,
-    pub created_date: Option<DateTime<Utc>>,
-    pub last_seen: Option<DateTime<Utc>>,
+    pub created_date: Option<jiff::Timestamp>,
+    pub last_seen: Option<jiff::Timestamp>,
     /// Computed server-side: true when last_seen is older than offline_threshold.
     #[serde(default)]
     pub is_offline: bool,

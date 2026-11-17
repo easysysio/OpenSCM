@@ -25,7 +25,7 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
 
-use chrono::NaiveDateTime;
+use jiff::civil::DateTime as NaiveDateTime;
 use serde::Serialize;
 use sqlx::SqlitePool;
 use tracing::{error, info, warn};
@@ -178,7 +178,7 @@ pub fn validate_settings(s: &BackupSettings, now: NaiveDateTime) -> Result<(), S
 // Function: save_settings
 // ─────────────────────────────────────────────────────────────────────────────
 pub async fn save_settings(pool: &SqlitePool, s: &BackupSettings) -> Result<(), String> {
-    validate_settings(s, chrono::Utc::now().naive_utc())?;
+    validate_settings(s, crate::clock::utc_now())?;
     set_setting(pool, "backup_enabled", if s.enabled { "1" } else { "0" }).await;
     set_setting(pool, "backup_schedule", s.schedule.trim()).await;
     set_setting(pool, "backup_keep", &s.keep.to_string()).await;
@@ -350,12 +350,12 @@ impl Backups {
         }
         let base = setting(pool, "backup_last_at")
             .await
-            .and_then(|t| NaiveDateTime::parse_from_str(&t, STATUS_TIME).ok())
+            .and_then(|t| NaiveDateTime::strptime(STATUS_TIME, &t).ok())
             .filter(|t| *t <= now)
             .unwrap_or(now);
         let at = crate::schedule::next_cron_run(s.schedule.trim(), base)
             .ok()
-            .and_then(|t| NaiveDateTime::parse_from_str(&t, crate::schedule::FMT).ok())?;
+            .and_then(|t| NaiveDateTime::strptime(crate::schedule::FMT, &t).ok())?;
         *self.next.lock().unwrap() = Some((s.schedule.clone(), at));
         Some(at)
     }
@@ -374,7 +374,7 @@ impl Backups {
         let sched = load_settings(pool).await.schedule;
         let following = crate::schedule::next_cron_run(sched.trim(), now)
             .ok()
-            .and_then(|t| NaiveDateTime::parse_from_str(&t, crate::schedule::FMT).ok());
+            .and_then(|t| NaiveDateTime::strptime(crate::schedule::FMT, &t).ok());
         *self.next.lock().unwrap() = following.map(|t| (sched, t));
 
         let me = self.clone();
@@ -404,7 +404,7 @@ impl Backups {
         backup::create_private_dir(&self.dir)?;
         // Two runs in the same second (a scheduled one and "Back up now")
         // would get the same name: number the second one.
-        let name = backup::default_file_name(&backup::this_host(), chrono::Utc::now());
+        let name = backup::default_file_name(&backup::this_host(), jiff::Timestamp::now());
         let mut out = self.dir.join(&name);
         let stem = name.trim_end_matches(&format!(".{}", backup::EXTENSION)).to_string();
         let mut n = 2;
@@ -428,7 +428,7 @@ impl Backups {
     // Status rows, audit entry, and on failure the bell and the alert trigger.
     // ─────────────────────────────────────────────────────────────────────────
     async fn record(&self, pool: &SqlitePool, trigger: &Trigger, result: &Result<RunResult, String>) {
-        let now = chrono::Utc::now().naive_utc().format(STATUS_TIME).to_string();
+        let now = crate::clock::utc_now().strftime(STATUS_TIME).to_string();
         set_setting(pool, "backup_last_at", &now).await;
         set_setting(pool, "backup_last_trigger", trigger.label()).await;
         let (actor_id, actor_name) = match trigger {
@@ -472,16 +472,16 @@ impl Backups {
     // Function: Backups::status
     // ─────────────────────────────────────────────────────────────────────────
     pub async fn status(&self, pool: &SqlitePool) -> Status {
-        let now = chrono::Utc::now().naive_utc();
+        let now = crate::clock::utc_now();
         let settings = load_settings(pool).await;
         let schedule_problem = validate_settings(&settings, now).err();
-        let next_run = self.next_run(pool, now).await.map(|t| format!("{} UTC", t.format("%Y-%m-%d %H:%M")));
+        let next_run = self.next_run(pool, now).await.map(|t| format!("{} UTC", t.strftime("%Y-%m-%d %H:%M")));
         let files = backup_files(&self.dir)
             .into_iter()
             .map(|(p, size, m)| BackupFile {
                 name: p.file_name().unwrap_or_default().to_string_lossy().to_string(),
                 size: backup::human_size(size),
-                modified: chrono::DateTime::<chrono::Utc>::from(m).format("%Y-%m-%d %H:%M UTC").to_string(),
+                modified: jiff::Timestamp::try_from(m).map(|t| t.strftime("%Y-%m-%d %H:%M UTC").to_string()).unwrap_or_default(),
             })
             .collect();
         Status {
@@ -515,7 +515,7 @@ impl Backups {
         if let Err(e) = read_passphrase_file(&self.passphrase_file) {
             return Some(format!("Scheduled backups cannot run: {e}"));
         }
-        if let Err(e) = validate_settings(&s, chrono::Utc::now().naive_utc()) {
+        if let Err(e) = validate_settings(&s, crate::clock::utc_now()) {
             return Some(format!("Scheduled backups cannot run: {e}"));
         }
         if setting(pool, "backup_last_result").await.as_deref() == Some("failed") {

@@ -16,7 +16,6 @@ use std::sync::Arc;
 use urlencoding;
 use std::collections::BTreeMap;
 use tracing::{info, error};
-use chrono::Utc;
 
 use crate::pdf::{Align, Cell, Doc, Style, Table, LOGO_WIDTH_MM};
 use crate::models::{
@@ -247,7 +246,7 @@ fn read_schedule(
         get("cron_val"),
         get("next_run"),
         get("next_run_tz_offset").and_then(|o| o.trim().parse::<i64>().ok()),
-        Utc::now().naive_utc(),
+        crate::clock::utc_now(),
     )
 }
 
@@ -322,7 +321,7 @@ pub async fn policies_add_save(
             return Redirect::to(&format!("/policies?error_message={}", encoded)).into_response();
         }
     };
-    let now_utc = Utc::now().format(crate::schedule::FMT).to_string();
+    let now_utc = crate::clock::utc_now_fmt(crate::schedule::FMT);
 
     // Insert policy (with auto-generated external_id for stable cross-system identity)
     let external_id = crate::schema::generate_external_id();
@@ -642,7 +641,7 @@ pub async fn policies_edit_save(
             return Redirect::to(&format!("/policies?error_message={}", encoded)).into_response();
         }
     };
-    let now_utc = Utc::now().format(crate::schedule::FMT).to_string();
+    let now_utc = crate::clock::utc_now_fmt(crate::schedule::FMT);
 
     // Update policy metadata
     if let Err(e) = sqlx::query(
@@ -1239,7 +1238,7 @@ pub async fn policies_report(
         description: policy_row.get::<Option<String>, _>("description").unwrap_or_default(),
         // Stored/displayed as canonical UTC (no tz marker); the web UI converts
         // it to the viewer's browser timezone client-side.
-        submission_date: Utc::now().format("%Y-%m-%d %H:%M:%S").to_string(),
+        submission_date: crate::clock::utc_now_fmt("%Y-%m-%d %H:%M:%S"),
         submitter_name: auth.username.clone(),
         tests_metadata,
         system_reports,
@@ -1610,7 +1609,7 @@ pub(crate) async fn fetch_live_policy_report_data(
         version: policy_row.get("version"),
         description: policy_row.get::<Option<String>, _>("description").unwrap_or_default(),
         // Canonical UTC (no tz marker); localized to the browser tz in the UI.
-        submission_date: Utc::now().format("%Y-%m-%d %H:%M:%S").to_string(),
+        submission_date: crate::clock::utc_now_fmt("%Y-%m-%d %H:%M:%S"),
         submitter_name: submitter_name.to_string(),
         tests_metadata,
         system_reports,

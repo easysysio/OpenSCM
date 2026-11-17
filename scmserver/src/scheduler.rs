@@ -9,7 +9,6 @@
 
 use sqlx::{SqlitePool, Row};
 use tokio::time::{self, Duration};
-use chrono::{Utc, Timelike, Datelike};
 use tracing::{info, warn, error};
 use reqwest::Client;
 
@@ -650,9 +649,9 @@ pub async fn record_entity_history(pool: &SqlitePool) -> Result<(), sqlx::Error>
 // next_run has arrived, then moves each to its next run. `now` is passed in so
 // the loop and the tests share one clock per tick.
 // ─────────────────────────────────────────────────────────────────────────────
-pub async fn run_due_schedules(pool: &SqlitePool, now: chrono::DateTime<Utc>) {
+pub async fn run_due_schedules(pool: &SqlitePool, now: jiff::Timestamp) {
     let loop_pool = pool.clone();
-    let now_str = now.format("%Y-%m-%dT%H:%M").to_string();
+    let now_str = now.strftime("%Y-%m-%dT%H:%M").to_string();
 
     let due_schedules = match sqlx::query_as::<_, PolicySchedule>(
         "SELECT id, tenant_id, policy_id, schedule_type,
@@ -691,7 +690,7 @@ pub async fn run_due_schedules(pool: &SqlitePool, now: chrono::DateTime<Utc>) {
                 &schedule.frequency,
                 schedule.cron_expression.as_deref(),
                 &schedule.next_run,
-                now.naive_utc(),
+                crate::clock::civil_utc(now),
             );
             if let Err(e) = sqlx::query("UPDATE policy_schedules SET next_run = ? WHERE id = ?")
                 .bind(&next_run_time)
@@ -754,7 +753,7 @@ pub async fn run_due_schedules(pool: &SqlitePool, now: chrono::DateTime<Utc>) {
                     &schedule.frequency,
                     schedule.cron_expression.as_deref(),
                     &schedule.next_run,
-                    now.naive_utc(),
+                    crate::clock::civil_utc(now),
                 );
                 if let Some(problem) = problem {
                     error!("Schedule for policy {}: {}", schedule.policy_id, problem);
@@ -816,7 +815,7 @@ pub async fn start_background_scheduler(pool: SqlitePool) {
         // When this server process came up. Used to gate the inactive-system
         // prune so a server outage can't be mistaken for absent agents.
         let started_at = std::time::Instant::now();
-        let mut last_snapshot_hour: i32 = Utc::now().hour() as i32;
+        let mut last_snapshot_hour: i32 = crate::clock::utc_now().hour() as i32;
         // Track the last calendar day on which daily-prune tasks ran so
         // the daily tick fires exactly once per UTC day regardless of
         // when the server started. Drives audit-log, report, and
@@ -826,19 +825,20 @@ pub async fn start_background_scheduler(pool: SqlitePool) {
         loop {
             interval.tick().await;
 
-            let now = Utc::now();
-            let current_hour = now.hour() as i32;
+            let now = jiff::Timestamp::now();
+            let now_utc = crate::clock::civil_utc(now);
+            let current_hour = now_utc.hour() as i32;
             // ordinal0() = 0-based day-of-year. Wraparound (year change) is
             // handled fine because last_audit_prune_day starts at -1 and any
             // change != prior value triggers one prune, then re-syncs.
-            let current_day  = now.ordinal0() as i32;
+            let current_day  = now_utc.day_of_year() as i32 - 1;
 
             // --- TASK A: POLICY SCHEDULER (scan + report) ---
             run_due_schedules(&loop_pool, now).await;
 
             // --- TASK H: SCHEDULED BACKUP ---
             // Starts in the background when due (backup_jobs.rs); never waits.
-            let _ = crate::backup_jobs::global().tick(&loop_pool, now.naive_utc()).await;
+            let _ = crate::backup_jobs::global().tick(&loop_pool, crate::clock::civil_utc(now)).await;
 
             // --- TASK G: DRAIN THE ALERT OUTBOX ---
             // Deliveries are queued by the evaluator and sent here, so a slow
@@ -850,7 +850,7 @@ pub async fn start_background_scheduler(pool: SqlitePool) {
             prune_inactive_systems(&loop_pool, started_at.elapsed()).await;
 
             // --- TASK C: HOURLY COMPLIANCE SNAPSHOT ---
-            if now.minute() == 0 && current_hour != last_snapshot_hour {
+            if now_utc.minute() == 0 && current_hour != last_snapshot_hour {
                 info!("Running hourly compliance aggregation snapshot...");
                 if let Err(e) = record_compliance_history(&loop_pool).await {
                     error!("Hourly compliance snapshot failed: {}", e);
@@ -985,8 +985,8 @@ pub async fn prune_inactive_systems(pool: &SqlitePool, uptime: Duration) {
         // 60s tick.  SQLite stores CURRENT_TIMESTAMP as "%Y-%m-%d %H:%M:%S",
         // which sorts lexically == chronologically, so a string comparison
         // against a same-format cutoff is correct.
-        let cutoff = (Utc::now() - chrono::Duration::minutes(minutes))
-            .format("%Y-%m-%d %H:%M:%S")
+        let cutoff = (jiff::Timestamp::now() - jiff::SignedDuration::from_mins(minutes))
+            .strftime("%Y-%m-%d %H:%M:%S")
             .to_string();
 
         let deleted = sqlx::query(

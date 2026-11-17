@@ -282,7 +282,7 @@ impl World {
 
     // The claims a well-behaved provider would issue for this sign-in.
     fn good_claims(&self, nonce: &str) -> Value {
-        let now = chrono::Utc::now().timestamp();
+        let now = jiff::Timestamp::now().as_second();
         json!({
             "iss": self.idp.base, "aud": CLIENT_ID, "sub": "idp-subject-bob", "iat": now, "exp": now + 300,
             "nonce": nonce, "email": "bob@acme.example", "email_verified": true
@@ -459,7 +459,7 @@ async fn a_token_from_another_issuer_is_refused() {
 #[tokio::test]
 async fn an_expired_or_not_yet_valid_token_is_refused() {
     let w = world().await;
-    let now = chrono::Utc::now().timestamp();
+    let now = jiff::Timestamp::now().as_second();
     w.refused(&w.sign_in(move |c| c["exp"] = json!(now - 600)).await, "expired", "ExpiredSignature").await;
     w.refused(&w.sign_in(move |c| c["nbf"] = json!(now + 600)).await, "not yet valid", "ImmatureSignature").await;
     // nbf written as text must not skip the check (CVE-2026-25537: jsonwebtoken

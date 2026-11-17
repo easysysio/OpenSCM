@@ -119,8 +119,8 @@ async fn due_report_schedule(pool: &SqlitePool) {
         .execute(pool).await.unwrap();
 }
 
-fn tick() -> chrono::DateTime<chrono::Utc> {
-    chrono::DateTime::parse_from_rfc3339("2026-10-05T02:00:30Z").unwrap().with_timezone(&chrono::Utc)
+fn tick() -> jiff::Timestamp {
+    "2026-10-05T02:00:30Z".parse::<jiff::Timestamp>().unwrap()
 }
 
 async fn next_run(pool: &SqlitePool) -> String {
@@ -150,7 +150,7 @@ async fn a_scheduled_report_is_skipped_at_the_plan_limit() {
     sqlx::query("DELETE FROM notify").execute(&pool).await.unwrap();
 
     // The next day's run finds the plan full.
-    let day2 = tick() + chrono::Duration::days(1);
+    let day2 = tick() + jiff::SignedDuration::from_hours(24);
     scmserver::scheduler::run_due_schedules(&pool, day2).await;
     assert_eq!(count(&pool, "SELECT COUNT(*) FROM reports").await, 1, "no report past the limit");
     assert_eq!(next_run(&pool).await, "2026-10-07T02:00", "the schedule moves on; it must not retry every minute");
@@ -160,7 +160,7 @@ async fn a_scheduled_report_is_skipped_at_the_plan_limit() {
     assert!(msg.contains("policy 1") && msg.contains("was not saved") && msg.contains("allows 1 reports"), "{msg}");
 
     // A further skipped run does not add a second copy of the warning.
-    scmserver::scheduler::run_due_schedules(&pool, day2 + chrono::Duration::days(1)).await;
+    scmserver::scheduler::run_due_schedules(&pool, day2 + jiff::SignedDuration::from_hours(24)).await;
     assert_eq!(count(&pool, "SELECT COUNT(*) FROM notify WHERE owner_id = 20").await, 1);
     assert_eq!(count(&pool, "SELECT COUNT(*) FROM reports").await, 1);
 }

@@ -35,7 +35,7 @@ static LAST_SENT_AT_MS: std::sync::atomic::AtomicI64 = std::sync::atomic::Atomic
 // ─────────────────────────────────────────────────────────────────────────────
 pub(crate) fn next_sent_at_ms() -> i64 {
     use std::sync::atomic::Ordering;
-    let now = chrono::Utc::now().timestamp_millis();
+    let now = jiff::Timestamp::now().as_millisecond();
     let mut prev = LAST_SENT_AT_MS.load(Ordering::SeqCst);
     loop {
         let next = now.max(prev + 1);
@@ -694,7 +694,7 @@ async fn post_heartbeat(
         ip:           sys.ip.clone(),
         os:           sys.os.clone(),
         arch:         sys.arch.clone(),
-        timestamp:    chrono::Utc::now().timestamp().to_string(),
+        timestamp:    jiff::Timestamp::now().as_second().to_string(),
         public_key:   if needs_handshake { Some(identity.public_base64.clone()) } else { None },
         // Send the enrollment token only at registration (alongside the public
         // key handshake) — never on routine heartbeats, so the secret isn't

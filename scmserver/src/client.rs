@@ -74,7 +74,7 @@ fn check_protocol(protocol: Option<i64>) -> Result<(), axum::response::Response>
 #[allow(clippy::result_large_err)]
 fn within_clock_window(sent_at_ms: Option<i64>) -> Result<i64, axum::response::Response> {
     let ts = sent_at_ms.ok_or_else(|| reject(StatusCode::BAD_REQUEST, "Protocol 1 requires sent_at_ms"))?;
-    let now = chrono::Utc::now().timestamp_millis();
+    let now = jiff::Timestamp::now().as_millisecond();
     if (ts - now).abs() > MAX_CLOCK_SKEW_MS {
         return Err(reject(
             StatusCode::UNAUTHORIZED,
@@ -1281,7 +1281,7 @@ pub async fn receive_result(
         return resp;
     }
 
-    let now = chrono::Utc::now().format("%Y-%m-%dT%H:%M:%S").to_string();
+    let now = crate::clock::utc_now_fmt("%Y-%m-%dT%H:%M:%S");
 
     // A test can be deleted while a scan that includes it is still running.
     // Its result then has nowhere to go: the INSERT below fails on the foreign
@@ -1413,7 +1413,7 @@ async fn ingest_containers(
 ) -> Result<(), sqlx::Error> {
     // Single stable timestamp for this scan boundary so the DELETE-stragglers
     // step is monotonic (any row we just touched has last_seen >= now_str).
-    let now_str = chrono::Utc::now().format("%Y-%m-%d %H:%M:%S").to_string();
+    let now_str = crate::clock::utc_now_fmt("%Y-%m-%d %H:%M:%S");
 
     for c in incoming {
         sqlx::query(
