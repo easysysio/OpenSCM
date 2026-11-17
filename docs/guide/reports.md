@@ -77,6 +77,7 @@ Each saved policy report captures:
 | **Test Metadata** | Name and description of every test included |
 | **Result Counts** | Per-system Passed / Failed / NA / Excluded tallies in the card header |
 | **Aggregate Totals** | Policy-wide Pass / Fail / NA / Excl counts plus a percent-compliant badge in the top card |
+| **Results by Test** | Every test once, with how many systems pass, fail, are NA or excluded, and an overall result (worked out when the report is viewed, so older snapshots have it too) |
 
 ### Why a Test Failed
 
@@ -209,6 +210,26 @@ independently, on a policy report each *system* does — so you can drill into o
 policy's failures while the rest stay as they are. It works on both the live reports
 and the saved snapshots under **Reports**, and it's purely a display filter: nothing is
 changed or recalculated, and the counts always match what the filter shows.
+
+#### Filtering a whole policy report
+
+A policy report, live or saved, also has a **Show** bar above its results:
+**All · Failed · Passed · NA · Excluded**. Clicking the Pass / Fail / NA / Excl totals
+in the top card does the same; click the active total again to clear it. The choice
+applies to the whole report:
+
+- **Results by Test** lists each test once. Its result is **FAIL** if the test fails
+  on any system, **PASS** if it fails on none and passes on at least one, and **NA**
+  otherwise. **Failed**, **Passed** and **NA** show the tests with that result;
+  **Excluded** shows the tests with at least one excluded result. Click a test's
+  counts to see which systems are behind them.
+- **System cards** show only results with the chosen status, including container
+  results. Systems with nothing to show are hidden, and the bar says how many
+  systems are left.
+
+Picking a filter resets the per-card filters above. Add `?show=fail` (or `pass`,
+`na`, `excluded`) to the report's address to open it already filtered. The PDF and
+emailed reports always contain the full report.
 
 ---
 

@@ -109,21 +109,21 @@
 
                 <div class="col-md-4 text-center">
                   <div class="row">
-                    <div class="col-3">
+                    <div class="col-3" data-report-filter="pass" title="Show passed results">
                       <h3 class="text-success mb-0">{{ total_pass }}</h3>
                       <small class="text-uppercase text-muted text-xs">Pass</small>
                     </div>
-                    <div class="col-3">
+                    <div class="col-3" data-report-filter="fail" title="Show failed results">
                       <h3 class="{% if total_fail > 0 %}text-danger{% else %}text-success{% endif %} mb-0">
                         {{ total_fail }}
                       </h3>
                       <small class="text-uppercase text-muted text-xs">Fail</small>
                     </div>
-                    <div class="col-3">
+                    <div class="col-3" data-report-filter="na" title="Show not-applicable results">
                       <h3 class="text-muted mb-0">{{ total_na }}</h3>
                       <small class="text-uppercase text-muted text-xs">NA</small>
                     </div>
-                    <div class="col-3">
+                    <div class="col-3" data-report-filter="excluded" title="Show excluded results">
                       <h3 class="text-muted mb-0">{{ total_excluded }}</h3>
                       <small class="text-uppercase text-muted text-xs">Excl</small>
                     </div>
@@ -146,6 +146,9 @@
           </div>
         </div>
       </div>
+
+      {# Report-wide filter + Results by Test (shared with the saved report view). #}
+      {% include "partials/report_by_test.html" %}
 
       {% for system in system_reports %}
       {% set exempt = system.pass_count == 0 and system.fail_count == 0 %}

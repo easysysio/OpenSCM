@@ -139,21 +139,21 @@
 
                 <div class="col-md-4 text-center">
                   <div class="row">
-                    <div class="col-3">
+                    <div class="col-3" data-report-filter="pass" title="Show passed results">
                       <h3 class="text-success mb-0">{{ report.total_pass }}</h3>
                       <small class="text-uppercase text-muted text-xs">Pass</small>
                     </div>
-                    <div class="col-3">
+                    <div class="col-3" data-report-filter="fail" title="Show failed results">
                       <h3 class="{% if report.total_fail > 0 %}text-danger{% else %}text-success{% endif %} mb-0">
                         {{ report.total_fail }}
                       </h3>
                       <small class="text-uppercase text-muted text-xs">Fail</small>
                     </div>
-                    <div class="col-3">
+                    <div class="col-3" data-report-filter="na" title="Show not-applicable results">
                       <h3 class="text-muted mb-0">{{ report.total_na }}</h3>
                       <small class="text-uppercase text-muted text-xs">NA</small>
                     </div>
-                    <div class="col-3">
+                    <div class="col-3" data-report-filter="excluded" title="Show excluded results">
                       <h3 class="text-muted mb-0">{{ report.total_excluded }}</h3>
                       <small class="text-uppercase text-muted text-xs">Excl</small>
                     </div>
@@ -202,6 +202,9 @@
         </div>
       </div>
       {% endif %}
+
+      {# Report-wide filter + Results by Test (shared with the saved report view). #}
+      {% include "partials/report_by_test.html" %}
 
       {% for system in report.system_reports %}
       {% set exempt = system.pass_count == 0 and system.fail_count == 0 %}
@@ -354,7 +357,11 @@
                   <thead class="sr-only"><tr><th scope="col">Test</th><th scope="col">Result</th></tr></thead>
                   <tbody>
                     {% for res in c.results %}
-                    <tr>
+                    {% set c_status = "fail" %}
+                    {% if res.is_excluded %}{% set c_status = "excluded" %}
+                    {% elif res.status == "PASS" %}{% set c_status = "pass" %}
+                    {% elif res.status == "NA" %}{% set c_status = "na" %}{% endif %}
+                    <tr class="report-row" data-status="{{ c_status }}">
                       <td style="padding-left: 28px;">
                         {% set meta = report.tests_metadata | filter(attribute="name", value=res.test_name) | first %}
                         {% if meta %}

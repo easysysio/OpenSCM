@@ -613,12 +613,31 @@ fn neg_one() -> f64 { -1.0 }
 
 
 // Metadata for a single test as stored in a saved report (name, description, etc.).
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct TestMeta {
     pub name: String,
     pub description: String,
     pub rational: String,
     pub remediation: String,
+}
+
+// One test's results across every system in a policy report — the "Results
+// by Test" card. Built at render time from the per-system results
+// (crate::policies::summarize_by_test), never stored, so saved snapshots get
+// it too. Host results only; containers are a separate axis.
+//
+// verdict: "fail" if the test fails on any system, else "pass" if it passes on
+// any, else "na" (only NA or excluded). The four *_on lists name the systems
+// with each status; an excluded result counts only as excluded.
+#[derive(Serialize, Debug, Default)]
+pub struct TestSummary {
+    pub test_name: String,
+    pub verdict: &'static str,
+    pub failed_on: Vec<String>,
+    pub passed_on: Vec<String>,
+    pub na_on: Vec<String>,
+    pub excluded_on: Vec<String>,
+    pub meta: Option<TestMeta>,
 }
 
 // One system's compliance results grouped into a report.

@@ -1,0 +1,194 @@
+{#
+  report_by_test.html — report-wide status filter + "Results by Test" card.
+
+  Included by policies_report.html (live) and reports_view.html (saved
+  snapshot). Uses `test_summary` (crate::policies::summarize_by_test); without
+  it only the filter bar renders.
+
+  The filter bar applies to the whole report:
+    - Results by Test: shows tests whose overall verdict matches (Excluded:
+      tests with at least one excluded result);
+    - system cards: shows rows with that status (host and container rows,
+      tr.report-row[data-status]) and hides cards with nothing matching.
+  Elements with [data-report-filter] elsewhere on the page (the summary
+  counts) set it too. ?show=fail|pass|na|excluded opens the page filtered.
+#}
+<div class="card shadow-sm mb-3" id="report-filter-bar">
+  <div class="card-body py-2 d-flex flex-wrap align-items-center">
+    <span class="text-sm text-muted font-weight-bold mr-2"><i class="fas fa-filter mr-1"></i>Show</span>
+    <div class="btn-group btn-group-sm flex-wrap" role="group" aria-label="Filter results by status">
+      <button type="button" class="btn btn-outline-secondary active" data-report-filter="">All</button>
+      <button type="button" class="btn btn-outline-danger" data-report-filter="fail"><i class="fas fa-times-circle mr-1"></i>Failed</button>
+      <button type="button" class="btn btn-outline-success" data-report-filter="pass"><i class="fas fa-check-circle mr-1"></i>Passed</button>
+      <button type="button" class="btn btn-outline-secondary" data-report-filter="na"><i class="fas fa-minus-circle mr-1"></i>NA</button>
+      <button type="button" class="btn btn-outline-secondary" data-report-filter="excluded"><i class="fas fa-ban mr-1"></i>Excluded</button>
+    </div>
+    <span class="text-xs text-muted ml-2" id="report-filter-note"></span>
+  </div>
+</div>
+
+{% if test_summary is defined and test_summary | length > 0 %}
+<div class="card card-outline card-primary shadow-sm" id="results-by-test">
+  <div class="card-header">
+    <h3 class="card-title font-weight-bold"><i class="fas fa-list-check mr-2 text-primary"></i>Results by Test</h3>
+    <div class="card-tools">
+      <span class="text-xs text-muted mr-2" id="by-test-count">{{ test_summary | length }} {% if test_summary | length == 1 %}test{% else %}tests{% endif %}</span>
+      <button type="button" class="btn btn-tool" data-card-widget="collapse"><i class="fas fa-minus"></i></button>
+    </div>
+  </div>
+  <div class="card-body p-0">
+    <table class="table table-valign-middle mb-0">
+      <thead>
+        <tr class="text-xs text-muted text-uppercase">
+          <th style="padding-left: 20px;">Test</th>
+          <th class="text-center text-nowrap" style="width: 1%;">Systems</th>
+          <th class="text-center text-nowrap" style="width: 1%; padding-left: 1.5rem; padding-right: 1.5rem;">Result</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for t in test_summary %}
+        <tr class="by-test-row" data-verdict="{{ t.verdict }}" data-excluded="{{ t.excluded_on | length }}">
+          <td style="padding-left: 20px;">
+            {% if t.meta %}
+            <span class="test-name-link" data-toggle="modal" data-target="#testDetailModal"
+              data-name="{{ t.test_name }}" data-description="{{ t.meta.description }}"
+              data-rational="{{ t.meta.rational }}" data-remediation="{{ t.meta.remediation }}"
+              data-status="{{ t.verdict | upper }}"><i class="fas fa-info-circle text-muted mr-1 text-xs"></i>{{ t.test_name }}</span>
+            {% else %}{{ t.test_name }}{% endif %}
+          </td>
+          <td class="text-center text-nowrap">
+            <button type="button" class="btn btn-link btn-xs p-0 by-test-toggle" title="Show which systems" aria-expanded="false">
+              {% if t.failed_on | length > 0 %}<span class="badge badge-danger-soft text-danger mr-1" title="Failed"><i class="fas fa-times-circle mr-1"></i>{{ t.failed_on | length }}</span>{% endif %}
+              {% if t.passed_on | length > 0 %}<span class="badge badge-success-soft text-success mr-1" title="Passed"><i class="fas fa-check-circle mr-1"></i>{{ t.passed_on | length }}</span>{% endif %}
+              {% if t.na_on | length > 0 %}<span class="badge badge-light text-secondary mr-1" title="Not applicable"><i class="fas fa-minus-circle mr-1"></i>{{ t.na_on | length }}</span>{% endif %}
+              {% if t.excluded_on | length > 0 %}<span class="badge badge-light text-secondary mr-1" title="Excluded"><i class="fas fa-ban mr-1"></i>{{ t.excluded_on | length }}</span>{% endif %}
+              <i class="fas fa-chevron-down text-muted text-xs"></i>
+            </button>
+          </td>
+          <td class="text-center text-nowrap">
+            {% if t.verdict == "fail" %}
+            <span class="badge badge-danger-soft text-danger"><i class="fas fa-times-circle mr-1"></i>FAIL</span>
+            {% elif t.verdict == "pass" %}
+            <span class="badge badge-success-soft text-success"><i class="fas fa-check-circle mr-1"></i>PASS</span>
+            {% else %}
+            <span class="text-secondary text-sm"><i class="fas fa-minus-circle mr-1"></i>NA</span>
+            {% endif %}
+          </td>
+        </tr>
+        <tr class="by-test-detail" style="display:none;">
+          <td colspan="3" class="bg-light px-4 py-2 text-sm">
+            {% if t.failed_on | length > 0 %}<div><strong class="text-danger">Failed on:</strong> {{ t.failed_on | join(sep=", ") }}</div>{% endif %}
+            {% if t.passed_on | length > 0 %}<div><strong class="text-success">Passed on:</strong> {{ t.passed_on | join(sep=", ") }}</div>{% endif %}
+            {% if t.na_on | length > 0 %}<div><strong class="text-secondary">NA on:</strong> {{ t.na_on | join(sep=", ") }}</div>{% endif %}
+            {% if t.excluded_on | length > 0 %}<div><strong class="text-secondary">Excluded on:</strong> {{ t.excluded_on | join(sep=", ") }}</div>{% endif %}
+          </td>
+        </tr>
+        {% endfor %}
+        <tr class="by-test-empty" style="display:none;">
+          <td colspan="3" class="text-center text-muted py-3">No tests match this filter.</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endif %}
+
+<script>
+  // Report-wide status filter. Vanilla JS so it runs wherever it is included.
+  document.addEventListener('DOMContentLoaded', function () {
+    var VALID = ['fail', 'pass', 'na', 'excluded'];
+    var NAMES = { fail: 'failed', pass: 'passed', na: 'not applicable', excluded: 'excluded' };
+    var current = '';
+
+    function each(sel, root, fn) { Array.prototype.forEach.call((root || document).querySelectorAll(sel), fn); }
+
+    // Per-test details open/close.
+    each('.by-test-toggle', null, function (btn) {
+      btn.addEventListener('click', function () {
+        var detail = btn.closest('tr').nextElementSibling;
+        var open = detail.style.display === 'none';
+        detail.style.display = open ? '' : 'none';
+        btn.setAttribute('aria-expanded', open ? 'true' : 'false');
+      });
+    });
+
+    function apply(want) {
+      current = want;
+      each('#report-filter-bar [data-report-filter]', null, function (b) {
+        b.classList.toggle('active', (b.getAttribute('data-report-filter') || '') === want);
+      });
+
+      // Results by Test.
+      var shownTests = 0, totalTests = 0;
+      each('tr.by-test-row', null, function (row) {
+        totalTests++;
+        var show = !want ||
+          (want === 'excluded' ? row.getAttribute('data-excluded') !== '0'
+                               : row.getAttribute('data-verdict') === want);
+        row.style.display = show ? '' : 'none';
+        row.nextElementSibling.style.display = 'none';
+        if (show) shownTests++;
+      });
+      var empty = document.querySelector('tr.by-test-empty');
+      if (empty) empty.style.display = shownTests ? 'none' : '';
+      var cnt = document.getElementById('by-test-count');
+      if (cnt) cnt.textContent = want ? (shownTests + ' of ' + totalTests + ' tests')
+                                      : (totalTests + (totalTests === 1 ? ' test' : ' tests'));
+
+      // System cards: top-level cards that hold result rows.
+      var shownSystems = 0, totalSystems = 0;
+      each('.card', null, function (card) {
+        if (card.parentElement.closest('.card')) return;            // nested (container) card
+        if (!card.querySelector('tr.report-row')) return;            // not a system card
+        totalSystems++;
+        each('.status-filter', card, function (b) { b.classList.remove('filter-active'); });
+        each('tr.evidence-detail', card, function (ev) { ev.style.display = 'none'; });
+        var any = false;
+        each('tr.report-row', card, function (row) {
+          var show = !want || row.getAttribute('data-status') === want;
+          row.style.display = show ? '' : 'none';
+          if (show) any = true;
+        });
+        // Container sub-cards with nothing left to show.
+        each('.card', card, function (sub) {
+          var rows = sub.querySelectorAll('tr.report-row');
+          if (!rows.length) return;
+          var vis = Array.prototype.some.call(rows, function (r) { return r.style.display !== 'none'; });
+          sub.style.display = vis ? '' : 'none';
+        });
+        card.style.display = any ? '' : 'none';
+        if (any) shownSystems++;
+      });
+
+      var note = document.getElementById('report-filter-note');
+      if (note) note.textContent = want
+        ? ('Showing ' + NAMES[want] + ' results: ' + shownSystems + ' of ' + totalSystems + ' systems')
+        : '';
+
+      // Keep ?show= in the address and on the trend range links.
+      try {
+        var url = new URL(window.location.href);
+        if (want) url.searchParams.set('show', want); else url.searchParams.delete('show');
+        window.history.replaceState(null, '', url.toString());
+        each('a[href*="range="]', null, function (a) {
+          var u = new URL(a.getAttribute('href'), window.location.href);
+          if (want) u.searchParams.set('show', want); else u.searchParams.delete('show');
+          a.setAttribute('href', u.pathname + u.search);
+        });
+      } catch (e) { /* old browser: the filter still works */ }
+    }
+
+    each('[data-report-filter]', null, function (el) {
+      el.style.cursor = 'pointer';
+      el.addEventListener('click', function () {
+        var want = el.getAttribute('data-report-filter') || '';
+        // A summary count that is already active clears the filter.
+        if (!el.closest('#report-filter-bar') && current === want) want = '';
+        apply(want);
+      });
+    });
+
+    var initial = new URLSearchParams(window.location.search).get('show');
+    if (VALID.indexOf(initial) !== -1) apply(initial);
+  });
+</script>

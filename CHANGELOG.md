@@ -6,6 +6,10 @@ All notable changes to OpenSCM are documented here.
 
 ## [Unreleased]
 
+### Added
+- **Filter a whole policy report by Failed, Passed, NA or Excluded.** A **Show** bar on the policy report and on saved policy reports applies to every system at once, including container results. Systems with nothing to show are hidden. Clicking the Pass / Fail / NA / Excl totals at the top does the same, and `?show=fail` (or `pass`, `na`, `excluded`) opens a report already filtered.
+- **Results by Test on policy reports.** A new card lists each test once with how many systems pass, fail, are NA or excluded, worst first, and which systems those are. Its result is FAIL if the test fails on any system. It follows the same filter, and saved reports have it too.
+
 ---
 
 ## [1.1.4] - 2026-11-15

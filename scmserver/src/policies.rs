@@ -22,7 +22,7 @@ use crate::pdf::{Align, Cell, Doc, Style, Table, LOGO_WIDTH_MM};
 use crate::models::{
     ErrorQuery, SystemGroup, Test, Policy, PolicySchedule,
     SystemInsidePolicy, TestInsidePolicy, PolicyCompliance,
-    ReportData, TestMeta, SystemReport, IndividualResult, ContainerReportGroup,
+    ReportData, TestMeta, TestSummary, SystemReport, IndividualResult, ContainerReportGroup,
     UserRole, AuthSession,
     PolicyExport, PolicyExportPolicy, PolicyExportTest, PolicyExportTestCondition,
     PolicyImportSummary,
@@ -1051,6 +1051,42 @@ pub async fn policies_report_unexclude(
 
 
 // ─────────────────────────────────────────────────────────────────────────────
+// summarize_by_test
+// Regroup a policy report's per-system results by test for the "Results by
+// Test" card (live report and saved snapshots). Order: failing tests first
+// (most failing systems first), then passing, then NA; ties by name.
+// ─────────────────────────────────────────────────────────────────────────────
+pub fn summarize_by_test(systems: &[SystemReport], meta: &[TestMeta]) -> Vec<TestSummary> {
+    let mut by_test: BTreeMap<&str, TestSummary> = BTreeMap::new();
+    for s in systems {
+        for r in &s.results {
+            let t = by_test.entry(r.test_name.as_str()).or_insert_with(|| TestSummary {
+                test_name: r.test_name.clone(),
+                meta: meta.iter().find(|m| m.name == r.test_name).cloned(),
+                ..Default::default()
+            });
+            let list = if r.is_excluded { &mut t.excluded_on }
+                else if r.status == "PASS" { &mut t.passed_on }
+                else if r.status == "FAIL" { &mut t.failed_on }
+                else { &mut t.na_on };
+            list.push(s.system_name.clone());
+        }
+    }
+    let mut out: Vec<TestSummary> = by_test.into_values().map(|mut t| {
+        t.verdict = if !t.failed_on.is_empty() { "fail" }
+            else if !t.passed_on.is_empty() { "pass" }
+            else { "na" };
+        t
+    }).collect();
+    let rank = |v: &str| match v { "fail" => 0, "pass" => 1, _ => 2 };
+    out.sort_by(|a, b| rank(a.verdict).cmp(&rank(b.verdict))
+        .then(b.failed_on.len().cmp(&a.failed_on.len()))
+        .then(a.test_name.cmp(&b.test_name)));
+    out
+}
+
+
+// ─────────────────────────────────────────────────────────────────────────────
 // GET /policies/report/{id}
 // Render the live compliance report for a policy (current results).
 // Role: Viewer
@@ -1230,8 +1266,11 @@ pub async fn policies_report(
     let (trend_labels, trend_scores, trend_passed, trend_failed) =
         fetch_entity_trend(&pool, &auth.tenant_id, "policy", id as i64, pmode == "system", trend_range).await;
 
+    let test_summary = summarize_by_test(&report_data.system_reports, &report_data.tests_metadata);
+
     let mut context = Context::new();
     context.insert("report", &report_data);
+    context.insert("test_summary", &test_summary);
     context.insert("fail_count", &fail_count);
     context.insert("compliance_sat", &compliance_sat);
     context.insert("compliance_marginal", &compliance_marginal);

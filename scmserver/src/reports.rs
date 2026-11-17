@@ -416,6 +416,7 @@ pub async fn reports_view(
     context.insert("report", &report);
     context.insert("tests_metadata", &tests_metadata);
     context.insert("system_reports", &system_reports);
+    context.insert("test_summary", &crate::policies::summarize_by_test(&system_reports, &tests_metadata));
     context.insert("fail_count", &fail_count);
     context.insert("total_pass", &total_pass);
     context.insert("total_fail", &total_fail);
