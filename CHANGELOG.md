@@ -6,6 +6,10 @@ All notable changes to OpenSCM are documented here.
 
 ## [Unreleased]
 
+---
+
+## [1.1.6] - 2026-11-18
+
 ### Security
 - lettre 0.11.23 → 0.11.24 (RUSTSEC-2026-0560 to -0565). The mail library behind email alerts and SMTP settings had six flaws: a man-in-the-middle could forge replies during STARTTLS, message text with a bare CR or LF could inject SMTP commands, a quoted address could be delivered elsewhere, and a hostile mail server could crash the sender or exhaust its memory. The minimum version is now 0.11.24 in `Cargo.toml`, so the old one cannot come back. `cargo audit` is clean.
 
