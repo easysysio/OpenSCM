@@ -6,6 +6,9 @@ All notable changes to OpenSCM are documented here.
 
 ## [Unreleased]
 
+### Fixed
+- **Changing an agent's server URL no longer makes it a new system.** Pointing an agent at another address of the same server (an external name to an internal one, say) used to register it again with a new ID, because the agent keeps its identity per URL. Now, when the new URL has no identity yet, the agent first checks in with its previous one; if the server signs the reply with the key the agent already trusts, it is the same server and the agent keeps its ID. A different server gets a new registration, as before. The old identity stays on disk, so switching back also works.
+
 ---
 
 ## [1.1.5] - 2026-11-17

@@ -1,7 +1,15 @@
+// =============================================================================
+// agent.rs — the agent's conversation with its server
+//
+// Per-server identity (keypair, ID, pinned server key), the signed heartbeat,
+// the server's reply (trust, binding, commands) and the tests, fixes and
+// upgrades it asks for. An identity carries over to a new server URL when the
+// server proves, by signing with the pinned key, that it is the same server.
+// =============================================================================
 use tracing::{info, warn, error, debug};
 use ed25519_dalek::{SigningKey, VerifyingKey, Signer, Verifier, Signature};
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use base64::{engine::general_purpose, Engine as _};
 use sha2::{Sha256, Digest};
 use rand::rngs::OsRng;
@@ -523,20 +531,28 @@ struct SystemInfo {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// identity_dir — the folder holding every per-server identity file.
+// ─────────────────────────────────────────────────────────────────────────────
+fn identity_dir() -> &'static Path {
+    Path::new(key_path())
+        .parent()
+        .expect("Core key directory must have a parent path")
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Load (or create) the per-server agent identity.
 // ─────────────────────────────────────────────────────────────────────────────
 fn load_or_create_identity(config: &Config) -> Result<AgentIdentity, Box<dyn std::error::Error>> {
-    let namespace = get_url_namespace(&config.server.url);
-    let key_dir = std::path::Path::new(key_path())
-        .parent()
-        .expect("Core key directory must have a parent path");
+    load_or_create_identity_in(identity_dir(), &get_url_namespace(&config.server.url))
+}
 
-    let id_path         = key_dir.join(format!("client_{}.id",  namespace));
-    let priv_path       = key_dir.join(format!("client_{}.key", namespace));
-    let pub_path        = key_dir.join(format!("client_{}.pub", namespace));
-    let server_pub_path = key_dir.join(format!("server_{}.pub", namespace));
-    // Present once the server has been seen speaking protocol 1 (check_binding).
-    let protocol_path   = key_dir.join(format!("server_{}.protocol", namespace));
+// ─────────────────────────────────────────────────────────────────────────────
+// load_or_create_identity_in — the identity for `namespace` in `key_dir`,
+// generating a keypair on first use.
+// ─────────────────────────────────────────────────────────────────────────────
+fn load_or_create_identity_in(key_dir: &Path, namespace: &str) -> Result<AgentIdentity, Box<dyn std::error::Error>> {
+    let priv_path = key_dir.join(format!("client_{}.key", namespace));
+    let pub_path  = key_dir.join(format!("client_{}.pub", namespace));
 
     // Generate keys on first run for this namespace.
     if !priv_path.exists() {
@@ -549,6 +565,19 @@ fn load_or_create_identity(config: &Config) -> Result<AgentIdentity, Box<dyn std
         fs::write(&pub_path, general_purpose::STANDARD.encode(verifying_key.to_bytes()))?;
         info!("New keypair generated for namespace '{}'.", namespace);
     }
+    load_identity_in(key_dir, namespace)
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// load_identity_in — read an existing identity; never generates one.
+// ─────────────────────────────────────────────────────────────────────────────
+fn load_identity_in(key_dir: &Path, namespace: &str) -> Result<AgentIdentity, Box<dyn std::error::Error>> {
+    let id_path         = key_dir.join(format!("client_{}.id",  namespace));
+    let priv_path       = key_dir.join(format!("client_{}.key", namespace));
+    let pub_path        = key_dir.join(format!("client_{}.pub", namespace));
+    let server_pub_path = key_dir.join(format!("server_{}.pub", namespace));
+    // Present once the server has been seen speaking protocol 1 (check_binding).
+    let protocol_path   = key_dir.join(format!("server_{}.protocol", namespace));
 
     let current_id = if id_path.exists() {
         fs::read_to_string(&id_path)?.trim().to_string()
@@ -566,7 +595,7 @@ fn load_or_create_identity(config: &Config) -> Result<AgentIdentity, Box<dyn std
     let public_base64 = fs::read_to_string(&pub_path)?.trim().to_string();
 
     Ok(AgentIdentity {
-        namespace,
+        namespace: namespace.to_string(),
         id_path,
         server_pub_path,
         protocol_path,
@@ -574,6 +603,56 @@ fn load_or_create_identity(config: &Config) -> Result<AgentIdentity, Box<dyn std
         public_base64,
         current_id,
     })
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// previous_identity — the most recently registered identity of another server
+// URL: one with an ID, a keypair and a pinned server key. When the configured
+// URL changes, this is the identity that may still be ours on the new URL.
+// ─────────────────────────────────────────────────────────────────────────────
+fn previous_identity(key_dir: &Path, current_ns: &str) -> Option<String> {
+    let mut best: Option<(std::time::SystemTime, String)> = None;
+    for entry in fs::read_dir(key_dir).ok()?.flatten() {
+        let name = entry.file_name().to_string_lossy().into_owned();
+        let Some(ns) = name.strip_prefix("client_").and_then(|n| n.strip_suffix(".id")) else { continue };
+        if ns == current_ns || ns.len() != 8 || !ns.chars().all(|c| c.is_ascii_hexdigit()) {
+            continue;
+        }
+        let id = fs::read_to_string(entry.path()).unwrap_or_default();
+        let id = id.trim();
+        if id.is_empty() || id == "0"
+            || !key_dir.join(format!("client_{ns}.key")).exists()
+            || !key_dir.join(format!("client_{ns}.pub")).exists()
+            || !key_dir.join(format!("server_{ns}.pub")).exists()
+        {
+            continue;
+        }
+        let when = entry.metadata().and_then(|m| m.modified()).unwrap_or(std::time::UNIX_EPOCH);
+        if best.as_ref().is_none_or(|(t, _)| when > *t) {
+            best = Some((when, ns.to_string()));
+        }
+    }
+    best.map(|(_, ns)| ns)
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// adopt_identity — copy the identity of namespace `from` to namespace `to`
+// (ID, keypair, pinned server key, protocol marker), replacing what `to` had.
+// The source is left in place, so switching the URL back still works.
+// ─────────────────────────────────────────────────────────────────────────────
+fn adopt_identity(key_dir: &Path, from: &str, to: &str) -> Result<(), Box<dyn std::error::Error>> {
+    for (prefix, ext) in [("client", "id"), ("client", "key"), ("client", "pub"),
+                          ("server", "pub"), ("server", "protocol")] {
+        let src = key_dir.join(format!("{prefix}_{from}.{ext}"));
+        let dst = key_dir.join(format!("{prefix}_{to}.{ext}"));
+        if !src.exists() {
+            let _ = fs::remove_file(&dst);
+            continue;
+        }
+        let body = fs::read_to_string(&src)?;
+        if ext == "key" { write_private_file(&dst, &body)? } else { fs::write(&dst, body)? }
+    }
+    Ok(())
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -664,7 +743,11 @@ fn collect_system_info() -> SystemInfo {
 // Post the signed heartbeat to /send. Returns the parsed SignedResponse on
 // success; Ok(None) on transient/recoverable failures (404 → identity reset,
 // non-2xx → log+skip) so the caller treats them as "this cycle is over".
+// `probe`: the identity is another URL's (try_previous_identity) — a 404 then
+// leaves its ID in place and any failure is quiet.
 // ─────────────────────────────────────────────────────────────────────────────
+// One argument per piece of the request, plus the probe switch.
+#[allow(clippy::too_many_arguments)]
 async fn post_heartbeat(
     http_client:   &reqwest::Client,
     config:        &Config,
@@ -673,6 +756,7 @@ async fn post_heartbeat(
     send_url:      &str,
     base_url:      &str,
     nonce:         &str,
+    probe:         bool,
 ) -> Result<Option<SignedResponse>, Box<dyn std::error::Error>> {
     let needs_handshake = identity.current_id == "0" || !identity.server_pub_path.exists();
 
@@ -724,6 +808,11 @@ async fn post_heartbeat(
 
     let response = http_client.post(send_url).json(&request).send().await?;
 
+    if response.status() == reqwest::StatusCode::NOT_FOUND && probe {
+        // A probe with another URL's identity: this server does not know it.
+        // That identity still belongs to its own server — leave its ID alone.
+        return Ok(None);
+    }
     if response.status() == reqwest::StatusCode::NOT_FOUND {
         // The system was deleted on the server: register again. The pinned
         // server key is KEPT — an unsigned 404 is not a reason to trust a new
@@ -737,6 +826,10 @@ async fn post_heartbeat(
     }
     if !response.status().is_success() {
         let status = response.status();
+        if probe {
+            debug!("Probe with a previous identity got status {}.", status);
+            return Ok(None);
+        }
         error!("Server returned error status {}: {}", status, server_error(response).await);
         return Ok(None);
     }
@@ -1103,6 +1196,44 @@ async fn dispatch_server_command(
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// try_previous_identity — send the heartbeat with the identity of namespace
+// `prev_ns` (another server URL) and return the reply only when it proves the
+// server is that identity's server: signed by its pinned key and answering
+// this request. Anything else (unknown ID, another key, no answer) is None,
+// and the agent registers as new, as for any new server.
+// ─────────────────────────────────────────────────────────────────────────────
+async fn try_previous_identity(
+    http_client: &reqwest::Client,
+    config:      &Config,
+    sys:         &SystemInfo,
+    send_url:    &str,
+    base_url:    &str,
+    nonce:       &str,
+    prev_ns:     &str,
+) -> Option<SignedResponse> {
+    let prev = load_identity_in(identity_dir(), prev_ns).ok()?;
+    let reply = match post_heartbeat(http_client, config, &prev, sys, send_url, base_url, nonce, true).await {
+        Ok(Some(r)) => r,
+        Ok(None) => {
+            info!("'{}' does not know this agent's previous identity; registering as a new system.", base_url);
+            return None;
+        }
+        Err(e) => {
+            debug!("Probe of '{}' with the previous identity failed: {}", base_url, e);
+            return None;
+        }
+    };
+    let pinned = fs::read_to_string(&prev.server_pub_path).ok();
+    if check_trust(pinned.as_deref(), &reply) != Trust::Verified
+        || check_binding(&reply.payload, nonce, prev.protocol_path.exists()).is_err()
+    {
+        info!("'{}' is not the server this agent was registered with; registering as a new system.", base_url);
+        return None;
+    }
+    Some(reply)
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Top-level heartbeat: orchestrates the four steps above. Kept small and
 // readable as a flow; each step is testable in isolation.
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1110,17 +1241,40 @@ pub async fn send_system_info(
     config:      &Config,
     http_client: &reqwest::Client,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let identity = load_or_create_identity(config)?;
-    let sys      = collect_system_info();
+    let mut identity = load_or_create_identity(config)?;
+    let sys          = collect_system_info();
 
     let base_url   = config.server.url.trim_end_matches('/').to_string();
     let send_url   = format!("{}/send",   base_url);
     let result_url = format!("{}/result", base_url);
 
-    let nonce = new_nonce();
-    let signed_res = match post_heartbeat(http_client, config, &identity, &sys, &send_url, &base_url, &nonce).await? {
+    let mut nonce = new_nonce();
+
+    // No ID for this URL: the URL may have changed while the server did not.
+    // Use this cycle's heartbeat to ask with the previous identity first.
+    let mut probed = None;
+    if identity.current_id == "0"
+        && let Some(prev_ns) = previous_identity(identity_dir(), &identity.namespace)
+        && let Some(reply) = try_previous_identity(http_client, config, &sys, &send_url, &base_url, &nonce, &prev_ns).await
+    {
+        adopt_identity(identity_dir(), &prev_ns, &identity.namespace)?;
+        identity = load_or_create_identity(config)?;
+        info!(
+            "Server '{}' is the server this agent knew under another URL (it signed with the pinned key). \
+             Keeping Agent ID {} instead of registering again.",
+            base_url, identity.current_id
+        );
+        probed = Some(reply);
+    } else if identity.current_id == "0" {
+        nonce = new_nonce();  // a probe may have spent the first one
+    }
+
+    let signed_res = match probed {
         Some(r) => r,
-        None    => return Ok(()),  // 404 reset or non-2xx — cycle ends here.
+        None => match post_heartbeat(http_client, config, &identity, &sys, &send_url, &base_url, &nonce, false).await? {
+            Some(r) => r,
+            None    => return Ok(()),  // 404 reset or non-2xx — cycle ends here.
+        },
     };
 
     let trust = verify_response(&identity, &signed_res, &base_url);
@@ -1282,5 +1436,69 @@ mod tests {
         assert!(upgrade_source(base, "/agents/a", "0.10.4", "0.9.9").is_err(), "downgrade");
         assert!(upgrade_source(base, "/agents/a", "0.9.9", "0.10.0").is_ok(), "numeric, not text, order");
         assert!(upgrade_source(base, "/agents/a", "0.10.4", "unknown").is_err());
+    }
+
+    // A fresh, empty identity folder for one test.
+    fn scratch_dir(tag: &str) -> PathBuf {
+        let d = std::env::temp_dir().join(format!("scmclient-ident-{tag}-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&d);
+        fs::create_dir_all(&d).unwrap();
+        d
+    }
+    // A registered identity for `ns`: keypair, ID and pinned server key.
+    fn registered(dir: &Path, ns: &str, id: &str, server_key: &str) {
+        load_or_create_identity_in(dir, ns).unwrap();
+        fs::write(dir.join(format!("client_{ns}.id")), id).unwrap();
+        fs::write(dir.join(format!("server_{ns}.pub")), server_key).unwrap();
+    }
+
+    #[test]
+    fn the_previous_identity_is_another_urls_registered_one() {
+        let dir = scratch_dir("prev");
+        // Nothing but the current URL's fresh identity: nothing to carry over.
+        load_or_create_identity_in(&dir, "aaaaaaaa").unwrap();
+        assert_eq!(previous_identity(&dir, "aaaaaaaa"), None);
+        // Unregistered (ID 0) and unpinned identities do not count.
+        registered(&dir, "bbbbbbbb", "0", "k");
+        load_or_create_identity_in(&dir, "cccccccc").unwrap();
+        fs::write(dir.join("client_cccccccc.id"), "7").unwrap();
+        assert_eq!(previous_identity(&dir, "aaaaaaaa"), None);
+        // A registered, pinned identity of another URL does.
+        registered(&dir, "dddddddd", "42", "k");
+        assert_eq!(previous_identity(&dir, "aaaaaaaa").as_deref(), Some("dddddddd"));
+        // The most recently registered wins.
+        std::thread::sleep(std::time::Duration::from_millis(20));
+        registered(&dir, "eeeeeeee", "43", "k");
+        assert_eq!(previous_identity(&dir, "aaaaaaaa").as_deref(), Some("eeeeeeee"));
+        // Never the current URL's own.
+        assert_eq!(previous_identity(&dir, "eeeeeeee").as_deref(), Some("dddddddd"));
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn adopting_carries_id_keys_and_pin_and_keeps_the_source() {
+        let dir = scratch_dir("adopt");
+        registered(&dir, "11111111", "42", "server-key");
+        fs::write(dir.join("server_11111111.protocol"), "1").unwrap();
+        let old = load_identity_in(&dir, "11111111").unwrap();
+        // The new URL already generated a keypair of its own this cycle.
+        let fresh = load_or_create_identity_in(&dir, "22222222").unwrap();
+        assert_ne!(fresh.public_base64, old.public_base64);
+
+        adopt_identity(&dir, "11111111", "22222222").unwrap();
+        let now = load_identity_in(&dir, "22222222").unwrap();
+        assert_eq!(now.current_id, "42");
+        assert_eq!(now.public_base64, old.public_base64);
+        assert_eq!(now.signing_key.to_bytes(), old.signing_key.to_bytes());
+        assert_eq!(fs::read_to_string(&now.server_pub_path).unwrap(), "server-key");
+        assert!(now.protocol_path.exists());
+        assert!(dir.join("client_11111111.id").exists(), "the old URL's identity stays");
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mode = fs::metadata(dir.join("client_22222222.key")).unwrap().permissions().mode();
+            assert_eq!(mode & 0o777, 0o600, "the copied private key stays private");
+        }
+        let _ = fs::remove_dir_all(&dir);
     }
 }

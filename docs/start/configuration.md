@@ -324,3 +324,11 @@ Configuration changes take effect on service restart.
     ```
 
     This saves the new URL to the config and persists across restarts.
+
+!!! note "Changing the server URL"
+    An agent keeps a separate identity for each server URL. When you change the URL
+    to another address of the **same** server (for example from an external name to an
+    internal one), the agent's next check-in uses its existing identity on the new URL.
+    The server proves it is the same server by signing its reply with the key the
+    agent already trusts, and the system keeps its ID, history and approval. If the new
+    URL is a different server, the agent registers there as a new system.
